@@ -424,64 +424,65 @@
 
 <script>
 (function () {
-  // --- Helpers ---
+
   function parseCssRgb(str) {
-    // "rgb(155, 202, 98)" or "rgba(155, 202, 98, 1)"
     const m = (str || "").match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
     if (!m) return null;
     return [Number(m[1]), Number(m[2]), Number(m[3])];
   }
 
-  function dist2(a, b) {
-    const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
-    return dr*dr + dg*dg + db*db;
+  function key(rgb) {
+    return rgb.map(n => String(Math.round(Number(n))).trim()).join(",");
   }
 
-  function nearestDayuCode(rgb) {
+  function buildRgbToCodeExact() {
     const pal = window.DAYU_PALETTE || [];
-    let best = null, bestD = Infinity;
+    const map = new Map();
     for (const p of pal) {
       if (!p || !p.rgb || !p.code) continue;
-      const d = dist2(rgb, p.rgb);
-      if (d < bestD) { bestD = d; best = p; }
+      map.set(key(p.rgb), String(p.code).trim());
     }
-    return best ? String(best.code) : null;
+    return map;
   }
 
-  // Construye mapping "0"->"WG3" leyendo el color de los swatches
-  function buildIndexToCodeFromSwatches() {
+  // Busca swatches 0..N-1 y saca SU color exacto (background-color)
+  function buildIndexToCodeExact(rgbToCode) {
     const mapping = new Map();
 
-    // buscamos elementos que contengan SOLO un número (0..99) y sean “cuadritos” (swatches)
-    // hay varios números dentro del dibujo, así que filtramos por tamaño (swatches son chicos)
-    const els = Array.from(document.querySelectorAll("body *"))
+    // Buscamos elementos pequeños que contengan SOLO números (0..)
+    const candidates = Array.from(document.querySelectorAll("body *"))
       .filter(el => {
         const t = (el.textContent || "").trim();
         if (!/^\d+$/.test(t)) return false;
         const r = el.getBoundingClientRect();
-        // swatch típico ~30-80 px
+        // swatch size heuristic
         return r.width >= 20 && r.width <= 120 && r.height >= 20 && r.height <= 120;
       });
 
-    // De esos, nos quedamos con los que efectivamente tienen fondo (background-color)
-    for (const el of els) {
+    // Ordenar por número (0,1,2...)
+    candidates.sort((a,b) => Number(a.textContent.trim()) - Number(b.textContent.trim()));
+
+    for (const el of candidates) {
       const idx = (el.textContent || "").trim();
       const bg = getComputedStyle(el).backgroundColor;
       const rgb = parseCssRgb(bg);
       if (!rgb) continue;
 
-      const code = nearestDayuCode(rgb);
-      if (code) mapping.set(idx, code);
+      const k = key(rgb);
+      if (rgbToCode.has(k)) {
+        mapping.set(idx, rgbToCode.get(k));
+      }
+      // Si NO existe exacto en Dayu, no lo cambiamos (evita errores tipo CG9 repetido)
     }
 
     return mapping;
   }
 
   function relabelSvg(idxToCode) {
-    // agarramos el SVG más grande (suele ser el resultado)
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return false;
 
+    // SVG más grande
     let target = null, bestArea = 0;
     for (const s of svgs) {
       const r = s.getBoundingClientRect();
@@ -490,16 +491,15 @@
     }
     if (!target) return false;
 
-    // reemplaza textos "0" por "WG3", etc.
-    const texts = target.querySelectorAll("text");
-    texts.forEach(t => {
+    // Cambiar <text> que sean exactamente números
+    target.querySelectorAll("text").forEach(t => {
       const v = (t.textContent || "").trim();
       if (/^\d+$/.test(v) && idxToCode.has(v)) {
         t.textContent = idxToCode.get(v);
       }
     });
 
-    // fallback por si hay nodos de texto sueltos
+    // fallback text nodes
     const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
     let node;
     while ((node = walker.nextNode())) {
@@ -513,23 +513,26 @@
   }
 
   function run() {
-    const idxToCode = buildIndexToCodeFromSwatches();
+    const rgbToCode = buildRgbToCodeExact();
+    if (!rgbToCode.size) return false;
+
+    const idxToCode = buildIndexToCodeExact(rgbToCode);
     if (!idxToCode.size) return false;
+
     return relabelSvg(idxToCode);
   }
 
   window.addEventListener("DOMContentLoaded", () => {
-    // reintentos porque la página renderiza por etapas
     const start = Date.now();
     const timer = setInterval(() => {
       const ok = run();
-      if (ok || Date.now() - start > 6000) clearInterval(timer);
+      if (ok || Date.now() - start > 7000) clearInterval(timer);
     }, 250);
 
-    // también observamos cambios cuando regeneras
     const obs = new MutationObserver(() => run());
-    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+    obs.observe(document.body, { childList:true, subtree:true, characterData:true });
   });
+
 })();
 </script>
 
