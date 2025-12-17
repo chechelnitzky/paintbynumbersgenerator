@@ -419,6 +419,75 @@
 
         });
     </script>
+<!-- Load Dayu palette -->
+<script src="./dayu_palette.js"></script>
+
+<script>
+(function(){
+  function setValueAndTrigger(el, value){
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles:true }));
+    el.dispatchEvent(new Event('change', { bubbles:true }));
+  }
+
+  function findRestrictTextarea(){
+    const tas = [...document.querySelectorAll('textarea')];
+    // el textarea suele venir con algo tipo //0,0,0 o 0,0,0
+    return tas.find(t =>
+      (t.value || '').includes('0,0,0') ||
+      (t.placeholder || '').includes('0,0,0')
+    );
+  }
+
+  function findRestrictCheckbox(){
+    // intenta encontrar el checkbox por el texto "Restrict clustering colors"
+    const labels = [...document.querySelectorAll('label')];
+    const lbl = labels.find(l => (l.textContent || '').toLowerCase().includes('restrict clustering colors'));
+    if (lbl){
+      const inside = lbl.querySelector('input[type="checkbox"]');
+      if (inside) return inside;
+      const forId = lbl.getAttribute('for');
+      if (forId) {
+        const byId = document.getElementById(forId);
+        if (byId && byId.type === 'checkbox') return byId;
+      }
+    }
+    // fallback: cualquier checkbox cuyo contenedor tenga ese texto
+    const cbs = [...document.querySelectorAll('input[type="checkbox"]')];
+    return cbs.find(cb => ((cb.parentElement?.textContent)||'').toLowerCase().includes('restrict clustering colors'));
+  }
+
+  function applyDayuLock(){
+    if (!window.DAYU_RESTRICT_RGB_LINES) return false;
+
+    const ta = findRestrictTextarea();
+    const cb = findRestrictCheckbox();
+
+    if (ta) {
+      setValueAndTrigger(ta, window.DAYU_RESTRICT_RGB_LINES.trim());
+      // opcional: esconderlo para que no lo toquen
+      ta.style.display = 'none';
+    }
+    if (cb) {
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles:true }));
+    }
+
+    // Consideramos éxito si al menos encontró el textarea o el checkbox
+    return !!(ta || cb);
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    // La UI a veces se arma después, así que reintentamos por 3 segundos
+    const start = Date.now();
+    const timer = setInterval(() => {
+      const ok = applyDayuLock();
+      if (ok || (Date.now() - start) > 3000) clearInterval(timer);
+    }, 150);
+  });
+})();
+</script>
+
 </body>
 
 </html>
