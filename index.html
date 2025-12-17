@@ -423,196 +423,116 @@
 <script src="./dayu_palette.js"></script>
 
 <script>
-(function(){
-  function setValueAndTrigger(el, value){
-    el.value = value;
-    el.dispatchEvent(new Event('input', { bubbles:true }));
-    el.dispatchEvent(new Event('change', { bubbles:true }));
-  }
-
-  function findRestrictTextarea(){
-    const tas = [...document.querySelectorAll('textarea')];
-    // el textarea suele venir con algo tipo //0,0,0 o 0,0,0
-    return tas.find(t =>
-      (t.value || '').includes('0,0,0') ||
-      (t.placeholder || '').includes('0,0,0')
-    );
-  }
-
-  function findRestrictCheckbox(){
-    // intenta encontrar el checkbox por el texto "Restrict clustering colors"
-    const labels = [...document.querySelectorAll('label')];
-    const lbl = labels.find(l => (l.textContent || '').toLowerCase().includes('restrict clustering colors'));
-    if (lbl){
-      const inside = lbl.querySelector('input[type="checkbox"]');
-      if (inside) return inside;
-      const forId = lbl.getAttribute('for');
-      if (forId) {
-        const byId = document.getElementById(forId);
-        if (byId && byId.type === 'checkbox') return byId;
-      }
-    }
-    // fallback: cualquier checkbox cuyo contenedor tenga ese texto
-    const cbs = [...document.querySelectorAll('input[type="checkbox"]')];
-    return cbs.find(cb => ((cb.parentElement?.textContent)||'').toLowerCase().includes('restrict clustering colors'));
-  }
-
-  function applyDayuLock(){
-    if (!window.DAYU_RESTRICT_RGB_LINES) return false;
-
-    const ta = findRestrictTextarea();
-    const cb = findRestrictCheckbox();
-
-    if (ta) {
-      setValueAndTrigger(ta, window.DAYU_RESTRICT_RGB_LINES.trim());
-      // opcional: esconderlo para que no lo toquen
-      ta.style.display = 'none';
-    }
-    if (cb) {
-      cb.checked = true;
-      cb.dispatchEvent(new Event('change', { bubbles:true }));
-    }
-
-    // Consideramos éxito si al menos encontró el textarea o el checkbox
-    return !!(ta || cb);
-  }
-
-  window.addEventListener('DOMContentLoaded', () => {
-    // La UI a veces se arma después, así que reintentamos por 3 segundos
-    const start = Date.now();
-    const timer = setInterval(() => {
-      const ok = applyDayuLock();
-      if (ok || (Date.now() - start) > 3000) clearInterval(timer);
-    }, 150);
-  });
-})();
-</script>
-<script>
-(function() {
+(function () {
   // --- Helpers ---
-  function normKey(rgbArr) {
-    return rgbArr.map(n => String(Math.round(Number(n))).trim()).join(",");
+  function parseCssRgb(str) {
+    // "rgb(155, 202, 98)" or "rgba(155, 202, 98, 1)"
+    const m = (str || "").match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (!m) return null;
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
   }
 
-  function buildDayuRgbToCodeMap() {
-    const map = new Map();
-    const pal = (window.DAYU_PALETTE || []);
-    for (const c of pal) {
-      if (!c || !c.rgb || !c.code) continue;
-      map.set(normKey(c.rgb), String(c.code).trim());
-    }
-    return map;
+  function dist2(a, b) {
+    const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
+    return dr*dr + dg*dg + db*db;
   }
 
-  // Busca la “paleta resultante” que muestra el generador (los cuadritos con "RGB: r,g,b")
-  // y arma un mapping: "0" -> "WG3", "1" -> "BG5", etc.
-  function buildIndexToDayuCodeFromDisplayedPalette(rgbToCode) {
-    // Detectamos los textos "RGB: r,g,b" en la página
-    const nodes = Array.from(document.querySelectorAll("body *"))
-      .filter(el => el && el.childNodes && el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE);
-
-    const rgbLines = [];
-    for (const el of nodes) {
-      const t = (el.textContent || "").trim();
-      // ejemplo: "RGB: 155,202,98"
-      if (/^RGB:\s*\d+\s*,\s*\d+\s*,\s*\d+\s*$/i.test(t)) {
-        rgbLines.push(t);
-      }
+  function nearestDayuCode(rgb) {
+    const pal = window.DAYU_PALETTE || [];
+    let best = null, bestD = Infinity;
+    for (const p of pal) {
+      if (!p || !p.rgb || !p.code) continue;
+      const d = dist2(rgb, p.rgb);
+      if (d < bestD) { bestD = d; best = p; }
     }
-
-    // La paleta resultante suele imprimirse en orden 0..N-1.
-    // Tomamos esos RGB en el orden en que aparecen.
-    const idxToCode = new Map();
-    for (let i = 0; i < rgbLines.length; i++) {
-      const nums = rgbLines[i].replace(/RGB:\s*/i, "").split(",").map(s => Number(s.trim()));
-      const key = normKey(nums);
-      const code = rgbToCode.get(key);
-      if (code) idxToCode.set(String(i), code);
-    }
-    return idxToCode;
+    return best ? String(best.code) : null;
   }
 
-  // Reemplaza textos en el SVG final: "0" -> "BG3", "12" -> "WG7", etc.
-  function relabelSvgNumbers(svgEl, idxToCode) {
-    if (!svgEl) return;
+  // Construye mapping "0"->"WG3" leyendo el color de los swatches
+  function buildIndexToCodeFromSwatches() {
+    const mapping = new Map();
 
-    // 1) Reemplaza <text> que sean exactamente un número (0..99..)
-    const texts = svgEl.querySelectorAll("text");
-    texts.forEach(t => {
-      const s = (t.textContent || "").trim();
-      if (/^\d+$/.test(s) && idxToCode.has(s)) {
-        t.textContent = idxToCode.get(s);
-      }
-    });
-
-    // 2) También reemplaza cualquier nodo de texto suelto dentro del SVG (por si no usan <text>)
-    const walker = document.createTreeWalker(svgEl, NodeFilter.SHOW_TEXT, null);
-    let node;
-    while ((node = walker.nextNode())) {
-      const s = (node.nodeValue || "").trim();
-      if (/^\d+$/.test(s) && idxToCode.has(s)) {
-        node.nodeValue = idxToCode.get(s);
-      }
-    }
-  }
-
-  // Reemplaza etiquetas visibles de la “paleta resultante” si también te interesa
-  function relabelPaletteBlockInDom(idxToCode) {
-    // Busca elementos que contengan SOLO el número grande (0,1,2...)
-    const candidates = Array.from(document.querySelectorAll("body *"))
+    // buscamos elementos que contengan SOLO un número (0..99) y sean “cuadritos” (swatches)
+    // hay varios números dentro del dibujo, así que filtramos por tamaño (swatches son chicos)
+    const els = Array.from(document.querySelectorAll("body *"))
       .filter(el => {
         const t = (el.textContent || "").trim();
-        return /^\d+$/.test(t) && (el.children?.length || 0) === 0;
+        if (!/^\d+$/.test(t)) return false;
+        const r = el.getBoundingClientRect();
+        // swatch típico ~30-80 px
+        return r.width >= 20 && r.width <= 120 && r.height >= 20 && r.height <= 120;
       });
 
-    for (const el of candidates) {
-      const n = (el.textContent || "").trim();
-      if (idxToCode.has(n)) {
-        el.textContent = idxToCode.get(n);
-      }
+    // De esos, nos quedamos con los que efectivamente tienen fondo (background-color)
+    for (const el of els) {
+      const idx = (el.textContent || "").trim();
+      const bg = getComputedStyle(el).backgroundColor;
+      const rgb = parseCssRgb(bg);
+      if (!rgb) continue;
+
+      const code = nearestDayuCode(rgb);
+      if (code) mapping.set(idx, code);
     }
+
+    return mapping;
   }
 
-  // --- Main: se ejecuta cada vez que aparezca el resultado ---
-  function applyDayuLabels() {
-    const rgbToCode = buildDayuRgbToCodeMap();
-    if (!rgbToCode.size) return false;
-
-    const idxToCode = buildIndexToDayuCodeFromDisplayedPalette(rgbToCode);
-    if (!idxToCode.size) return false;
-
-    // Intento 1: encontrar SVG resultante (lo más común)
+  function relabelSvg(idxToCode) {
+    // agarramos el SVG más grande (suele ser el resultado)
     const svgs = Array.from(document.querySelectorAll("svg"));
-    // usamos el SVG “más grande” como heurística
-    let targetSvg = null;
-    let bestArea = 0;
+    if (!svgs.length) return false;
+
+    let target = null, bestArea = 0;
     for (const s of svgs) {
       const r = s.getBoundingClientRect();
       const area = r.width * r.height;
-      if (area > bestArea) { bestArea = area; targetSvg = s; }
+      if (area > bestArea) { bestArea = area; target = s; }
     }
+    if (!target) return false;
 
-    if (targetSvg) relabelSvgNumbers(targetSvg, idxToCode);
-    relabelPaletteBlockInDom(idxToCode);
+    // reemplaza textos "0" por "WG3", etc.
+    const texts = target.querySelectorAll("text");
+    texts.forEach(t => {
+      const v = (t.textContent || "").trim();
+      if (/^\d+$/.test(v) && idxToCode.has(v)) {
+        t.textContent = idxToCode.get(v);
+      }
+    });
+
+    // fallback por si hay nodos de texto sueltos
+    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+      const v = (node.nodeValue || "").trim();
+      if (/^\d+$/.test(v) && idxToCode.has(v)) {
+        node.nodeValue = idxToCode.get(v);
+      }
+    }
 
     return true;
   }
 
-  // Observa cambios (cuando el usuario genera una nueva imagen)
-  function watch() {
-    // corre una vez al cargar
-    applyDayuLabels();
-
-    const obs = new MutationObserver(() => {
-      applyDayuLabels();
-    });
-
-    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+  function run() {
+    const idxToCode = buildIndexToCodeFromSwatches();
+    if (!idxToCode.size) return false;
+    return relabelSvg(idxToCode);
   }
 
-  window.addEventListener("DOMContentLoaded", watch);
+  window.addEventListener("DOMContentLoaded", () => {
+    // reintentos porque la página renderiza por etapas
+    const start = Date.now();
+    const timer = setInterval(() => {
+      const ok = run();
+      if (ok || Date.now() - start > 6000) clearInterval(timer);
+    }, 250);
+
+    // también observamos cambios cuando regeneras
+    const obs = new MutationObserver(() => run());
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
 })();
 </script>
+
 
 </body>
 
