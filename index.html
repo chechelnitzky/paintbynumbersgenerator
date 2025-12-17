@@ -487,6 +487,132 @@
   });
 })();
 </script>
+<script>
+(function() {
+  // --- Helpers ---
+  function normKey(rgbArr) {
+    return rgbArr.map(n => String(Math.round(Number(n))).trim()).join(",");
+  }
+
+  function buildDayuRgbToCodeMap() {
+    const map = new Map();
+    const pal = (window.DAYU_PALETTE || []);
+    for (const c of pal) {
+      if (!c || !c.rgb || !c.code) continue;
+      map.set(normKey(c.rgb), String(c.code).trim());
+    }
+    return map;
+  }
+
+  // Busca la “paleta resultante” que muestra el generador (los cuadritos con "RGB: r,g,b")
+  // y arma un mapping: "0" -> "WG3", "1" -> "BG5", etc.
+  function buildIndexToDayuCodeFromDisplayedPalette(rgbToCode) {
+    // Detectamos los textos "RGB: r,g,b" en la página
+    const nodes = Array.from(document.querySelectorAll("body *"))
+      .filter(el => el && el.childNodes && el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE);
+
+    const rgbLines = [];
+    for (const el of nodes) {
+      const t = (el.textContent || "").trim();
+      // ejemplo: "RGB: 155,202,98"
+      if (/^RGB:\s*\d+\s*,\s*\d+\s*,\s*\d+\s*$/i.test(t)) {
+        rgbLines.push(t);
+      }
+    }
+
+    // La paleta resultante suele imprimirse en orden 0..N-1.
+    // Tomamos esos RGB en el orden en que aparecen.
+    const idxToCode = new Map();
+    for (let i = 0; i < rgbLines.length; i++) {
+      const nums = rgbLines[i].replace(/RGB:\s*/i, "").split(",").map(s => Number(s.trim()));
+      const key = normKey(nums);
+      const code = rgbToCode.get(key);
+      if (code) idxToCode.set(String(i), code);
+    }
+    return idxToCode;
+  }
+
+  // Reemplaza textos en el SVG final: "0" -> "BG3", "12" -> "WG7", etc.
+  function relabelSvgNumbers(svgEl, idxToCode) {
+    if (!svgEl) return;
+
+    // 1) Reemplaza <text> que sean exactamente un número (0..99..)
+    const texts = svgEl.querySelectorAll("text");
+    texts.forEach(t => {
+      const s = (t.textContent || "").trim();
+      if (/^\d+$/.test(s) && idxToCode.has(s)) {
+        t.textContent = idxToCode.get(s);
+      }
+    });
+
+    // 2) También reemplaza cualquier nodo de texto suelto dentro del SVG (por si no usan <text>)
+    const walker = document.createTreeWalker(svgEl, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+      const s = (node.nodeValue || "").trim();
+      if (/^\d+$/.test(s) && idxToCode.has(s)) {
+        node.nodeValue = idxToCode.get(s);
+      }
+    }
+  }
+
+  // Reemplaza etiquetas visibles de la “paleta resultante” si también te interesa
+  function relabelPaletteBlockInDom(idxToCode) {
+    // Busca elementos que contengan SOLO el número grande (0,1,2...)
+    const candidates = Array.from(document.querySelectorAll("body *"))
+      .filter(el => {
+        const t = (el.textContent || "").trim();
+        return /^\d+$/.test(t) && (el.children?.length || 0) === 0;
+      });
+
+    for (const el of candidates) {
+      const n = (el.textContent || "").trim();
+      if (idxToCode.has(n)) {
+        el.textContent = idxToCode.get(n);
+      }
+    }
+  }
+
+  // --- Main: se ejecuta cada vez que aparezca el resultado ---
+  function applyDayuLabels() {
+    const rgbToCode = buildDayuRgbToCodeMap();
+    if (!rgbToCode.size) return false;
+
+    const idxToCode = buildIndexToDayuCodeFromDisplayedPalette(rgbToCode);
+    if (!idxToCode.size) return false;
+
+    // Intento 1: encontrar SVG resultante (lo más común)
+    const svgs = Array.from(document.querySelectorAll("svg"));
+    // usamos el SVG “más grande” como heurística
+    let targetSvg = null;
+    let bestArea = 0;
+    for (const s of svgs) {
+      const r = s.getBoundingClientRect();
+      const area = r.width * r.height;
+      if (area > bestArea) { bestArea = area; targetSvg = s; }
+    }
+
+    if (targetSvg) relabelSvgNumbers(targetSvg, idxToCode);
+    relabelPaletteBlockInDom(idxToCode);
+
+    return true;
+  }
+
+  // Observa cambios (cuando el usuario genera una nueva imagen)
+  function watch() {
+    // corre una vez al cargar
+    applyDayuLabels();
+
+    const obs = new MutationObserver(() => {
+      applyDayuLabels();
+    });
+
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+
+  window.addEventListener("DOMContentLoaded", watch);
+})();
+</script>
 
 </body>
 
