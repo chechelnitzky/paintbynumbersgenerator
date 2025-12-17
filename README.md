@@ -1,4 +1,4 @@
-# Paint by numbers generator
+# Paint by numbers generator chech
 Generate paint by number images (vectorized with SVG) from any input image.
 
 *** This project was a proof of concept for fun back in the day, it is not being actively maintained but feel free to fork and make your own changes.  ***
