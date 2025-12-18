@@ -1,4 +1,4 @@
-/* dayu_system_final.js
+/* ayu_system_drake7707.js
  * VERSIÓN DEFINITIVA - Solo editar cajitas superiores
  * Características:
  * - Mapea colores a DAYU automáticamente
