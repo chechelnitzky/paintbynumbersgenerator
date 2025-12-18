@@ -1,10 +1,10 @@
-/* dayu_simple.js - v15: Regenerar con toggle borders automático */
+/* dayu_simple.js - v16: Regeneración automática al editar */
 
 (function() {
   'use strict';
   
-  const VERSION = 'v15';
-  console.log(`🎨 DAYU ${VERSION} - Regenerar con toggle automático`);
+  const VERSION = 'v16';
+  console.log(`🎨 DAYU ${VERSION} - Regeneración automática al editar`);
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -61,26 +61,20 @@
   function regenerarSVGConToggle() {
     console.log('🔄 Regenerando SVG con toggle borders...');
     
-    // Buscar el checkbox de "Show borders"
     const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
     
-    // Buscar por label o por posición (Show borders suele ser el último)
     let borderCheckbox = checkboxes.find(cb => {
       const label = cb.parentElement?.textContent || '';
       return label.toLowerCase().includes('border');
     });
     
-    // Si no lo encontramos por label, buscar por ID o posición
     if (!borderCheckbox) {
-      // En el generador PBN, "Show borders" suele estar cerca de los sliders
       const container = document.querySelector('.row') || document.body;
       const allCheckboxes = Array.from(container.querySelectorAll('input[type="checkbox"]'));
-      borderCheckbox = allCheckboxes[allCheckboxes.length - 1]; // Último checkbox
+      borderCheckbox = allCheckboxes[allCheckboxes.length - 1];
     }
     
     if (!borderCheckbox) {
-      console.log('⚠️ No se encontró checkbox de borders, intentando método alternativo...');
-      // Método alternativo: buscar cualquier checkbox visible
       borderCheckbox = checkboxes.find(cb => {
         const rect = cb.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
@@ -92,12 +86,10 @@
       
       console.log(`✅ Checkbox encontrado, estado original: ${estadoOriginal}`);
       
-      // Toggle OFF
       borderCheckbox.checked = !estadoOriginal;
       borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
       borderCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
       
-      // Toggle ON (volver al estado original) después de 100ms
       setTimeout(() => {
         borderCheckbox.checked = estadoOriginal;
         borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
@@ -105,17 +97,15 @@
         
         console.log('✅ Toggle completado, SVG regenerándose...');
         
-        // Aplicar DAYU después de que se regenere
         setTimeout(() => {
           const resultado = actualizarSVG();
-          mostrarStatus(`✅ SVG regenerado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
+          mostrarStatus(`✅ Aplicado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
         }, 300);
       }, 100);
       
       return true;
     } else {
       console.log('❌ No se encontró ningún checkbox');
-      alert('No se pudo encontrar el control de borders. Intenta cambiar manualmente el tamaño del SVG.');
       return false;
     }
   }
@@ -137,7 +127,7 @@
       p.parentNode.insertBefore(versionDiv, p);
     }
     
-    // Botón mapear
+    // Botón mapear (único botón)
     if (!document.getElementById('btnDayu')) {
       const btn = document.createElement('button');
       btn.id = 'btnDayu';
@@ -146,38 +136,6 @@
       btn.style.cssText = 'margin:10px 5px 10px 0;background:linear-gradient(135deg,#667eea,#764ba2);font-weight:bold;';
       btn.onclick = iniciarMapeo;
       p.parentNode.insertBefore(btn, p);
-    }
-    
-    // Botón regenerar SVG
-    if (!document.getElementById('btnRegenerar')) {
-      const btnRegen = document.createElement('button');
-      btnRegen.id = 'btnRegenerar';
-      btnRegen.textContent = '🔄 REGENERAR SVG';
-      btnRegen.className = 'waves-effect waves-light btn';
-      btnRegen.style.cssText = 'margin:10px 5px;background:#00BCD4;font-weight:bold;display:none;';
-      btnRegen.onclick = () => {
-        console.log('🔄 Usuario presionó REGENERAR SVG');
-        mostrarStatus('🔄 Regenerando SVG...', 'info');
-        regenerarSVGConToggle();
-      };
-      p.parentNode.insertBefore(btnRegen, p);
-    }
-    
-    // Botón limpiar
-    if (!document.getElementById('btnLimpiar')) {
-      const btn2 = document.createElement('button');
-      btn2.id = 'btnLimpiar';
-      btn2.textContent = '🗑️ LIMPIAR';
-      btn2.className = 'waves-effect waves-light btn red';
-      btn2.style.cssText = 'margin:10px 5px;font-weight:bold;display:none;';
-      btn2.onclick = () => {
-        if (confirm('¿Limpiar el mapeo DAYU?')) {
-          window.dayuMapping = {};
-          detenerObservers();
-          location.reload();
-        }
-      };
-      p.parentNode.insertBefore(btn2, p);
     }
     
     // Status
@@ -207,14 +165,6 @@
     status.style.background = c.bg;
     status.style.borderColor = c.border;
     status.textContent = mensaje;
-  }
-  
-  function mostrarBotonesActivos() {
-    const btnRegenerar = document.getElementById('btnRegenerar');
-    const btnLimpiar = document.getElementById('btnLimpiar');
-    
-    if (btnRegenerar) btnRegenerar.style.display = 'inline-block';
-    if (btnLimpiar) btnLimpiar.style.display = 'inline-block';
   }
   
   // ======================
@@ -297,7 +247,6 @@
     actualizarCajitas();
     const resultado = actualizarSVG();
     iniciarObservers();
-    mostrarBotonesActivos();
     
     mostrarStatus(`✅ Mapeo completado: ${Object.keys(window.dayuMapping).length} colores | ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
     
@@ -349,7 +298,7 @@
     caja.parentNode.replaceChild(nueva, caja);
     
     nueva.style.cursor = 'pointer';
-    nueva.title = 'Clic para editar → Usa REGENERAR SVG después';
+    nueva.title = 'Clic para editar → Enter para aplicar';
     
     nueva.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -388,6 +337,7 @@
         return;
       }
       
+      // Actualizar el mapeo
       window.dayuMapping[numOriginal] = {
         code: dayu.code,
         hex: dayu.hex,
@@ -396,13 +346,19 @@
         hexOriginal: window.dayuMapping[numOriginal].hexOriginal
       };
       
+      // Actualizar cajita
       caja.textContent = dayu.code;
       caja.style.backgroundColor = dayu.hex;
       caja.dataset.dayuCode = dayu.code;
       
       console.log(`✅ Color ${numOriginal} cambiado a ${dayu.code}`);
       
-      mostrarStatus(`✏️ Color ${numOriginal} → ${dayu.code} | Presiona REGENERAR SVG para aplicar`, 'warning');
+      // REGENERAR AUTOMÁTICAMENTE
+      mostrarStatus(`⏳ Aplicando ${dayu.code}...`, 'info');
+      
+      setTimeout(() => {
+        regenerarSVGConToggle();
+      }, 50);
     };
     
     inp.addEventListener('blur', aplicarCambio);
