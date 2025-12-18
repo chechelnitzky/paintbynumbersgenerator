@@ -1,10 +1,10 @@
-/* dayu_simple.js - v17: Doble toggle para mantener estado original */
+/* dayu_simple.js - v18: Un solo toggle completo */
 
 (function() {
   'use strict';
   
-  const VERSION = 'v17';
-  console.log(`🎨 DAYU ${VERSION} - Doble toggle automático`);
+  const VERSION = 'v18';
+  console.log(`🎨 DAYU ${VERSION} - Toggle único optimizado`);
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -55,11 +55,11 @@
   }
   
   // ======================
-  // REGENERAR SVG CON DOBLE TOGGLE
+  // REGENERAR SVG CON UN TOGGLE
   // ======================
   
   function regenerarSVGConToggle() {
-    console.log('🔄 Regenerando SVG con DOBLE toggle borders...');
+    console.log('🔄 Regenerando SVG con toggle único...');
     
     const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
     
@@ -84,43 +84,27 @@
     if (borderCheckbox) {
       const estadoOriginal = borderCheckbox.checked;
       
-      console.log(`✅ Checkbox encontrado, estado original: ${estadoOriginal}`);
-      console.log('🔄 Iniciando DOBLE toggle...');
+      console.log(`✅ Estado original: ${estadoOriginal ? 'ON' : 'OFF'}`);
+      console.log(`🔄 Haciendo toggle: ${estadoOriginal ? 'OFF→ON' : 'ON→OFF'}`);
       
-      // PRIMER TOGGLE: OFF/ON
+      // Cambiar al estado contrario
       borderCheckbox.checked = !estadoOriginal;
       borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
       borderCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
       
+      // Volver al estado original después de 100ms
       setTimeout(() => {
-        // Volver al estado original (completa primer toggle)
         borderCheckbox.checked = estadoOriginal;
         borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
         borderCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
         
-        console.log('✅ Primer toggle completado');
+        console.log(`✅ Toggle completado, vuelto a: ${estadoOriginal ? 'ON' : 'OFF'}`);
         
+        // Aplicar DAYU después de que se regenere
         setTimeout(() => {
-          // SEGUNDO TOGGLE: OFF/ON
-          borderCheckbox.checked = !estadoOriginal;
-          borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-          borderCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
-          
-          setTimeout(() => {
-            // Volver al estado original FINAL (completa segundo toggle)
-            borderCheckbox.checked = estadoOriginal;
-            borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-            borderCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
-            
-            console.log('✅ Segundo toggle completado, estado final:', estadoOriginal);
-            
-            // Aplicar DAYU después del doble toggle
-            setTimeout(() => {
-              const resultado = actualizarSVG();
-              mostrarStatus(`✅ Aplicado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
-            }, 300);
-          }, 100);
-        }, 100);
+          const resultado = actualizarSVG();
+          mostrarStatus(`✅ Aplicado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
+        }, 300);
       }, 100);
       
       return true;
@@ -373,7 +357,7 @@
       
       console.log(`✅ Color ${numOriginal} cambiado a ${dayu.code}`);
       
-      // REGENERAR AUTOMÁTICAMENTE CON DOBLE TOGGLE
+      // REGENERAR AUTOMÁTICAMENTE CON UN SOLO TOGGLE
       mostrarStatus(`⏳ Aplicando ${dayu.code}...`, 'info');
       
       setTimeout(() => {
