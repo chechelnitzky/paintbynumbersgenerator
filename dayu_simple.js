@@ -1,9 +1,9 @@
-/* dayu_simple.js - v9 FINAL: Maneja HEX y RGB */
+/* dayu_simple.js - v10: Auto-detección de cambios en SVG */
 
 (function() {
   'use strict';
   
-  console.log('🎨 DAYU v9 - Soporte HEX + RGB');
+  console.log('🎨 DAYU v10 - Auto-actualización');
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -13,6 +13,9 @@
   if (!window.dayuMapping) {
     window.dayuMapping = {};
   }
+  
+  let svgObserver = null;
+  let lastSvgContent = '';
   
   function dist(rgb1, rgb2) {
     return Math.pow(rgb1[0]-rgb2[0],2) + Math.pow(rgb1[1]-rgb2[1],2) + Math.pow(rgb1[2]-rgb2[2],2);
@@ -58,11 +61,11 @@
       p.parentNode.insertBefore(btn, p);
     }
     
-    // Botón re-aplicar
+    // Botón re-aplicar (mantener por si acaso)
     if (!document.getElementById('btnReaplicar')) {
       const btn2 = document.createElement('button');
       btn2.id = 'btnReaplicar';
-      btn2.textContent = '🔄 RE-APLICAR';
+      btn2.textContent = '🔄 RE-APLICAR MANUAL';
       btn2.className = 'waves-effect waves-light btn';
       btn2.style.cssText = 'margin:10px 0;background:#26a69a;font-weight:bold;display:none;';
       btn2.onclick = () => {
@@ -72,7 +75,93 @@
       p.parentNode.insertBefore(btn2, p);
     }
     
+    // Indicador de auto-actualización
+    if (!document.getElementById('dayuAutoIndicator')) {
+      const indicator = document.createElement('span');
+      indicator.id = 'dayuAutoIndicator';
+      indicator.textContent = '🔄 Auto-actualización: OFF';
+      indicator.style.cssText = 'margin-left:10px;padding:5px 10px;background:#ff9800;color:white;border-radius:4px;font-size:12px;font-weight:bold;display:none;';
+      p.parentNode.insertBefore(indicator, p);
+    }
+    
     return true;
+  }
+  
+  function iniciarObservador() {
+    const container = document.getElementById('svgContainer');
+    if (!container) {
+      console.log('⏳ Esperando svgContainer...');
+      return false;
+    }
+    
+    if (svgObserver) {
+      svgObserver.disconnect();
+    }
+    
+    svgObserver = new MutationObserver((mutations) => {
+      // Detectar si el SVG cambió
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+      
+      const currentContent = svg.innerHTML.substring(0, 1000); // Solo comparar inicio
+      
+      if (currentContent !== lastSvgContent && lastSvgContent !== '') {
+        console.log('🔄 SVG cambió, re-aplicando DAYU...');
+        
+        // Esperar un poco para que el SVG termine de renderizar
+        setTimeout(() => {
+          const r = actualizar();
+          console.log(`✅ Auto-aplicado: ${r.textos}t, ${r.colores}c`);
+          
+          // Mostrar notificación visual
+          mostrarNotificacion(`✅ DAYU aplicado: ${r.textos} textos, ${r.colores} colores`);
+        }, 100);
+      }
+      
+      lastSvgContent = currentContent;
+    });
+    
+    svgObserver.observe(container, {
+      childList: true,
+      subtree: true,
+      attributes: false
+    });
+    
+    console.log('👁️ Observer activado en svgContainer');
+    
+    // Actualizar indicador
+    const indicator = document.getElementById('dayuAutoIndicator');
+    if (indicator) {
+      indicator.textContent = '🔄 Auto-actualización: ON';
+      indicator.style.background = '#4CAF50';
+    }
+    
+    return true;
+  }
+  
+  function mostrarNotificacion(mensaje) {
+    const notif = document.createElement('div');
+    notif.textContent = mensaje;
+    notif.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #4CAF50;
+      color: white;
+      padding: 15px 25px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      z-index: 10000;
+      font-weight: bold;
+      animation: slideIn 0.3s ease-out;
+    `;
+    
+    document.body.appendChild(notif);
+    
+    setTimeout(() => {
+      notif.style.animation = 'slideOut 0.3s ease-out';
+      setTimeout(() => notif.remove(), 300);
+    }, 3000);
   }
   
   function mapear() {
@@ -143,11 +232,17 @@
     hacerEditables();
     const r = actualizar();
     
-    // Mostrar botón re-aplicar
+    // Iniciar el observer después del primer mapeo
+    const observerIniciado = iniciarObservador();
+    
+    // Mostrar botón re-aplicar e indicador
     const btnReaplicar = document.getElementById('btnReaplicar');
     if (btnReaplicar) btnReaplicar.style.display = 'inline-block';
     
-    alert(`✅ Listo!\n${Object.keys(window.dayuMapping).length} colores\n${r.textos} textos\n${r.colores} colores\n\n💡 Si cambias el SVG multiplier, usa el botón "RE-APLICAR"`);
+    const indicator = document.getElementById('dayuAutoIndicator');
+    if (indicator) indicator.style.display = 'inline-block';
+    
+    alert(`✅ Listo!\n${Object.keys(window.dayuMapping).length} colores mapeados\n${r.textos} textos actualizados\n${r.colores} colores aplicados\n\n🤖 Auto-actualización ${observerIniciado ? 'ACTIVADA' : 'pendiente'}\n💡 Los cambios se aplicarán automáticamente al cambiar SVG multiplier`);
   }
   
   function hacerEditables() {
@@ -192,7 +287,7 @@
       const dayu = window.DAYU_PALETTE.find(d => d.code.toUpperCase() === nuevo);
       
       if (!dayu) {
-        alert(`❌ "${nuevo}" no existe`);
+        alert(`❌ "${nuevo}" no existe en la paleta DAYU`);
         caja.textContent = actual;
         return;
       }
@@ -210,6 +305,7 @@
       
       const r = actualizar();
       console.log(`✏️ ${num} → ${dayu.code}: ${r.textos}t, ${r.colores}c`);
+      mostrarNotificacion(`✏️ Color ${num} cambiado a ${dayu.code}`);
     };
     
     inp.addEventListener('blur', aplicarCambio);
@@ -292,6 +388,20 @@
   }
   
   function init() {
+    // Agregar estilos para animaciones
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+      }
+    `;
+    document.head.appendChild(style);
+    
     let i = 0;
     const t = setInterval(() => {
       if (crearBotones() || ++i > 20) clearInterval(t);
@@ -306,6 +416,10 @@
   
   // API pública
   window.reaplicarDayu = actualizar;
+  window.dayuInfo = () => {
+    console.log('🎨 DAYU Mapping:', window.dayuMapping);
+    console.log('👁️ Observer activo:', !!svgObserver);
+  };
   
-  console.log('✅ DAYU v9 listo - Soporta HEX y RGB');
+  console.log('✅ DAYU v10 listo - Auto-actualización inteligente');
 })();
