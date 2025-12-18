@@ -1,11 +1,9 @@
-/* dayu_ui_patch.js
-   Modo “opt-in”:
-   - El generador base crea clusters 0..K-1 como siempre.
-   - Debajo de la paleta aparece:
-     [ ] Usar paleta Dayu
-     (Aplicar) (Reset)
-   - Al activar: asigna Dayu a cada cluster sin repetir códigos.
-   - Cada swatch se vuelve editable: escribir "63" o "WG3" y ENTER -> actualiza imagen.
+/* dayu_ui_patch.js (V2)
+   - NO depende de #palette.
+   - Lee clusters y colores desde el SVG generado.
+   - Crea su propia fila de “cajitas” (swatches) editables.
+   - Toggle Dayu (opt-in) + Apply + Reset.
+   - Asignación Dayu por similitud SIN repetir códigos (greedy por distancia).
 */
 
 (function () {
@@ -14,30 +12,38 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  // =========================
-  // DAYU helpers
-  // =========================
+  // ---------- Dayu helpers ----------
   function sanitizeHex(hex) {
     if (!hex) return null;
-    hex = String(hex).trim().replace(/^#/, "");
-    if (hex === "0") return "000000";
-    if (/^[0-9a-fA-F]{6}$/.test(hex)) return hex.toLowerCase();
-    if (/^[0-9a-fA-F]{3}$/.test(hex)) return hex.split("").map(c => c + c).join("").toLowerCase();
+    let h = String(hex).trim().replace(/^#/, "");
+    if (h === "0") return "000000";
+    if (/^[0-9a-fA-F]{6}$/.test(h)) return h.toLowerCase();
+    if (/^[0-9a-fA-F]{3}$/.test(h)) return h.split("").map(c => c + c).join("").toLowerCase();
     return null;
   }
 
   function hexToRgb(hex) {
     const h = sanitizeHex(hex);
     if (!h) return null;
-    return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+
+  function rgbFromCssColor(c) {
+    // Accepts: rgb(r,g,b) or #rrggbb
+    if (!c) return null;
+    c = String(c).trim();
+    if (c.startsWith("#")) return hexToRgb(c);
+    const m = c.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+    if (!m) return null;
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
   }
 
   function dist2(a, b) {
-    const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
-    return dr*dr + dg*dg + db*db;
+    const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+    return dr * dr + dg * dg + db * db;
   }
 
-  function getDayuMap() {
+  function getDayu() {
     const raw = Array.isArray(window.DAYU_PALETTE) ? window.DAYU_PALETTE : [];
     const map = new Map();
     const list = [];
@@ -51,263 +57,325 @@
       const rgb = hexToRgb(hex);
       if (!hex || !rgb) continue;
 
-      const obj = { code, hex, rgb };
-      map.set(code.toUpperCase(), obj);
+      const obj = { code: code.toUpperCase(), hex, rgb };
+      map.set(obj.code, obj);
       list.push(obj);
     }
+
     return { map, list };
   }
 
-  // =========================
-  // Leer paleta base (clusters)
-  // =========================
-  function parseRgbText(t) {
-    const m = (t || "").match(/RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-    if (!m) return null;
-    return [Number(m[1]), Number(m[2]), Number(m[3])];
-  }
-
-  // Toma los RGB de la paleta que el app ya muestra (los cuadritos 0..K-1).
-  // Regla: dentro de #palette aparecen textos "RGB: r,g,b". Los tomamos en orden como 0..K-1
-  function readClusterPaletteRgb() {
-    const paletteEl = document.getElementById("palette");
-    if (!paletteEl) return null;
-
-    const rgbEls = $$("#palette *", paletteEl)
-      .filter(el => /RGB:\s*\d+\s*,\s*\d+\s*,\s*\d+/i.test((el.textContent || "").trim()));
-
-    if (!rgbEls.length) return null;
-
-    const idxToRgb = new Map();
-    let idx = 0;
-    for (const el of rgbEls) {
-      const rgb = parseRgbText((el.textContent || "").trim());
-      if (!rgb) continue;
-      idxToRgb.set(String(idx), rgb);
-      idx++;
-    }
-    return idxToRgb;
-  }
-
-  // =========================
-  // UI: switch + botones + inputs
-  // =========================
-  function ensureUi() {
-    const paletteEl = document.getElementById("palette");
-    if (!paletteEl) return null;
-
-    let ui = document.getElementById("dayu-ui");
-    if (ui) return ui;
-
-    ui = document.createElement("div");
-    ui.id = "dayu-ui";
-    ui.style.marginTop = "12px";
-    ui.style.padding = "12px";
-    ui.style.border = "1px solid rgba(0,0,0,.12)";
-    ui.style.borderRadius = "12px";
-    ui.style.display = "flex";
-    ui.style.alignItems = "center";
-    ui.style.gap = "12px";
-    ui.style.flexWrap = "wrap";
-
-    ui.innerHTML = `
-      <label style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" id="dayu-toggle" />
-        <span><b>Usar paleta Dayu</b> (opcional)</span>
-      </label>
-
-      <button id="dayu-apply" class="btn waves-effect waves-light" type="button">Aplicar Dayu</button>
-      <button id="dayu-reset" class="btn waves-effect waves-light" type="button">Reset (volver a 0..K-1)</button>
-
-      <span id="dayu-msg" style="opacity:.75;"></span>
-      <div style="flex-basis:100%;height:0;"></div>
-      <span style="opacity:.8;font-size:13px;">
-        Tip: puedes editar cualquier cajita: escribe <b>63</b> o <b>WG3</b> y presiona <b>Enter</b>.
-      </span>
-    `;
-
-    // Insertar justo debajo del bloque de paleta
-    paletteEl.parentElement.appendChild(ui);
-
-    return ui;
-  }
-
-  // Convierte las “cajitas” visuales en inputs editables (overlay)
-  // No sabemos la estructura exacta del repo, así que usamos una estrategia robusta:
-  // buscamos dentro de #palette cualquier elemento con texto EXACTO "0","1","2"..., y le agregamos un input encima.
-  function makeSwatchesEditable() {
-    const paletteEl = document.getElementById("palette");
-    if (!paletteEl) return false;
-
-    // Detecta nodos que tengan solo números (índices)
-    const numNodes = $$("#palette *", paletteEl)
-      .filter(el => /^\d+$/.test((el.textContent || "").trim()));
-
-    if (!numNodes.length) return false;
-
-    for (const node of numNodes) {
-      const idx = (node.textContent || "").trim();
-
-      // evita duplicar
-      if (node.dataset.dayuEditable === "1") continue;
-      node.dataset.dayuEditable = "1";
-
-      // contenedor visual
-      const box = node.closest("div") || node.parentElement;
-      if (!box) continue;
-
-      box.style.position = box.style.position || "relative";
-
-      // crea input overlay
-      const inp = document.createElement("input");
-      inp.type = "text";
-      inp.value = idx; // por defecto muestra el índice (0..K-1)
-      inp.dataset.clusterIdx = idx;
-
-      inp.style.position = "absolute";
-      inp.style.left = "0";
-      inp.style.top = "0";
-      inp.style.width = "100%";
-      inp.style.height = "100%";
-      inp.style.border = "0";
-      inp.style.outline = "0";
-      inp.style.background = "transparent";
-      inp.style.textAlign = "center";
-      inp.style.fontWeight = "700";
-      inp.style.color = "inherit";
-      inp.style.cursor = "text";
-
-      // Oculta el texto original y pone input
-      node.style.opacity = "0";
-      box.appendChild(inp);
-
-      inp.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          applyManualCodeToCluster(idx, inp.value);
-          inp.blur();
-        }
-      });
-    }
-
-    return true;
-  }
-
-  // =========================
-  // Aplicar cambios al SVG
-  // =========================
+  // ---------- SVG access ----------
   function getSvg() {
-    return document.querySelector("#svgContainer svg");
+    return document.querySelector("#svgContainer svg") || document.querySelector("svg");
   }
 
-  // Encuentra la forma del facet asociada a un <text> (en el mismo <g>)
   function findFacetShapeFromText(textEl) {
     const g = textEl.closest("g") || textEl.parentElement;
     if (!g) return null;
+
+    // Common shapes
     const shapes = g.querySelectorAll("path,polygon,rect");
     for (const s of shapes) {
+      // Prefer a non-none fill
       const fill = (s.getAttribute("fill") || "").trim();
-      const style = s.getAttribute("style") || "";
+      const style = (s.getAttribute("style") || "").trim();
+
       if (fill && fill !== "none") return s;
-      if (/fill\s*:\s*[^;]+/i.test(style) && !/fill\s*:\s*none/i.test(style)) return s;
+
+      const m = style.match(/fill\s*:\s*([^;]+)/i);
+      if (m && m[1] && m[1].trim() !== "none") return s;
     }
     return null;
   }
 
+  function getShapeFillHex(shapeEl) {
+    if (!shapeEl) return null;
+
+    const fill = (shapeEl.getAttribute("fill") || "").trim();
+    if (fill && fill !== "none") {
+      if (fill.startsWith("#")) return sanitizeHex(fill);
+      const rgb = rgbFromCssColor(fill);
+      if (rgb) return rgbToHex(rgb);
+    }
+
+    const style = (shapeEl.getAttribute("style") || "");
+    const m = style.match(/fill\s*:\s*([^;]+)/i);
+    if (m && m[1]) {
+      const v = m[1].trim();
+      if (v.startsWith("#")) return sanitizeHex(v);
+      const rgb = rgbFromCssColor(v);
+      if (rgb) return rgbToHex(rgb);
+    }
+
+    return null;
+  }
+
   function setShapeFill(shapeEl, hex) {
-    const color = `#${sanitizeHex(hex)}`;
-    shapeEl.setAttribute("fill", color);
+    const h = sanitizeHex(hex);
+    if (!h || !shapeEl) return;
+    const c = `#${h}`;
+    shapeEl.setAttribute("fill", c);
+
     const style = shapeEl.getAttribute("style") || "";
     if (/fill\s*:/i.test(style)) {
-      shapeEl.setAttribute("style", style.replace(/fill\s*:\s*[^;]+/i, `fill:${color}`));
+      shapeEl.setAttribute("style", style.replace(/fill\s*:\s*[^;]+/i, `fill:${c}`));
     } else {
-      shapeEl.setAttribute("style", `${style}${style && !style.trim().endsWith(";") ? ";" : ""}fill:${color};`);
+      const tail = style && !style.trim().endsWith(";") ? ";" : "";
+      shapeEl.setAttribute("style", `${style}${tail}fill:${c};`);
     }
   }
 
-  // Aplica DAYU code+color a TODOS los facets cuyo label original era idx
+  function rgbToHex(rgb) {
+    const [r, g, b] = rgb;
+    const to2 = (n) => n.toString(16).padStart(2, "0");
+    return `${to2(r)}${to2(g)}${to2(b)}`;
+  }
+
+  // ---------- Read clusters from SVG ----------
+  function getClusterTexts(svg) {
+    // We only treat pure integer labels as clusters (0..K-1)
+    const texts = $$("text", svg);
+    const out = [];
+    for (const t of texts) {
+      const v = (t.textContent || "").trim();
+      if (/^\d+$/.test(v)) out.push(t);
+    }
+    return out;
+  }
+
+  function getClusterCountFromSvg(svg) {
+    const labels = getClusterTexts(svg)
+      .map(t => Number((t.textContent || "").trim()))
+      .filter(n => Number.isFinite(n));
+
+    if (!labels.length) return 0;
+    return Math.max(...labels) + 1;
+  }
+
+  // Build representative RGB for each cluster idx:
+  // pick first facet we find for each idx, grab its fill color.
+  function buildIdxToRgbFromSvg(svg) {
+    const idxToRgb = new Map();
+    const texts = getClusterTexts(svg);
+
+    for (const t of texts) {
+      const idx = (t.textContent || "").trim();
+      if (idxToRgb.has(idx)) continue;
+
+      // tag original cluster idx so we can reset labels later
+      if (!t.getAttribute("data-cluster-idx")) t.setAttribute("data-cluster-idx", idx);
+
+      const shape = findFacetShapeFromText(t);
+      const fillHex = getShapeFillHex(shape);
+      if (!fillHex) continue;
+
+      const rgb = hexToRgb(fillHex);
+      if (!rgb) continue;
+
+      idxToRgb.set(idx, rgb);
+    }
+
+    return idxToRgb;
+  }
+
+  // ---------- UI ----------
+  function ensureUiContainer() {
+    // place UI near svgContainer
+    const svgContainer = document.getElementById("svgContainer") || document.body;
+    let host = document.getElementById("dayu-ui-host");
+    if (host) return host;
+
+    host = document.createElement("div");
+    host.id = "dayu-ui-host";
+    host.style.margin = "12px 0";
+    host.style.padding = "12px";
+    host.style.border = "1px solid rgba(0,0,0,.12)";
+    host.style.borderRadius = "12px";
+    host.style.display = "grid";
+    host.style.gap = "10px";
+
+    host.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="dayu-toggle" />
+          <span><b>Usar paleta Dayu</b> (opcional)</span>
+        </label>
+
+        <button id="dayu-apply" class="btn waves-effect waves-light" type="button">APLICAR DAYU</button>
+        <button id="dayu-reset" class="btn waves-effect waves-light" type="button">RESET (VOLVER A 0..K-1)</button>
+
+        <span id="dayu-msg" style="opacity:.75;"></span>
+      </div>
+
+      <div id="dayu-swatches" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+
+      <div style="opacity:.8;font-size:13px;">
+        Tip: edita una cajita: escribe <b>63</b> o <b>WG3</b> y presiona <b>Enter</b>.
+      </div>
+    `;
+
+    // Insert host ABOVE svgContainer so it's visible
+    svgContainer.parentElement.insertBefore(host, svgContainer);
+    return host;
+  }
+
+  function msg(text) {
+    const el = document.getElementById("dayu-msg");
+    if (el) el.textContent = text || "";
+  }
+
+  function createSwatch(idx, colorHex, labelValue) {
+    const wrap = document.createElement("div");
+    wrap.style.width = "56px";
+    wrap.style.height = "56px";
+    wrap.style.borderRadius = "8px";
+    wrap.style.overflow = "hidden";
+    wrap.style.position = "relative";
+    wrap.style.border = "1px solid rgba(0,0,0,.12)";
+
+    const bg = document.createElement("div");
+    bg.style.position = "absolute";
+    bg.style.inset = "0";
+    bg.style.background = `#${sanitizeHex(colorHex) || "ffffff"}`;
+    wrap.appendChild(bg);
+
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.value = labelValue;
+    inp.dataset.clusterIdx = String(idx);
+    inp.style.position = "absolute";
+    inp.style.inset = "0";
+    inp.style.width = "100%";
+    inp.style.height = "100%";
+    inp.style.border = "0";
+    inp.style.outline = "0";
+    inp.style.background = "transparent";
+    inp.style.textAlign = "center";
+    inp.style.fontWeight = "800";
+    inp.style.fontSize = "14px";
+    inp.style.color = "#000";
+    inp.style.textTransform = "uppercase";
+
+    // Improve readability
+    inp.style.textShadow = "0 0 3px rgba(255,255,255,.9), 0 0 6px rgba(255,255,255,.7)";
+
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyManualCodeToCluster(inp.dataset.clusterIdx, inp.value);
+        inp.blur();
+      }
+    });
+
+    wrap.appendChild(inp);
+    return wrap;
+  }
+
+  function renderSwatchesFromSvg() {
+    const svg = getSvg();
+    if (!svg) {
+      msg("Aún no hay SVG generado. Primero presiona Process image.");
+      return false;
+    }
+
+    const k = getClusterCountFromSvg(svg);
+    if (!k) {
+      msg("No detecté labels numéricos (0..K-1) en el SVG.");
+      return false;
+    }
+
+    const idxToRgb = buildIdxToRgbFromSvg(svg);
+    const sw = document.getElementById("dayu-swatches");
+    sw.innerHTML = "";
+
+    for (let i = 0; i < k; i++) {
+      const idx = String(i);
+      const rgb = idxToRgb.get(idx);
+      const baseHex = rgb ? rgbToHex(rgb) : "ffffff";
+      sw.appendChild(createSwatch(idx, baseHex, idx));
+    }
+
+    msg(`Detecté ${k} clusters desde el SVG.`);
+    return true;
+  }
+
+  // ---------- Apply / Reset ----------
+  function resetLabelsToOriginal() {
+    const svg = getSvg();
+    if (!svg) return false;
+
+    // restore labels to their original numeric cluster idx (stored in data-cluster-idx)
+    const texts = $$("text", svg);
+    let changed = false;
+
+    for (const t of texts) {
+      const orig = t.getAttribute("data-cluster-idx");
+      if (orig && /^\d+$/.test(orig)) {
+        t.textContent = orig;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function applyDayuToCluster(idx, dayuCode, dayuHex) {
     const svg = getSvg();
     if (!svg) return false;
 
     let changed = false;
+    const texts = $$("text", svg);
 
-    // Importante:
-    // El label original es "idx" (0..K-1).
-    // Pero si ya aplicaste Dayu antes, los textos ya no serán idx.
-    // Solución: guardamos el idx original en data-attr la primera vez que tocamos un <text>.
-    const texts = svg.querySelectorAll("text");
-
-    texts.forEach(t => {
-      const raw = (t.textContent || "").trim();
-      const original = t.getAttribute("data-cluster-idx") || null;
-
-      // Si no tiene data-cluster-idx todavía, y raw es numérico, lo seteamos.
-      if (!original && /^\d+$/.test(raw)) {
-        t.setAttribute("data-cluster-idx", raw);
+    for (const t of texts) {
+      const orig = t.getAttribute("data-cluster-idx") || (t.textContent || "").trim();
+      // ensure data-cluster-idx is set if numeric
+      if (!t.getAttribute("data-cluster-idx") && /^\d+$/.test(orig)) {
+        t.setAttribute("data-cluster-idx", orig);
       }
 
       const clusterIdx = t.getAttribute("data-cluster-idx");
-      if (clusterIdx !== String(idx)) return;
+      if (clusterIdx !== String(idx)) continue;
 
-      // Cambiar texto a dayuCode
       t.textContent = dayuCode;
       changed = true;
 
-      // Cambiar fill del facet
       const shape = findFacetShapeFromText(t);
       if (shape) setShapeFill(shape, dayuHex);
-    });
+    }
 
     return changed;
   }
 
-  // Volver a labels originales (0..K-1) y NO cambiar colores (solo texto).
-  // Nota: volver colores exactos base requeriría guardar los fills originales por facet.
-  // Para “Reset” práctico: volvemos etiquetas a idx y NO tocamos fill.
-  function resetLabelsToOriginal() {
+  function assignDayuGreedyUnique() {
     const svg = getSvg();
-    if (!svg) return false;
+    const { list: dayuList } = getDayu();
 
-    let changed = false;
-    const texts = svg.querySelectorAll("text");
-
-    texts.forEach(t => {
-      const clusterIdx = t.getAttribute("data-cluster-idx");
-      if (!clusterIdx) return;
-      t.textContent = clusterIdx;
-      changed = true;
-    });
-
-    return changed;
-  }
-
-  // =========================
-  // Asignación automática (sin repetir)
-  // =========================
-  function assignDayuToAllClusters() {
-    const { list: dayuList } = getDayuMap();
+    if (!svg) {
+      msg("Primero genera un SVG con Process image.");
+      return;
+    }
     if (!dayuList.length) {
-      msg("No se encontró window.DAYU_PALETTE válido.");
+      msg("No encontré DAYU_PALETTE válido. Revisa dayu_palette.js.");
       return;
     }
 
-    const idxToRgb = readClusterPaletteRgb();
-    if (!idxToRgb || !idxToRgb.size) {
-      msg("Aún no hay paleta generada. Primero presiona Process image.");
+    const idxToRgb = buildIdxToRgbFromSvg(svg);
+    const idxs = Array.from(idxToRgb.keys()).sort((a, b) => Number(a) - Number(b));
+
+    if (!idxs.length) {
+      msg("No pude leer colores desde el SVG. (No encontré fills).");
       return;
     }
 
-    const idxs = Array.from(idxToRgb.keys()).sort((a,b) => Number(a)-Number(b));
+    // build all candidate pairs
     const pairs = [];
-
     for (let i = 0; i < idxs.length; i++) {
       const rgb = idxToRgb.get(idxs[i]);
       for (let j = 0; j < dayuList.length; j++) {
         pairs.push({ i, j, d: dist2(rgb, dayuList[j].rgb) });
       }
     }
-    pairs.sort((a,b) => a.d - b.d);
+    pairs.sort((a, b) => a.d - b.d);
 
     const usedI = new Set();
     const usedJ = new Set();
@@ -325,29 +393,29 @@
       if (idxToDayu.size === idxs.length) break;
     }
 
-    // Aplicar al SVG y actualizar inputs
+    // Apply mapping
     for (const [idx, dayu] of idxToDayu.entries()) {
       applyDayuToCluster(idx, dayu.code, dayu.hex);
 
-      // si existe input overlay para ese idx, actualizar su texto
-      const inp = document.querySelector(`#palette input[data-cluster-idx="${idx}"]`);
+      // update swatch UI label + color
+      const inp = document.querySelector(`#dayu-swatches input[data-cluster-idx="${idx}"]`);
       if (inp) inp.value = dayu.code;
+
+      const wrap = inp ? inp.parentElement : null;
+      if (wrap) wrap.firstChild.style.background = `#${dayu.hex}`;
     }
 
-    msg(`Dayu aplicado: ${idxToDayu.size} clusters asignados sin repetir.`);
+    msg(`Aplicado Dayu: ${idxToDayu.size} clusters asignados sin repetir.`);
   }
 
-  // =========================
-  // Manual override
-  // =========================
+  // ---------- Manual override ----------
   function normalizeCode(v) {
     return String(v || "").trim().toUpperCase();
   }
 
   function applyManualCodeToCluster(idx, userValue) {
-    const { map } = getDayuMap();
+    const { map } = getDayu();
     const code = normalizeCode(userValue);
-
     if (!code) return;
 
     const dayu = map.get(code);
@@ -356,94 +424,98 @@
       return;
     }
 
-    // Evitar duplicados manuales (opcional): si ya está usado en otro cluster, avisar
-    // (puedes permitirlo, pero tú pediste 1 nombre por color)
-    const otherInputs = Array.from(document.querySelectorAll(`#palette input[data-cluster-idx]`));
-    const usedBy = otherInputs.find(i => i.dataset.clusterIdx !== String(idx) && normalizeCode(i.value) === code);
+    // prevent duplicates (your rule)
+    const inputs = $$("#dayu-swatches input[data-cluster-idx]");
+    const usedBy = inputs.find(i => i.dataset.clusterIdx !== String(idx) && normalizeCode(i.value) === code);
     if (usedBy) {
       msg(`"${code}" ya está usado en el cluster ${usedBy.dataset.clusterIdx}. Elige otro.`);
+      // revert input
+      const self = inputs.find(i => i.dataset.clusterIdx === String(idx));
+      if (self) self.value = self.value; // no-op
       return;
     }
 
     applyDayuToCluster(idx, dayu.code, dayu.hex);
+
+    // update swatch color
+    const inp = document.querySelector(`#dayu-swatches input[data-cluster-idx="${idx}"]`);
+    if (inp) inp.value = dayu.code;
+    const wrap = inp ? inp.parentElement : null;
+    if (wrap) wrap.firstChild.style.background = `#${dayu.hex}`;
+
     msg(`Cluster ${idx} -> ${dayu.code}`);
   }
 
-  function msg(t) {
-    const el = document.getElementById("dayu-msg");
-    if (el) el.textContent = t || "";
-  }
-
-  // =========================
-  // Wiring
-  // =========================
-  function wireUi() {
-    const ui = ensureUi();
-    if (!ui) return;
+  // ---------- Wiring / observers ----------
+  function wireUiOnce() {
+    ensureUiContainer();
 
     const toggle = document.getElementById("dayu-toggle");
     const applyBtn = document.getElementById("dayu-apply");
     const resetBtn = document.getElementById("dayu-reset");
 
-    // Toggle: si lo prendes, aplica; si lo apagas, reset labels
+    if (toggle.dataset.wired === "1") return; // prevent duplicate wiring
+    toggle.dataset.wired = "1";
+
     toggle.addEventListener("change", () => {
       if (toggle.checked) {
-        assignDayuToAllClusters();
+        assignDayuGreedyUnique();
       } else {
         resetLabelsToOriginal();
-        msg("Reset: etiquetas originales restauradas (0..K-1).");
+        // reset swatch labels back to idx and colors back to base-from-SVG
+        renderSwatchesFromSvg();
+        msg("Reset: volví a 0..K-1 (y reconstruí cajitas).");
       }
     });
 
     applyBtn.addEventListener("click", () => {
       toggle.checked = true;
-      assignDayuToAllClusters();
+      assignDayuGreedyUnique();
     });
 
     resetBtn.addEventListener("click", () => {
       toggle.checked = false;
       resetLabelsToOriginal();
-      // volver inputs a idx
-      const inputs = Array.from(document.querySelectorAll(`#palette input[data-cluster-idx]`));
-      for (const inp of inputs) inp.value = inp.dataset.clusterIdx;
+      renderSwatchesFromSvg();
       msg("Reset aplicado.");
     });
   }
 
-  function observeOutput() {
-    const paletteEl = document.getElementById("palette");
-    const svgContainer = document.getElementById("svgContainer");
-    if (!paletteEl || !svgContainer) return;
-
-    const ensureEditable = () => {
-      makeSwatchesEditable();
-      wireUi();
-    };
-
-    // Cuando cambia la paleta o el svg (después de Process), re-creamos inputs y UI si faltan
-    new MutationObserver(() => ensureEditable()).observe(paletteEl, { childList: true, subtree: true });
-    new MutationObserver(() => ensureEditable()).observe(svgContainer, { childList: true, subtree: true });
-
-    // Intento inicial
-    ensureEditable();
+  function tryInitAfterProcess() {
+    wireUiOnce();
+    renderSwatchesFromSvg();
   }
 
   window.addEventListener("DOMContentLoaded", () => {
-    observeOutput();
+    wireUiOnce();
 
-    // También enganchar al botón Process para asegurar que tras generar, quede listo
+    // Hook to Process button
     const btn = document.getElementById("btnProcess");
     if (btn) {
       btn.addEventListener("click", () => {
-        // esperar un poco a que termine render y luego activar editable/UI
+        // Wait until SVG appears/updates
         let tries = 0;
-        const timer = setInterval(() => {
+        const t = setInterval(() => {
           tries++;
-          makeSwatchesEditable();
-          wireUi();
-          if (getSvg() || tries > 60) clearInterval(timer);
-        }, 250);
+          const svg = getSvg();
+          if (svg) {
+            tryInitAfterProcess();
+            clearInterval(t);
+          } else if (tries > 80) {
+            msg("No apareció el SVG. Revisa si el proceso terminó.");
+            clearInterval(t);
+          }
+        }, 200);
       }, true);
+    }
+
+    // Observe svgContainer changes (when generation finishes)
+    const svgContainer = document.getElementById("svgContainer");
+    if (svgContainer) {
+      new MutationObserver(() => {
+        // If SVG is present, keep swatches synced
+        if (getSvg()) tryInitAfterProcess();
+      }).observe(svgContainer, { childList: true, subtree: true });
     }
   });
 })();
