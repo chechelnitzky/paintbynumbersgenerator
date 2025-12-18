@@ -1,17 +1,15 @@
 /* dayu_system_final.js
- * Sistema DAYU completo y funcional
- * - Botón "APLICAR DAYU" conectado
- * - Cajitas editables (clic → escribe código → Enter)
+ * Sistema DAYU - VERSIÓN CORREGIDA
+ * - Solo usa las cajitas de arriba (con códigos DAYU)
+ * - Elimina duplicados
+ * - Cajitas editables con clic
  * - Actualización automática del SVG
- * - Botón RESET para volver a colores originales
- * 
- * Requiere: dayu_palette.js cargado primero
  */
 
 (function() {
   'use strict';
   
-  console.log('🎨 Cargando DAYU System Final...');
+  console.log('🎨 Cargando DAYU System Final v2...');
   
   // ============================================
   // ESTADO GLOBAL
@@ -48,33 +46,101 @@
   }
   
   // ============================================
+  // IDENTIFICAR CAJITAS CORRECTAS
+  // ============================================
+  
+  function getColorBoxes() {
+    // Buscar todas las cajitas con background
+    const allBoxes = Array.from(document.querySelectorAll('div[style*="background"]'));
+    
+    // Las cajitas correctas son las que:
+    // 1. Tienen color de fondo
+    // 2. Tienen tamaño visual (no están ocultas)
+    // 3. Están en la parte superior (antes de otras cajitas grandes)
+    
+    const validBoxes = allBoxes.filter(box => {
+      const text = box.textContent.trim();
+      const rect = box.getBoundingClientRect();
+      
+      // Debe tener tamaño visible
+      if (rect.width < 10 || rect.height < 10) return false;
+      
+      // Debe tener contenido de texto corto (código DAYU o número)
+      if (text.length === 0 || text.length > 5) return false;
+      
+      // Debe tener color de fondo visible
+      const bgColor = window.getComputedStyle(box).backgroundColor;
+      if (!bgColor || bgColor === 'transparent') return false;
+      
+      return true;
+    });
+    
+    // Ordenar por posición Y (las de arriba primero)
+    validBoxes.sort((a, b) => {
+      const rectA = a.getBoundingClientRect();
+      const rectB = b.getBoundingClientRect();
+      return rectA.top - rectB.top;
+    });
+    
+    // Tomar solo las primeras (las de la fila de arriba)
+    // Generalmente son las primeras 16-20 cajitas
+    const topY = validBoxes[0]?.getBoundingClientRect().top || 0;
+    const topBoxes = validBoxes.filter(box => {
+      const rect = box.getBoundingClientRect();
+      return Math.abs(rect.top - topY) < 50; // Misma fila (tolerancia 50px)
+    });
+    
+    console.log(`📦 Cajitas encontradas: ${topBoxes.length}`);
+    return topBoxes;
+  }
+  
+  // ============================================
+  // OCULTAR CAJITAS DUPLICADAS (las de abajo)
+  // ============================================
+  
+  function hideExtraBoxes() {
+    const allBoxes = Array.from(document.querySelectorAll('div[style*="background"]'));
+    const topBoxes = getColorBoxes();
+    
+    // Ocultar las que NO son las cajitas de arriba
+    allBoxes.forEach(box => {
+      if (!topBoxes.includes(box)) {
+        const text = box.textContent.trim();
+        // Solo ocultar si parece ser una cajita de número (0-200)
+        if (/^\d+$/.test(text) && parseInt(text) < 200) {
+          box.style.display = 'none';
+          console.log(`🚫 Ocultando cajita duplicada: ${text}`);
+        }
+      }
+    });
+  }
+  
+  // ============================================
   // EXTRACCIÓN DE PALETA
   // ============================================
   
   function extractPalette() {
-    const boxes = document.querySelectorAll('div[style*="background"]');
+    const boxes = getColorBoxes();
     const palette = new Map();
     
-    boxes.forEach(box => {
-      const text = box.textContent.trim();
-      if (/^\d+$/.test(text)) {
-        const idx = parseInt(text);
-        const rgb = parseColorFromBox(box);
-        if (rgb) {
-          palette.set(idx, {
-            rgb: rgb,
-            hex: rgbToHex(rgb),
-            box: box
-          });
-        }
+    boxes.forEach((box, index) => {
+      const rgb = parseColorFromBox(box);
+      if (rgb) {
+        palette.set(index, {
+          rgb: rgb,
+          hex: rgbToHex(rgb),
+          box: box,
+          originalText: box.textContent.trim()
+        });
       }
     });
     
+    console.log(`📊 Paleta extraída: ${palette.size} colores`);
     return palette;
   }
   
   // ============================================
-  // MAPEO A DAYU (1:1 sin repetir)
+  // MAPEO A DAYU
   // ============================================
   
   function mapToDayu(palette) {
@@ -84,11 +150,10 @@
     }
     
     const dayuColors = window.DAYU_PALETTE;
-    const indices = Array.from(palette.keys()).sort((a, b) => a - b);
+    const indices = Array.from(palette.keys());
     
-    console.log(`📊 Mapeando ${indices.length} colores a DAYU...`);
+    console.log(`🔄 Mapeando ${indices.length} colores...`);
     
-    // Calcular distancias
     const distances = [];
     indices.forEach(idx => {
       const currentColor = palette.get(idx);
@@ -101,10 +166,8 @@
       });
     });
     
-    // Ordenar por distancia
     distances.sort((a, b) => a.distance - b.distance);
     
-    // Asignación greedy 1:1
     const usedClusters = new Set();
     const usedDayu = new Set();
     const mapping = new Map();
@@ -128,7 +191,7 @@
       if (mapping.size === indices.length) break;
     }
     
-    console.log(`✅ Mapeo completado: ${mapping.size} colores`);
+    console.log(`✅ Mapeo: ${mapping.size} colores`);
     return mapping;
   }
   
@@ -140,20 +203,20 @@
     mapping.forEach((dayuColor, idx) => {
       const data = palette.get(idx);
       if (data && data.box) {
-        // Guardar color original
+        // Guardar estado original
         if (!data.box.dataset.originalColor) {
           data.box.dataset.originalColor = data.hex;
-          data.box.dataset.originalText = idx;
+          data.box.dataset.originalText = data.originalText;
         }
         
         // Actualizar a DAYU
         data.box.style.backgroundColor = dayuColor.hex;
         data.box.textContent = dayuColor.code;
-        data.box.dataset.originalIdx = idx;
+        data.box.dataset.clusterIdx = idx;
         data.box.dataset.dayuCode = dayuColor.code;
         data.box.dataset.dayuColor = dayuColor.hex;
         
-        console.log(`📦 Cluster ${idx} → DAYU ${dayuColor.code}`);
+        console.log(`📦 ${idx} → ${dayuColor.code} (${dayuColor.hex})`);
       }
     });
   }
@@ -162,12 +225,24 @@
   // ACTUALIZACIÓN DEL SVG
   // ============================================
   
-  function updateSVG(mapping) {
+  function updateSVG(mapping, palette) {
     const svg = document.querySelector('svg');
     if (!svg) {
       console.warn('⚠️ SVG no encontrado');
       return false;
     }
+    
+    // Crear un mapa de código DAYU a índice de cluster
+    const dayuToCluster = new Map();
+    mapping.forEach((dayuColor, idx) => {
+      dayuToCluster.set(dayuColor.code, idx);
+    });
+    
+    // También mapear por color original
+    const colorToCluster = new Map();
+    palette.forEach((data, idx) => {
+      colorToCluster.set(data.hex.toLowerCase(), idx);
+    });
     
     let updated = 0;
     const texts = svg.querySelectorAll('text');
@@ -175,43 +250,68 @@
     texts.forEach(textEl => {
       const currentText = textEl.textContent.trim();
       
-      // Si es un número (índice original)
+      // Buscar el cluster correspondiente
+      let clusterIdx = null;
+      
+      // Opción 1: Por número directo (si es 0, 1, 2...)
       if (/^\d+$/.test(currentText)) {
-        const idx = parseInt(currentText);
-        const dayuColor = mapping.get(idx);
-        
-        if (dayuColor) {
-          // Guardar original
-          if (!textEl.dataset.originalText) {
-            textEl.dataset.originalText = currentText;
-          }
-          
-          textEl.textContent = dayuColor.code;
-          textEl.dataset.originalIdx = idx;
-          
-          // Actualizar faceta
-          const parent = textEl.parentElement;
-          if (parent) {
-            const shapes = parent.querySelectorAll('path, polygon, rect');
-            shapes.forEach(shape => {
-              const fill = shape.getAttribute('fill');
-              if (fill && fill !== 'none') {
-                // Guardar original
-                if (!shape.dataset.originalFill) {
-                  shape.dataset.originalFill = fill;
-                }
-                shape.setAttribute('fill', dayuColor.hex);
-                shape.style.fill = dayuColor.hex;
-              }
-            });
-          }
-          
-          updated++;
+        const num = parseInt(currentText);
+        if (mapping.has(num)) {
+          clusterIdx = num;
         }
+      }
+      
+      // Opción 2: Por color de la faceta
+      if (clusterIdx === null) {
+        const parent = textEl.parentElement;
+        if (parent) {
+          const shape = parent.querySelector('path, polygon, rect');
+          if (shape) {
+            const fill = shape.getAttribute('fill');
+            if (fill) {
+              const fillHex = fill.toLowerCase().replace('#', '');
+              const fullHex = fillHex.length === 6 ? fillHex : null;
+              if (fullHex && colorToCluster.has('#' + fullHex)) {
+                clusterIdx = colorToCluster.get('#' + fullHex);
+              }
+            }
+          }
+        }
+      }
+      
+      // Aplicar cambio
+      if (clusterIdx !== null && mapping.has(clusterIdx)) {
+        const dayuColor = mapping.get(clusterIdx);
+        
+        // Guardar original
+        if (!textEl.dataset.originalText) {
+          textEl.dataset.originalText = currentText;
+        }
+        
+        textEl.textContent = dayuColor.code;
+        textEl.dataset.clusterIdx = clusterIdx;
+        
+        // Actualizar faceta
+        const parent = textEl.parentElement;
+        if (parent) {
+          const shapes = parent.querySelectorAll('path, polygon, rect');
+          shapes.forEach(shape => {
+            const fill = shape.getAttribute('fill');
+            if (fill && fill !== 'none') {
+              if (!shape.dataset.originalFill) {
+                shape.dataset.originalFill = fill;
+              }
+              shape.setAttribute('fill', dayuColor.hex);
+              shape.style.fill = dayuColor.hex;
+            }
+          });
+        }
+        
+        updated++;
       }
     });
     
-    console.log(`✅ SVG actualizado: ${updated} etiquetas`);
+    console.log(`✅ SVG: ${updated} etiquetas actualizadas`);
     return updated > 0;
   }
   
@@ -220,27 +320,31 @@
   // ============================================
   
   function makeBoxesEditable() {
-    const boxes = document.querySelectorAll('div[data-dayu-code]');
+    const boxes = Array.from(document.querySelectorAll('div[data-dayu-code]'));
+    
+    console.log(`✏️ Haciendo ${boxes.length} cajitas editables...`);
     
     boxes.forEach(box => {
-      // Remover listeners anteriores
+      // Clonar para remover listeners
       const newBox = box.cloneNode(true);
       box.parentNode.replaceChild(newBox, box);
       
-      // Estilo visual
+      // Estilo
       newBox.style.cursor = 'pointer';
-      newBox.style.transition = 'transform 0.2s, box-shadow 0.2s';
-      newBox.title = 'Clic para editar código DAYU (ej: 64, 67, WG3)';
+      newBox.style.transition = 'all 0.2s';
+      newBox.title = '🖱️ Clic para editar\nEjemplos: 64, WG3, BG5';
       
-      // Hover effect
+      // Hover
       newBox.addEventListener('mouseenter', () => {
-        newBox.style.transform = 'scale(1.1)';
-        newBox.style.boxShadow = '0 0 10px rgba(0,0,0,0.3)';
+        newBox.style.transform = 'scale(1.15)';
+        newBox.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+        newBox.style.zIndex = '1000';
       });
       
       newBox.addEventListener('mouseleave', () => {
         newBox.style.transform = 'scale(1)';
         newBox.style.boxShadow = '';
+        newBox.style.zIndex = '';
       });
       
       // Click para editar
@@ -248,22 +352,23 @@
         e.stopPropagation();
         
         const currentCode = this.textContent.trim();
-        const originalIdx = parseInt(this.dataset.originalIdx);
+        const clusterIdx = parseInt(this.dataset.clusterIdx);
         
-        // Crear input
+        // Input
         const input = document.createElement('input');
         input.type = 'text';
         input.value = currentCode;
         input.style.cssText = `
           width: 100%;
           height: 100%;
-          border: 3px solid #2196F3;
+          border: 3px solid #FF5722;
           text-align: center;
           font-size: inherit;
           font-weight: bold;
           box-sizing: border-box;
           background: white;
           color: black;
+          padding: 0;
         `;
         
         this.textContent = '';
@@ -272,21 +377,21 @@
         input.select();
         
         const applyChange = () => {
-          const newCodeInput = input.value.trim().toUpperCase();
+          const newCode = input.value.trim().toUpperCase();
           
-          // Buscar en DAYU_PALETTE
+          // Buscar en DAYU
           const newDayuColor = window.DAYU_PALETTE.find(c => 
-            c.code.toUpperCase() === newCodeInput
+            c.code.toUpperCase() === newCode
           );
           
           if (newDayuColor) {
-            // Actualizar mapping global
+            // Actualizar mapping
             if (currentMapping) {
-              currentMapping.set(originalIdx, {
+              currentMapping.set(clusterIdx, {
                 code: newDayuColor.code,
                 hex: newDayuColor.hex,
                 rgb: newDayuColor.rgb,
-                original: currentMapping.get(originalIdx).original
+                original: currentMapping.get(clusterIdx).original
               });
             }
             
@@ -297,24 +402,24 @@
             this.dataset.dayuColor = newDayuColor.hex;
             
             // Actualizar SVG
-            updateSVGForIndex(originalIdx, newDayuColor);
+            updateSVGForCluster(clusterIdx, newDayuColor);
             
-            console.log(`✏️ Editado: Cluster ${originalIdx} → ${newDayuColor.code}`);
-            
-            // Mostrar confirmación visual
+            // Animación
             this.style.animation = 'none';
             setTimeout(() => {
-              this.style.animation = 'pulse 0.5s';
+              this.style.animation = 'dayu-pulse 0.5s';
             }, 10);
             
+            console.log(`✏️ Editado: Cluster ${clusterIdx} → ${newDayuColor.code}`);
+            
           } else {
-            alert(`❌ Código "${newCodeInput}" no encontrado en paleta DAYU\n\nEjemplos válidos:\n- Números: 64, 67, 121\n- Códigos: WG3, BG5, CG7`);
+            alert(`❌ Código "${newCode}" no encontrado\n\n✅ Ejemplos válidos:\n• 64, 67, 121, 167\n• WG3, BG5, CG7\n• GG1, GG3, GG5`);
             this.textContent = currentCode;
           }
         };
         
         input.addEventListener('blur', applyChange);
-        input.addEventListener('keypress', (e) => {
+        input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') {
             applyChange();
           } else if (e.key === 'Escape') {
@@ -323,19 +428,16 @@
         });
       });
     });
-    
-    console.log(`✏️ ${boxes.length} cajitas ahora son editables`);
   }
   
-  function updateSVGForIndex(idx, newDayuColor) {
+  function updateSVGForCluster(clusterIdx, newDayuColor) {
     const svg = document.querySelector('svg');
     if (!svg) return;
     
-    const texts = svg.querySelectorAll('text[data-original-idx="' + idx + '"]');
+    const texts = svg.querySelectorAll(`text[data-cluster-idx="${clusterIdx}"]`);
     texts.forEach(textEl => {
       textEl.textContent = newDayuColor.code;
       
-      // Actualizar faceta
       const parent = textEl.parentElement;
       if (parent) {
         const shapes = parent.querySelectorAll('path, polygon, rect');
@@ -345,100 +447,103 @@
         });
       }
     });
+    
+    console.log(`🔄 SVG actualizado para cluster ${clusterIdx}`);
   }
   
   // ============================================
-  // RESET A COLORES ORIGINALES
+  // RESET
   // ============================================
   
   function resetToOriginal() {
-    console.log('🔄 Reseteando a colores originales...');
+    console.log('🔄 Reseteando...');
     
     // Reset cajitas
     const boxes = document.querySelectorAll('div[data-original-color]');
     boxes.forEach(box => {
-      const originalColor = box.dataset.originalColor;
-      const originalText = box.dataset.originalText;
-      
-      if (originalColor && originalText) {
-        box.style.backgroundColor = originalColor;
-        box.textContent = originalText;
-        box.style.cursor = 'default';
-        box.style.transform = '';
-        box.style.boxShadow = '';
-        box.title = '';
-      }
+      box.style.backgroundColor = box.dataset.originalColor;
+      box.textContent = box.dataset.originalText;
+      box.style.cursor = 'default';
+      box.style.transform = '';
+      box.title = '';
+      delete box.dataset.clusterIdx;
+      delete box.dataset.dayuCode;
     });
     
     // Reset SVG
     const svg = document.querySelector('svg');
     if (svg) {
       const texts = svg.querySelectorAll('text[data-original-text]');
-      texts.forEach(textEl => {
-        textEl.textContent = textEl.dataset.originalText;
+      texts.forEach(t => {
+        t.textContent = t.dataset.originalText;
       });
       
       const shapes = svg.querySelectorAll('[data-original-fill]');
-      shapes.forEach(shape => {
-        shape.setAttribute('fill', shape.dataset.originalFill);
-        shape.style.fill = shape.dataset.originalFill;
+      shapes.forEach(s => {
+        s.setAttribute('fill', s.dataset.originalFill);
       });
     }
     
+    // Mostrar cajitas ocultas
+    const hidden = document.querySelectorAll('div[style*="display: none"]');
+    hidden.forEach(box => {
+      if (/^\d+$/.test(box.textContent.trim())) {
+        box.style.display = '';
+      }
+    });
+    
     currentMapping = null;
-    console.log('✅ Reset completado');
+    console.log('✅ Reset completo');
   }
   
   // ============================================
-  // PROCESO PRINCIPAL
+  // APLICAR DAYU
   // ============================================
   
   function aplicarDayu() {
     console.log('🎨 === APLICAR DAYU ===');
     
-    // 1. Extraer paleta
+    // 1. Ocultar duplicados
+    hideExtraBoxes();
+    
+    // 2. Extraer paleta
     const palette = extractPalette();
     if (!palette || palette.size === 0) {
-      alert('❌ No se pudo extraer la paleta.\n\nAsegúrate de haber generado la imagen primero.');
+      alert('❌ No se encontraron cajitas de color.\n\nGenera la imagen primero.');
       return;
     }
     
     originalPalette = palette;
-    console.log(`📊 Paleta extraída: ${palette.size} colores`);
     
-    // 2. Mapear a DAYU
+    // 3. Mapear
     const mapping = mapToDayu(palette);
     if (!mapping) {
-      alert('❌ Error al mapear a paleta DAYU');
+      alert('❌ Error al mapear');
       return;
     }
     
     currentMapping = mapping;
     
-    // 3. Actualizar cajitas
+    // 4. Actualizar
     updateBoxes(mapping, palette);
-    
-    // 4. Actualizar SVG
-    updateSVG(mapping);
-    
-    // 5. Hacer cajitas editables
+    updateSVG(mapping, palette);
     makeBoxesEditable();
     
-    // Agregar animación CSS si no existe
+    // 5. Agregar CSS
     if (!document.getElementById('dayu-styles')) {
       const style = document.createElement('style');
       style.id = 'dayu-styles';
       style.textContent = `
-        @keyframes pulse {
+        @keyframes dayu-pulse {
           0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.2); }
+          50% { transform: scale(1.3); }
         }
       `;
       document.head.appendChild(style);
     }
     
-    console.log('🎉 === DAYU APLICADO ===');
-    alert(`✅ ¡DAYU aplicado correctamente!\n\n${mapping.size} colores mapeados\n\n💡 Tip: Haz clic en cualquier cajita de color para cambiar el código DAYU manualmente.\n\nEjemplos: 64, 67, WG3, BG5, CG7`);
+    console.log('🎉 ¡COMPLETADO!');
+    alert(`✅ DAYU aplicado: ${mapping.size} colores\n\n💡 Haz clic en cualquier cajita de arriba para editarla\n\nEjemplos: 64, WG3, BG5, CG7`);
   }
   
   // ============================================
@@ -446,103 +551,60 @@
   // ============================================
   
   function conectarBotones() {
-    // Buscar botones existentes
     const buttons = Array.from(document.querySelectorAll('button'));
     
-    const aplicarBtn = buttons.find(b => 
-      b.textContent.includes('APLICAR DAYU') || 
-      b.textContent.includes('APLICAR')
-    );
-    
-    const resetBtn = buttons.find(b => 
-      b.textContent.includes('RESET') || 
-      b.textContent.includes('VOLVER')
-    );
+    const aplicarBtn = buttons.find(b => b.textContent.includes('APLICAR'));
+    const resetBtn = buttons.find(b => b.textContent.includes('RESET'));
     
     if (aplicarBtn) {
-      // Clonar para remover listeners anteriores
       const newBtn = aplicarBtn.cloneNode(true);
       aplicarBtn.parentNode.replaceChild(newBtn, aplicarBtn);
-      
       newBtn.addEventListener('click', aplicarDayu);
-      console.log('✅ Botón APLICAR DAYU conectado');
-    } else {
-      console.warn('⚠️ No se encontró botón APLICAR DAYU');
+      console.log('✅ Botón APLICAR conectado');
     }
     
     if (resetBtn) {
       const newBtn = resetBtn.cloneNode(true);
       resetBtn.parentNode.replaceChild(newBtn, resetBtn);
-      
       newBtn.addEventListener('click', resetToOriginal);
       console.log('✅ Botón RESET conectado');
-    } else {
-      console.warn('⚠️ No se encontró botón RESET');
     }
   }
   
   // ============================================
-  // INICIALIZACIÓN
+  // INIT
   // ============================================
   
   function init() {
     if (!window.DAYU_PALETTE) {
-      console.error('❌ DAYU_PALETTE no está cargada');
-      console.error('Asegúrate de cargar dayu_palette.js antes de dayu_system_final.js');
+      console.error('❌ DAYU_PALETTE no cargada');
       return;
     }
     
-    console.log(`✅ DAYU_PALETTE cargada: ${window.DAYU_PALETTE.length} colores`);
+    console.log(`✅ DAYU: ${window.DAYU_PALETTE.length} colores`);
     
-    // Intentar conectar botones cuando estén disponibles
-    const tryConnect = () => {
-      const aplicarBtn = Array.from(document.querySelectorAll('button'))
-        .find(b => b.textContent.includes('APLICAR'));
-      
-      if (aplicarBtn) {
-        conectarBotones();
-      } else {
-        // Intentar de nuevo en 500ms
-        setTimeout(tryConnect, 500);
-      }
-    };
+    setTimeout(conectarBotones, 1000);
     
-    tryConnect();
-    
-    // Observer para detectar cuando se agregan botones nuevos
     const observer = new MutationObserver(() => {
-      const aplicarBtn = Array.from(document.querySelectorAll('button'))
+      const btn = Array.from(document.querySelectorAll('button'))
         .find(b => b.textContent.includes('APLICAR') && !b.onclick);
-      
-      if (aplicarBtn) {
-        conectarBotones();
-      }
+      if (btn) conectarBotones();
     });
     
-    observer.observe(document.body, { 
-      childList: true, 
-      subtree: true 
-    });
+    observer.observe(document.body, { childList: true, subtree: true });
     
-    console.log('✅ DAYU System Final inicializado');
-    console.log('📝 Usa el checkbox "Usar paleta Dayu" y el botón "APLICAR DAYU"');
+    console.log('✅ DAYU System v2 listo');
   }
   
-  // Esperar DOMContentLoaded
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
   
-  // API pública
   window.DAYU_SYSTEM = {
     aplicar: aplicarDayu,
-    reset: resetToOriginal,
-    getMapping: () => currentMapping,
-    getPalette: () => originalPalette
+    reset: resetToOriginal
   };
-  
-  console.log('✅ window.DAYU_SYSTEM disponible');
   
 })();
