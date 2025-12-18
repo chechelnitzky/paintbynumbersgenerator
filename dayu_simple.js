@@ -1,10 +1,10 @@
-/* dayu_simple.js - v19: Fixes para bugs de toggle múltiple */
+/* dayu_simple.js - v20: Sin observers, solo manual */
 
 (function() {
   'use strict';
   
-  const VERSION = 'v19';
-  console.log(`🎨 DAYU ${VERSION} - Fixes críticos`);
+  const VERSION = 'v20';
+  console.log(`🎨 DAYU ${VERSION} - Versión simplificada sin loops`);
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -12,11 +12,7 @@
   }
   
   window.dayuMapping = window.dayuMapping || {};
-  
-  let svgObserver = null;
-  let paletaObserver = null;
-  let isUpdating = false;
-  let isRegenerating = false; // FLAG NUEVO para evitar loops
+  let isRegenerating = false;
   
   // ======================
   // UTILIDADES
@@ -56,12 +52,12 @@
   }
   
   // ======================
-  // REGENERAR SVG CON UN TOGGLE
+  // REGENERAR SVG
   // ======================
   
   function regenerarSVGConToggle() {
     if (isRegenerating) {
-      console.log('⚠️ Ya está regenerando, ignorando llamada duplicada');
+      console.log('⚠️ Ya regenerando, ignorando');
       return false;
     }
     
@@ -69,62 +65,53 @@
     console.log('🔄 Regenerando SVG...');
     
     const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
-    
     let borderCheckbox = checkboxes.find(cb => {
       const label = cb.parentElement?.textContent || '';
       return label.toLowerCase().includes('border');
     });
     
-    if (!borderCheckbox) {
-      const container = document.querySelector('.row') || document.body;
-      const allCheckboxes = Array.from(container.querySelectorAll('input[type="checkbox"]'));
-      borderCheckbox = allCheckboxes[allCheckboxes.length - 1];
-    }
-    
-    if (!borderCheckbox) {
-      borderCheckbox = checkboxes.find(cb => {
-        const rect = cb.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-      });
+    if (!borderCheckbox && checkboxes.length > 0) {
+      borderCheckbox = checkboxes[checkboxes.length - 1];
     }
     
     if (borderCheckbox) {
       const estadoOriginal = borderCheckbox.checked;
+      console.log(`Estado original: ${estadoOriginal ? 'ON' : 'OFF'}`);
       
-      console.log(`✅ Estado original: ${estadoOriginal ? 'ON' : 'OFF'}`);
-      
-      // Cambiar al estado contrario
+      // Toggle
       borderCheckbox.checked = !estadoOriginal;
       borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-      borderCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
       
-      // Volver al estado original
       setTimeout(() => {
         borderCheckbox.checked = estadoOriginal;
         borderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-        borderCheckbox.dispatchEvent(new Event('input', { bubbles: true }));
+        console.log(`Estado final: ${estadoOriginal ? 'ON' : 'OFF'}`);
         
-        console.log(`✅ Toggle completado, estado final: ${estadoOriginal ? 'ON' : 'OFF'}`);
-        
-        // Aplicar DAYU después de que se regenere
         setTimeout(() => {
-          const resultado = actualizarSVG();
-          mostrarStatus(`✅ Aplicado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
-          
-          // Liberar el flag después de completar
-          setTimeout(() => {
-            isRegenerating = false;
-            console.log('✅ Regeneración completada');
-          }, 100);
-        }, 300);
-      }, 100);
+          actualizarTodo();
+          isRegenerating = false;
+        }, 400);
+      }, 150);
       
       return true;
-    } else {
-      console.log('❌ No se encontró ningún checkbox');
-      isRegenerating = false;
-      return false;
     }
+    
+    isRegenerating = false;
+    return false;
+  }
+  
+  // ======================
+  // ACTUALIZAR TODO
+  // ======================
+  
+  function actualizarTodo() {
+    console.log('🎨 Actualizando cajitas y SVG...');
+    
+    actualizarCajitas();
+    const resultado = actualizarSVG();
+    
+    mostrarStatus(`✅ ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
+    console.log('✅ Actualización completada');
   }
   
   // ======================
@@ -135,7 +122,6 @@
     const p = document.getElementById('palette');
     if (!p) return false;
     
-    // Indicador de versión
     if (!document.getElementById('dayuVersion')) {
       const versionDiv = document.createElement('div');
       versionDiv.id = 'dayuVersion';
@@ -144,7 +130,6 @@
       p.parentNode.insertBefore(versionDiv, p);
     }
     
-    // Botón mapear
     if (!document.getElementById('btnDayu')) {
       const btn = document.createElement('button');
       btn.id = 'btnDayu';
@@ -155,7 +140,6 @@
       p.parentNode.insertBefore(btn, p);
     }
     
-    // Status
     if (!document.getElementById('dayuStatus')) {
       const status = document.createElement('div');
       status.id = 'dayuStatus';
@@ -173,8 +157,7 @@
     const colores = {
       info: {bg: '#e3f2fd', border: '#2196F3'},
       success: {bg: '#e8f5e9', border: '#4CAF50'},
-      warning: {bg: '#fff3e0', border: '#FF9800'},
-      error: {bg: '#ffebee', border: '#f44336'}
+      warning: {bg: '#fff3e0', border: '#FF9800'}
     };
     
     const c = colores[tipo];
@@ -185,7 +168,7 @@
   }
   
   // ======================
-  // MAPEO INICIAL
+  // MAPEO
   // ======================
   
   function iniciarMapeo() {
@@ -193,28 +176,20 @@
     
     const cajitas = obtenerCajitas();
     if (!cajitas.length) {
-      alert('❌ No se encontraron colores en la paleta');
+      alert('❌ No se encontraron colores');
       return;
     }
     
-    const coloresOriginales = cajitas.map((caja, idx) => {
-      const rgb = parseRgb(caja);
-      const num = caja.textContent.trim();
-      
-      return {
-        numero: num,
-        rgb: rgb,
-        caja: caja,
-        indice: idx
-      };
-    }).filter(c => c.rgb);
+    const coloresOriginales = cajitas.map(caja => ({
+      numero: caja.textContent.trim(),
+      rgb: parseRgb(caja),
+      caja: caja
+    })).filter(c => c.rgb);
     
     if (!coloresOriginales.length) {
-      alert('❌ No se pudieron extraer los colores');
+      alert('❌ No se pudieron extraer colores');
       return;
     }
-    
-    console.log(`📊 ${coloresOriginales.length} colores originales detectados`);
     
     const distancias = [];
     coloresOriginales.forEach(orig => {
@@ -239,9 +214,7 @@
     window.dayuMapping = {};
     
     for (const d of distancias) {
-      if (numerosUsados.has(d.numOriginal) || dayuUsados.has(d.dayuIdx)) {
-        continue;
-      }
+      if (numerosUsados.has(d.numOriginal) || dayuUsados.has(d.dayuIdx)) continue;
       
       numerosUsados.add(d.numOriginal);
       dayuUsados.add(d.dayuIdx);
@@ -254,24 +227,15 @@
         hexOriginal: hex(d.rgbOriginal)
       };
       
-      if (Object.keys(window.dayuMapping).length === coloresOriginales.length) {
-        break;
-      }
+      if (Object.keys(window.dayuMapping).length === coloresOriginales.length) break;
     }
     
-    console.log('✅ Mapeo creado:', window.dayuMapping);
-    
-    actualizarCajitas();
-    const resultado = actualizarSVG();
-    iniciarObservers();
-    
-    mostrarStatus(`✅ Mapeo completado: ${Object.keys(window.dayuMapping).length} colores | ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
-    
-    console.log('🎉 Mapeo completado');
+    console.log('✅ Mapeo creado');
+    actualizarTodo();
   }
   
   // ======================
-  // ACTUALIZAR CAJITAS
+  // CAJITAS
   // ======================
   
   function obtenerCajitas() {
@@ -285,9 +249,6 @@
   }
   
   function actualizarCajitas() {
-    if (isUpdating) return;
-    isUpdating = true;
-    
     const cajitas = obtenerCajitas();
     
     cajitas.forEach(caja => {
@@ -299,15 +260,10 @@
         caja.style.backgroundColor = dayu.hex;
         caja.textContent = dayu.code;
         caja.dataset.numOriginal = numActual;
-        caja.dataset.dayuCode = dayu.code;
-        caja.dataset.editable = 'true';
         
         hacerEditable(caja);
       }
     });
-    
-    isUpdating = false;
-    console.log('🎨 Cajitas actualizadas');
   }
   
   function hacerEditable(caja) {
@@ -315,7 +271,7 @@
     caja.parentNode.replaceChild(nueva, caja);
     
     nueva.style.cursor = 'pointer';
-    nueva.title = 'Clic para editar → Enter para aplicar';
+    nueva.title = 'Clic → Enter para aplicar';
     
     nueva.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -326,8 +282,6 @@
   function editarCajita(caja) {
     const numOriginal = caja.dataset.numOriginal;
     const codigoActual = caja.textContent.trim();
-    
-    console.log(`✏️ Editando color ${numOriginal} (actual: ${codigoActual})`);
     
     const inp = document.createElement('input');
     inp.value = codigoActual;
@@ -349,12 +303,11 @@
       const dayu = encontrarDayuPorCodigo(nuevoCodigo);
       
       if (!dayu) {
-        alert(`❌ "${nuevoCodigo}" no existe en la paleta DAYU`);
+        alert(`❌ "${nuevoCodigo}" no existe`);
         caja.textContent = codigoActual;
         return;
       }
       
-      // Actualizar el mapeo
       window.dayuMapping[numOriginal] = {
         code: dayu.code,
         hex: dayu.hex,
@@ -363,19 +316,13 @@
         hexOriginal: window.dayuMapping[numOriginal].hexOriginal
       };
       
-      // Actualizar cajita
       caja.textContent = dayu.code;
       caja.style.backgroundColor = dayu.hex;
-      caja.dataset.dayuCode = dayu.code;
       
-      console.log(`✅ Color ${numOriginal} cambiado a ${dayu.code}`);
-      
-      // REGENERAR AUTOMÁTICAMENTE
+      console.log(`✅ ${numOriginal} → ${dayu.code}`);
       mostrarStatus(`⏳ Aplicando ${dayu.code}...`, 'info');
       
-      setTimeout(() => {
-        regenerarSVGConToggle();
-      }, 50);
+      setTimeout(() => regenerarSVGConToggle(), 100);
     };
     
     inp.addEventListener('blur', aplicarCambio);
@@ -391,37 +338,28 @@
   }
   
   // ======================
-  // ACTUALIZAR SVG
+  // SVG
   // ======================
   
   function actualizarSVG() {
     const svg = document.querySelector('#svgContainer svg');
-    if (!svg) {
-      console.log('⚠️ SVG no encontrado');
-      return {textos: 0, colores: 0};
-    }
-    
-    if (Object.keys(window.dayuMapping).length === 0) {
-      console.log('⚠️ No hay mapeo activo');
+    if (!svg || Object.keys(window.dayuMapping).length === 0) {
       return {textos: 0, colores: 0};
     }
     
     let textos = 0;
     let colores = 0;
     
-    // ACTUALIZAR TEXTOS - Solo los que están en el mapeo
+    // Textos
     svg.querySelectorAll('text').forEach(texto => {
       const contenido = texto.textContent.trim();
-      
-      // Solo actualizar si es un número que tenemos mapeado
       if (window.dayuMapping[contenido]) {
         texto.textContent = window.dayuMapping[contenido].code;
-        texto.dataset.numOriginal = contenido;
         textos++;
       }
     });
     
-    // ACTUALIZAR COLORES
+    // Colores
     svg.querySelectorAll('path, polygon').forEach(area => {
       const style = area.getAttribute('style');
       if (!style) return;
@@ -442,136 +380,33 @@
       
       if (!rgbActual) return;
       
-      // Buscar el MEJOR match por distancia
       let mejorMatch = null;
       let menorDistancia = Infinity;
       
       for (const [numOriginal, dayu] of Object.entries(window.dayuMapping)) {
         const distancia = dist(rgbActual, dayu.rgbOriginal);
-        
         if (distancia < menorDistancia) {
           menorDistancia = distancia;
           mejorMatch = {numOriginal, dayu};
         }
       }
       
-      // Solo aplicar si la distancia es razonable (< 100)
       if (mejorMatch && menorDistancia < 100) {
-        let nuevoStyle;
-        
-        if (esHex) {
-          nuevoStyle = style.replace(/fill:\s*#[0-9a-fA-F]{3,6}/, `fill: ${mejorMatch.dayu.hex}`);
-        } else {
-          nuevoStyle = style.replace(/fill:\s*rgb\([^)]+\)/, `fill: ${mejorMatch.dayu.hex}`);
-        }
+        let nuevoStyle = esHex 
+          ? style.replace(/fill:\s*#[0-9a-fA-F]{3,6}/, `fill: ${mejorMatch.dayu.hex}`)
+          : style.replace(/fill:\s*rgb\([^)]+\)/, `fill: ${mejorMatch.dayu.hex}`);
         
         area.setAttribute('style', nuevoStyle);
-        area.dataset.numOriginal = mejorMatch.numOriginal;
         colores++;
       }
     });
     
-    console.log(`✅ SVG actualizado: ${textos} textos, ${colores} colores`);
+    console.log(`✅ SVG: ${textos}t, ${colores}c`);
     return {textos, colores};
   }
   
   // ======================
-  // OBSERVERS
-  // ======================
-  
-  function iniciarObservers() {
-    iniciarObserverSVG();
-    iniciarObserverPaleta();
-  }
-  
-  function iniciarObserverSVG() {
-    const container = document.getElementById('svgContainer');
-    if (!container) {
-      setTimeout(iniciarObserverSVG, 500);
-      return;
-    }
-    
-    if (svgObserver) {
-      svgObserver.disconnect();
-    }
-    
-    svgObserver = new MutationObserver(() => {
-      // NO re-aplicar si estamos regenerando manualmente
-      if (isUpdating || isRegenerating) return;
-      
-      const svg = container.querySelector('svg');
-      if (!svg) return;
-      
-      const textos = Array.from(svg.querySelectorAll('text'));
-      const tieneNumerosOriginales = textos.some(t => {
-        const txt = t.textContent.trim();
-        return /^\d+$/.test(txt) && parseInt(txt) < 50 && !t.dataset.numOriginal;
-      });
-      
-      if (tieneNumerosOriginales && Object.keys(window.dayuMapping).length > 0) {
-        console.log('🔄 SVG regenerado por slider, re-aplicando...');
-        
-        setTimeout(() => {
-          const resultado = actualizarSVG();
-          mostrarStatus(`🔄 Auto-aplicado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
-        }, 150);
-      }
-    });
-    
-    svgObserver.observe(container, {
-      childList: true,
-      subtree: true
-    });
-    
-    console.log('👁️ Observer SVG activo');
-  }
-  
-  function iniciarObserverPaleta() {
-    const palette = document.getElementById('palette');
-    if (!palette) {
-      setTimeout(iniciarObserverPaleta, 500);
-      return;
-    }
-    
-    if (paletaObserver) {
-      paletaObserver.disconnect();
-    }
-    
-    paletaObserver = new MutationObserver(() => {
-      if (isUpdating || isRegenerating) return;
-      
-      const cajitas = obtenerCajitas();
-      const tieneNumerosOriginales = cajitas.some(c => {
-        const txt = c.textContent.trim();
-        return /^\d+$/.test(txt) && parseInt(txt) < 50 && !c.dataset.editable;
-      });
-      
-      if (tieneNumerosOriginales && Object.keys(window.dayuMapping).length > 0) {
-        console.log('🔄 Paleta regenerada, re-aplicando...');
-        
-        setTimeout(() => {
-          actualizarCajitas();
-        }, 100);
-      }
-    });
-    
-    paletaObserver.observe(palette, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      characterDataOldValue: true
-    });
-    
-    console.log('👁️ Observer Paleta activo');
-  }
-  
-  function detenerObservers() {
-    if (svgObserver) svgObserver.disconnect();
-    if (paletaObserver) paletaObserver.disconnect();
-  }
-  
-  // ======================
-  // INICIALIZACIÓN
+  // INIT
   // ======================
   
   function init() {
@@ -590,29 +425,9 @@
     setTimeout(init, 500);
   }
   
-  // ======================
-  // API PÚBLICA
-  // ======================
-  
-  window.dayuInfo = () => {
-    console.log(`📊 DAYU ${VERSION} Estado:`);
-    console.log('Mapeo:', window.dayuMapping);
-    console.log('Total colores:', Object.keys(window.dayuMapping).length);
-    console.log('Observer SVG:', !!svgObserver);
-    console.log('Observer Paleta:', !!paletaObserver);
-    console.log('Regenerando:', isRegenerating);
-  };
-  
-  window.reaplicarDayu = () => {
-    actualizarCajitas();
-    return actualizarSVG();
-  };
-  
-  window.dayuVersion = () => {
-    console.log(`🎨 DAYU ${VERSION}`);
-    return VERSION;
-  };
-  
+  // API
+  window.dayuVersion = () => VERSION;
+  window.dayuInfo = () => console.log('Mapeo:', window.dayuMapping);
   window.regenerarSVG = regenerarSVGConToggle;
   
   console.log(`✅ DAYU ${VERSION} cargado`);
