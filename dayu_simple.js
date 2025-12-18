@@ -1,9 +1,10 @@
-/* dayu_simple.js - v12: Sincronización completa cajitas ↔ SVG */
+/* dayu_simple.js - v13: Botón regenerar + Indicador de versión */
 
 (function() {
   'use strict';
   
-  console.log('🎨 DAYU v12 - Sincronización total');
+  const VERSION = 'v13';
+  console.log(`🎨 DAYU ${VERSION} - Regeneración manual + Indicador`);
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -62,6 +63,15 @@
     const p = document.getElementById('palette');
     if (!p) return false;
     
+    // Indicador de versión
+    if (!document.getElementById('dayuVersion')) {
+      const versionDiv = document.createElement('div');
+      versionDiv.id = 'dayuVersion';
+      versionDiv.textContent = `DAYU ${VERSION}`;
+      versionDiv.style.cssText = 'display:inline-block;margin:0 10px 5px 0;padding:4px 10px;background:#9C27B0;color:white;border-radius:3px;font-size:11px;font-weight:bold;letter-spacing:0.5px;';
+      p.parentNode.insertBefore(versionDiv, p);
+    }
+    
     // Botón mapear
     if (!document.getElementById('btnDayu')) {
       const btn = document.createElement('button');
@@ -71,6 +81,22 @@
       btn.style.cssText = 'margin:10px 5px 10px 0;background:linear-gradient(135deg,#667eea,#764ba2);font-weight:bold;';
       btn.onclick = iniciarMapeo;
       p.parentNode.insertBefore(btn, p);
+    }
+    
+    // Botón regenerar SVG (nuevo)
+    if (!document.getElementById('btnRegenerar')) {
+      const btnRegen = document.createElement('button');
+      btnRegen.id = 'btnRegenerar';
+      btnRegen.textContent = '🔄 REGENERAR SVG';
+      btnRegen.className = 'waves-effect waves-light btn';
+      btnRegen.style.cssText = 'margin:10px 5px;background:#00BCD4;font-weight:bold;display:none;';
+      btnRegen.onclick = () => {
+        console.log('🔄 Regenerando SVG manualmente...');
+        actualizarCajitas();
+        const resultado = actualizarSVG();
+        mostrarStatus(`🔄 SVG regenerado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'info');
+      };
+      p.parentNode.insertBefore(btnRegen, p);
     }
     
     // Botón limpiar
@@ -117,6 +143,14 @@
     status.style.background = c.bg;
     status.style.borderColor = c.border;
     status.textContent = mensaje;
+  }
+  
+  function mostrarBotonesActivos() {
+    const btnRegenerar = document.getElementById('btnRegenerar');
+    const btnLimpiar = document.getElementById('btnLimpiar');
+    
+    if (btnRegenerar) btnRegenerar.style.display = 'inline-block';
+    if (btnLimpiar) btnLimpiar.style.display = 'inline-block';
   }
   
   // ======================
@@ -210,9 +244,8 @@
     // Iniciar observers
     iniciarObservers();
     
-    // Mostrar botón limpiar
-    const btnLimpiar = document.getElementById('btnLimpiar');
-    if (btnLimpiar) btnLimpiar.style.display = 'inline-block';
+    // Mostrar botones activos
+    mostrarBotonesActivos();
     
     // Status
     mostrarStatus(`✅ Mapeo completado: ${Object.keys(window.dayuMapping).length} colores | ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
@@ -534,7 +567,7 @@
     const intervalo = setInterval(() => {
       if (crearBotones() || ++intentos > 30) {
         clearInterval(intervalo);
-        console.log('✅ DAYU v12 inicializado');
+        console.log(`✅ DAYU ${VERSION} inicializado`);
       }
     }, 500);
   }
@@ -550,7 +583,7 @@
   // ======================
   
   window.dayuInfo = () => {
-    console.log('📊 DAYU Estado:');
+    console.log(`📊 DAYU ${VERSION} Estado:`);
     console.log('Mapeo:', window.dayuMapping);
     console.log('Total colores:', Object.keys(window.dayuMapping).length);
     console.log('Observer SVG:', !!svgObserver);
@@ -562,5 +595,10 @@
     return actualizarSVG();
   };
   
-  console.log('✅ DAYU v12 cargado');
+  window.dayuVersion = () => {
+    console.log(`🎨 DAYU ${VERSION}`);
+    return VERSION;
+  };
+  
+  console.log(`✅ DAYU ${VERSION} cargado`);
 })();
