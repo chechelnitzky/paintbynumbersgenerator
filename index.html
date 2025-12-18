@@ -577,6 +577,171 @@
 })();
 </script>
 
+    <script>
+(() => {
+  // Ajusta esto si quieres más intentos automáticos
+  const MAX_RETRIES = 10;
+
+  let armed = false;     // solo se activa cuando tú apretas "Process image"
+  let retries = 0;
+  let debounceTimer = null;
+
+  function toast(msg) {
+    try {
+      if (window.M && typeof M.toast === "function") {
+        M.toast({ html: msg });
+      } else {
+        console.log(msg);
+      }
+    } catch (e) {
+      console.log(msg);
+    }
+  }
+
+  function getInt(id, fallback = 0) {
+    const el = document.getElementById(id);
+    const n = parseInt(el?.value ?? "", 10);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function setVal(id, v) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = String(v);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function getDesiredK() {
+    const k = getInt("txtNrOfClusters", 0);
+    return k > 0 ? k : null;
+  }
+
+  // Cuenta colores usados desde el SVG (lo más fiel a “se usó o no se usó”)
+  // OJO: esto requiere que "Fill facets" esté ACTIVADO al generar.
+  function getUsedColorCount() {
+    const svg = document.querySelector("#svgContainer svg");
+    if (!svg) return null;
+
+    const fills = new Set();
+    svg.querySelectorAll("[fill]").forEach(el => {
+      const f = (el.getAttribute("fill") || "").trim().toLowerCase();
+      if (!f) return;
+      if (f === "none" || f === "transparent") return;
+      fills.add(f);
+    });
+
+    if (fills.size > 0) return fills.size;
+
+    // Fallback: contar “swatches” del palette si el SVG no tiene fills por algún motivo
+    const pal = document.getElementById("palette");
+    if (!pal) return null;
+
+    const bgs = new Set();
+    pal.querySelectorAll("*").forEach(el => {
+      const cs = getComputedStyle(el);
+      const bg = cs?.backgroundColor;
+      if (!bg || bg === "rgba(0, 0, 0, 0)") return;
+      if ((el.offsetWidth || 0) < 12 || (el.offsetHeight || 0) < 12) return;
+      bgs.add(bg);
+    });
+
+    return bgs.size > 0 ? bgs.size : null;
+  }
+
+  // Si salen MENOS colores que K, volvemos el proceso menos destructivo
+  function tweakForMoreColors() {
+    // 1) bajar agresividad del pruning (esto es lo que más “mata colores”)
+    const removeSmall = getInt("txtRemoveFacetsSmallerThan", 20);
+    if (removeSmall > 1) {
+      setVal("txtRemoveFacetsSmallerThan", Math.max(1, Math.floor(removeSmall / 2)));
+    } else {
+      // 2) si ya estamos en 1, bajamos narrow cleanup
+      const runs = getInt("txtNarrowPixelStripCleanupRuns", 3);
+      if (runs > 0) setVal("txtNarrowPixelStripCleanupRuns", runs - 1);
+
+      // 3) subir máximo de facets para que no “aplane” de más
+      const maxFacets = getInt("txtMaximumNumberOfFacets", 100000);
+      if (maxFacets < 200000) setVal("txtMaximumNumberOfFacets", 200000);
+    }
+
+    // 4) cambiar seed para que el kmeans encuentre otra solución
+    const seed = getInt("txtRandomSeed", 0);
+    setVal("txtRandomSeed", seed + 1);
+  }
+
+  function clickProcess() {
+    const btn = document.getElementById("btnProcess");
+    if (btn) btn.click();
+  }
+
+  function enforceExactK() {
+    if (!armed) return;
+
+    // Debounce: esperamos un pelín después de que cambie el SVG/paleta
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const desired = getDesiredK();
+      const used = getUsedColorCount();
+
+      if (!desired || !used) return;
+
+      if (used === desired) {
+        toast(`✅ Listo: usando exactamente ${desired} colores.`);
+        armed = false;
+        retries = 0;
+        return;
+      }
+
+      // Si se pasó (raro), igual te aviso y no lo fuerzo (porque implica “matar” colores)
+      if (used > desired) {
+        toast(`⚠️ Salieron ${used} colores (más que ${desired}). Sube "Remove small facets" si quieres bajar detalle.`);
+        armed = false;
+        retries = 0;
+        return;
+      }
+
+      // Si faltan colores: reintentar ajustando
+      if (retries >= MAX_RETRIES) {
+        toast(`❌ No logré forzar ${desired} colores (me quedé en ${used}). Baja manualmente "Remove small facets" y/o "Narrow cleanup".`);
+        armed = false;
+        retries = 0;
+        return;
+      }
+
+      retries++;
+      toast(`🔁 Faltan colores (${used}/${desired}). Reintentando ${retries}/${MAX_RETRIES}…`);
+
+      tweakForMoreColors();
+      clickProcess();
+    }, 250);
+  }
+
+  window.addEventListener("DOMContentLoaded", () => {
+    // Armamos el modo “forzar” SOLO cuando tú apretas el botón
+    const btn = document.getElementById("btnProcess");
+    if (btn) {
+      // capture=true para que se marque antes del handler del generador
+      btn.addEventListener("click", () => {
+        armed = true;
+        retries = 0;
+      }, true);
+    }
+
+    // Observamos cambios en el SVG/paleta para saber cuándo terminó una corrida
+    const svgContainer = document.getElementById("svgContainer");
+    const palette = document.getElementById("palette");
+
+    if (svgContainer) {
+      new MutationObserver(enforceExactK).observe(svgContainer, { childList: true, subtree: true });
+    }
+    if (palette) {
+      new MutationObserver(enforceExactK).observe(palette, { childList: true, subtree: true });
+    }
+  });
+})();
+</script>
+
 
 </body>
 
