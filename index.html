@@ -419,17 +419,17 @@
 
         });
     </script>
-<!-- Load Dayu palette -->
-<!-- Dayu: load palette + force restrictions + rename SVG labels -->
+<!-- Dayu: load palette + force restrictions + rename SVG labels (v2 robust) -->
 <script src="./dayu_palette.js"></script>
 <script>
 (() => {
   const DAYU = Array.isArray(window.DAYU_PALETTE) ? window.DAYU_PALETTE : [];
-  const DAYU_BY_RGB = window.DAYU_BY_RGB instanceof Map
-    ? window.DAYU_BY_RGB
-    : new Map(DAYU.map(p => [p.rgb.join(','), p.code]));
+  if (!DAYU.length) {
+    console.warn('[DAYU] No se encontró window.DAYU_PALETTE. Revisa dayu_palette.js');
+    return;
+  }
 
-  const rgbRe = /^RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$/i;
+  const DAYU_BY_RGB = new Map(DAYU.map(p => [p.rgb.join(','), String(p.code).trim()]));
 
   const dist2 = (a,b) => {
     const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2];
@@ -438,68 +438,84 @@
 
   function fillKMeansRestrictionsWithDayu() {
     const ta = document.getElementById('txtKMeansColorRestrictions');
-    if (!ta || !DAYU.length) return;
-
-    // 167 líneas: "r,g,b"
+    if (!ta) return;
     ta.value = DAYU.map(p => p.rgb.join(',')).join('\n');
-    ta.setAttribute('readonly', 'readonly');
-
-    // si Materialize está activo, ajusta altura
-    if (window.M && typeof M.textareaAutoResize === 'function') {
-      M.textareaAutoResize(ta);
-    }
+    ta.setAttribute('readonly','readonly');
+    if (window.M && typeof M.textareaAutoResize === 'function') M.textareaAutoResize(ta);
   }
 
-  // Lee los RGB de la paleta final mostrada en #palette.
-  // IMPORTANT: el orden de los "RGB: ..." corresponde a índices 0..K-1.
-  function getIdxToRgbFromPaletteUI() {
-    const paletteEl = document.getElementById('palette');
-    if (!paletteEl) return null;
+  // ✅ Lee los RGB reales desde los cuadritos de #palette (background-color).
+  function getIdxToRgbFromPaletteSwatches() {
+    const palette = document.getElementById('palette');
+    if (!palette) return null;
 
-    const rgbEls = Array.from(paletteEl.querySelectorAll('*'))
-      .filter(el => rgbRe.test((el.textContent || '').trim()));
+    // Tomamos hijos directos o descendientes que parezcan "swatches"
+    const candidates = Array.from(palette.querySelectorAll('*'))
+      .filter(el => {
+        const cs = getComputedStyle(el);
+        // swatch típico: tiene background-color NO transparente y un tamaño visible
+        const bg = cs.backgroundColor || '';
+        const w = el.getBoundingClientRect().width;
+        const h = el.getBoundingClientRect().height;
+        return bg.startsWith('rgb') && w >= 10 && h >= 10;
+      });
 
-    if (!rgbEls.length) return null;
+    if (!candidates.length) return null;
 
+    // Intento 1: swatches que contienen texto numérico (0..K-1)
+    // Si no, usamos el orden en que aparecen (0..K-1).
     const idxToRgb = new Map();
-    rgbEls.forEach((el, idx) => {
-      const m = (el.textContent || '').trim().match(rgbRe);
-      idxToRgb.set(String(idx), [Number(m[1]), Number(m[2]), Number(m[3])]);
-    });
 
-    return idxToRgb;
+    let usedOrder = 0;
+    for (const el of candidates) {
+      const cs = getComputedStyle(el);
+      const m = (cs.backgroundColor || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+      if (!m) continue;
+
+      const rgb = [Number(m[1]), Number(m[2]), Number(m[3])];
+
+      const txt = (el.textContent || '').trim();
+      let idx = null;
+
+      if (/^\d+$/.test(txt)) idx = txt;         // si el swatch muestra "0", "1", etc.
+      else idx = String(usedOrder);             // fallback por orden
+      usedOrder++;
+
+      if (!idxToRgb.has(idx)) idxToRgb.set(idx, rgb);
+    }
+
+    return idxToRgb.size ? idxToRgb : null;
   }
 
   function buildIdxToCode(idxToRgb) {
     const idxToCode = new Map();
-    if (!idxToRgb || !idxToRgb.size || !DAYU.length) return idxToCode;
+    if (!idxToRgb) return idxToCode;
 
-    const used = new Set();
+    const usedCodes = new Set();
 
-    // 1) match exacto (ideal si el clustering quedó restringido a Dayu)
+    // 1) Match exacto
     for (const [idx, rgb] of idxToRgb.entries()) {
-      const key = rgb.join(',');
-      const code = DAYU_BY_RGB.get(key);
-      if (code) {
-        idxToCode.set(idx, code);
-        used.add(code);
+      const exact = DAYU_BY_RGB.get(rgb.join(','));
+      if (exact && !usedCodes.has(exact)) {
+        idxToCode.set(idx, exact);
+        usedCodes.add(exact);
       }
     }
 
-    // 2) fallback: nearest-unused (por si sale un RGB “casi igual”)
+    // 2) Fallback: nearest-unused (si el RGB no es exacto pero es cercano)
     for (const [idx, rgb] of idxToRgb.entries()) {
       if (idxToCode.has(idx)) continue;
 
       let best = null;
       for (const p of DAYU) {
-        if (used.has(p.code)) continue;
+        const code = String(p.code).trim();
+        if (usedCodes.has(code)) continue;
         const d = dist2(rgb, p.rgb);
-        if (!best || d < best.d) best = { code: p.code, d };
+        if (!best || d < best.d) best = { code, d };
       }
-
       if (best) {
         idxToCode.set(idx, best.code);
-        used.add(best.code);
+        usedCodes.add(best.code);
       }
     }
 
@@ -510,51 +526,65 @@
     const svg = document.querySelector('#svgContainer svg');
     if (!svg) return false;
 
-    let changed = false;
-    svg.querySelectorAll('text').forEach(t => {
-      const v = (t.textContent || '').trim();
+    // A veces el texto puede estar en <text> o <tspan>
+    const textNodes = svg.querySelectorAll('text, tspan');
+    if (!textNodes.length) return false;
+
+    let changed = 0;
+    textNodes.forEach(n => {
+      const v = (n.textContent || '').trim();
       if (idxToCode.has(v)) {
-        t.textContent = idxToCode.get(v);
-        changed = true;
+        n.textContent = idxToCode.get(v);
+        changed++;
       }
     });
 
-    return changed;
+    console.log('[DAYU] Renombrados:', changed, 'labels');
+    return changed > 0;
   }
 
-  function runDayuRelabel() {
-    const idxToRgb = getIdxToRgbFromPaletteUI();
-    if (!idxToRgb) return false;
+  function runRelabelOnce() {
+    const idxToRgb = getIdxToRgbFromPaletteSwatches();
+    if (!idxToRgb) {
+      console.log('[DAYU] No pude leer swatches desde #palette (aún).');
+      return false;
+    }
 
     const idxToCode = buildIdxToCode(idxToRgb);
-    if (!idxToCode.size) return false;
+    console.log('[DAYU] idxToRgb:', idxToRgb.size, 'idxToCode:', idxToCode.size);
 
     return relabelSvg(idxToCode);
   }
 
-  function armWatchers() {
+  function install() {
     fillKMeansRestrictionsWithDayu();
 
-    // Reintenta después de "Process image" mientras el SVG se genera
+    // Al apretar Process, reintenta varios segundos porque el SVG tarda en aparecer
     const btn = document.getElementById('btnProcess');
     if (btn) {
       btn.addEventListener('click', () => {
         let tries = 0;
         const timer = setInterval(() => {
           tries++;
-          const ok = runDayuRelabel();
-          if (ok || tries > 120) clearInterval(timer); // ~30s
+          const ok = runRelabelOnce();
+          if (ok || tries > 160) clearInterval(timer); // ~40s
         }, 250);
       });
     }
 
-    // Si regeneras, vuelve a renombrar
-    const target = document.getElementById('svgContainer') || document.body;
-    const obs = new MutationObserver(() => runDayuRelabel());
-    obs.observe(target, { childList: true, subtree: true });
+    // Si #palette o #svgContainer cambian, vuelve a intentar
+    const watchTargets = [
+      document.getElementById('palette'),
+      document.getElementById('svgContainer')
+    ].filter(Boolean);
+
+    const obs = new MutationObserver(() => runRelabelOnce());
+    watchTargets.forEach(t => obs.observe(t, { childList: true, subtree: true, characterData: true }));
+
+    console.log('[DAYU] Instalado OK');
   }
 
-  window.addEventListener('DOMContentLoaded', armWatchers);
+  window.addEventListener('DOMContentLoaded', install);
 })();
 </script>
 
