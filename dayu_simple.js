@@ -1,10 +1,10 @@
-/* dayu_simple.js - v15: Re-render tipo "Show Borders" + Tiempo real */
+/* dayu_simple.js - v15: Re-render REAL vía UI (borders/labels/facets/font/size) + Tiempo real */
 
 (function () {
   "use strict";
 
   const VERSION = "v15";
-  console.log(`🎨 DAYU ${VERSION} - Re-render tipo "Show Borders" + Tiempo real`);
+  console.log(`🎨 DAYU ${VERSION} - Re-render REAL vía UI + Tiempo real`);
 
   if (!window.DAYU_PALETTE) {
     console.error("❌ DAYU_PALETTE no encontrada");
@@ -16,7 +16,7 @@
   let svgObserver = null;
   let paletaObserver = null;
   let isUpdating = false;
-  let generarSVGOriginal = null; // Guardar la función original
+  let generarSVGOriginal = null;
 
   // ======================
   // UTILIDADES
@@ -75,11 +75,8 @@
   function forzarRegeneracionSVG() {
     console.log("🔄 Forzando regeneración del SVG (legacy)...");
 
-    // Método 1: Buscar el botón de generar SVG
     const btnGenerar =
       document.querySelector('button[onclick*="generate"]') ||
-      // Nota: ":contains" NO existe en querySelector nativo, se deja como fallback nulo
-      document.querySelector('button:contains("Generate")') ||
       Array.from(document.querySelectorAll("button")).find((b) => {
         const t = (b.textContent || "").toLowerCase();
         return t.includes("generate") || t.includes("generar");
@@ -91,25 +88,21 @@
       return true;
     }
 
-    // Método 2: Buscar función generateSVG en window
     if (typeof window.generateSVG === "function") {
       console.log("✅ Encontrada función generateSVG(), ejecutando...");
       window.generateSVG();
       return true;
     }
 
-    // Método 3: Simular cambio en el slider
     const slider = document.querySelector('input[type="range"]');
     if (slider) {
       console.log("✅ Simulando cambio en slider...");
       const valorActual = parseFloat(slider.value);
 
-      // Cambiar temporalmente
       slider.value = valorActual + 0.01;
       slider.dispatchEvent(new Event("input", { bubbles: true }));
       slider.dispatchEvent(new Event("change", { bubbles: true }));
 
-      // Volver al valor original
       setTimeout(() => {
         slider.value = valorActual;
         slider.dispatchEvent(new Event("input", { bubbles: true }));
@@ -124,129 +117,193 @@
   }
 
   // ======================
-  // FORZAR RE-RENDER (UI NUDGE tipo Show Borders)
+  // FORZAR RE-RENDER REAL (USANDO LOS CONTROLES QUE YA SABES QUE FUNCIONAN)
   // ======================
 
-  function forzarRerenderComoBorders() {
-    console.log('⚡ Forzando re-render estilo "Show borders"...');
+  function forzarRerenderComoUI() {
+    console.log("⚡ Forzando re-render usando controles reales (borders/labels/facets/font/size)...");
 
-    // A) Intentar encontrar el toggle/checkbox de "borders"
-    const candidates = Array.from(
-      document.querySelectorAll('input[type="checkbox"], button, a, label')
-    );
+    const fire = (el) => {
+      if (!el) return;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    };
 
-    const borderEl = candidates.find((el) => {
-      const t = (el.textContent || "").toLowerCase();
-      const aria =
-        (el.getAttribute &&
-          (el.getAttribute("aria-label") ||
-            el.getAttribute("title") ||
-            "")) ||
-        "";
-      const a = aria.toLowerCase();
+    const click = (el) => {
+      if (!el) return;
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    };
 
-      return (
-        t.includes("border") ||
-        t.includes("borde") ||
-        a.includes("border") ||
-        a.includes("borde")
+    function findControlByNearbyText(textIncludes) {
+      const needles = Array.isArray(textIncludes) ? textIncludes : [textIncludes];
+      const all = Array.from(
+        document.querySelectorAll("label, .input-field, .switch, .row, .col, div, span, p, a, button")
       );
-    });
 
-    // Si encontramos un checkbox real asociado a borders, hacemos toggle doble (y volvemos al estado original)
-    const checkbox =
-      borderEl && borderEl.tagName === "INPUT" && borderEl.type === "checkbox"
-        ? borderEl
-        : borderEl
-        ? borderEl.querySelector?.('input[type="checkbox"]')
-        : null;
+      const node = all.find((n) => {
+        const t = (n.textContent || "").toLowerCase();
+        const aria =
+          (n.getAttribute &&
+            (n.getAttribute("aria-label") || n.getAttribute("title") || "")) ||
+          "";
+        const a = aria.toLowerCase();
+        return needles.some((k) => t.includes(k) || a.includes(k));
+      });
 
-    if (checkbox) {
-      const original = checkbox.checked;
+      if (!node) return null;
 
-      checkbox.checked = !original;
-      checkbox.dispatchEvent(new Event("input", { bubbles: true }));
-      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+      const inside = node.querySelector?.("input, select, textarea, button");
+      if (inside) return inside;
 
-      setTimeout(() => {
-        checkbox.checked = original;
-        checkbox.dispatchEvent(new Event("input", { bubbles: true }));
-        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
-        console.log("✅ Re-render disparado via checkbox borders");
-      }, 40);
+      const parent = node.closest?.("label, .input-field, .switch, .row, .col, div") || node.parentElement;
+      if (parent) {
+        const near = parent.querySelector?.("input, select, textarea, button");
+        if (near) return near;
+      }
 
-      return true;
+      return null;
     }
 
-    // B) Si no hay checkbox, intentar click doble sobre un botón/label relacionado
-    if (
-      borderEl &&
-      (borderEl.tagName === "BUTTON" ||
-        borderEl.tagName === "A" ||
-        borderEl.tagName === "LABEL")
-    ) {
-      borderEl.click();
-      setTimeout(() => borderEl.click(), 40);
-      console.log("✅ Re-render disparado via click doble borders");
-      return true;
+    // 1) Show borders (mejor trigger)
+    {
+      const borders = findControlByNearbyText(["show border", "show borders", "borde", "bordes"]);
+      if (borders) {
+        const cb =
+          borders.type === "checkbox"
+            ? borders
+            : borders.querySelector?.('input[type="checkbox"]');
+
+        if (cb) {
+          const original = cb.checked;
+          cb.checked = !original;
+          fire(cb);
+          setTimeout(() => {
+            cb.checked = original;
+            fire(cb);
+          }, 30);
+          console.log("✅ Re-render: toggle show borders");
+          return true;
+        }
+
+        const target = borders.closest?.("label") || borders;
+        click(target);
+        setTimeout(() => click(target), 30);
+        console.log("✅ Re-render: click doble show borders");
+        return true;
+      }
     }
 
-    // C) Fallback genérico: "nudge" en controles típicos (select / range / checkbox)
-    // Sin alterar el estado final: tocamos y devolvemos.
-    const range = document.querySelector('input[type="range"]');
-    if (range) {
-      const v = range.value;
-      range.value = String(parseFloat(v) + 0.01);
-      range.dispatchEvent(new Event("input", { bubbles: true }));
-      range.dispatchEvent(new Event("change", { bubbles: true }));
+    // 2) Show labels
+    {
+      const labels = findControlByNearbyText(["show labels", "labels", "etiquetas", "label"]);
+      if (labels) {
+        const cb =
+          labels.type === "checkbox"
+            ? labels
+            : labels.querySelector?.('input[type="checkbox"]');
 
-      setTimeout(() => {
-        range.value = v;
-        range.dispatchEvent(new Event("input", { bubbles: true }));
-        range.dispatchEvent(new Event("change", { bubbles: true }));
-      }, 40);
+        if (cb) {
+          const original = cb.checked;
+          cb.checked = !original;
+          fire(cb);
+          setTimeout(() => {
+            cb.checked = original;
+            fire(cb);
+          }, 30);
+          console.log("✅ Re-render: toggle show labels");
+          return true;
+        }
 
-      console.log("✅ Re-render disparado via range nudge");
-      return true;
+        const target = labels.closest?.("label") || labels;
+        click(target);
+        setTimeout(() => click(target), 30);
+        console.log("✅ Re-render: click doble show labels");
+        return true;
+      }
     }
 
-    const anyCheckbox = document.querySelector('input[type="checkbox"]');
-    if (anyCheckbox) {
-      const original = anyCheckbox.checked;
+    // 3) Fill facets
+    {
+      const facets = findControlByNearbyText(["fill facets", "facet", "facets", "facetas"]);
+      if (facets) {
+        const cb =
+          facets.type === "checkbox"
+            ? facets
+            : facets.querySelector?.('input[type="checkbox"]');
 
-      anyCheckbox.checked = !original;
-      anyCheckbox.dispatchEvent(new Event("input", { bubbles: true }));
-      anyCheckbox.dispatchEvent(new Event("change", { bubbles: true }));
+        if (cb) {
+          const original = cb.checked;
+          cb.checked = !original;
+          fire(cb);
+          setTimeout(() => {
+            cb.checked = original;
+            fire(cb);
+          }, 30);
+          console.log("✅ Re-render: toggle fill facets");
+          return true;
+        }
 
-      setTimeout(() => {
-        anyCheckbox.checked = original;
-        anyCheckbox.dispatchEvent(new Event("input", { bubbles: true }));
-        anyCheckbox.dispatchEvent(new Event("change", { bubbles: true }));
-      }, 40);
-
-      console.log("✅ Re-render disparado via checkbox genérico");
-      return true;
+        const target = facets.closest?.("label") || facets;
+        click(target);
+        setTimeout(() => click(target), 30);
+        console.log("✅ Re-render: click doble fill facets");
+        return true;
+      }
     }
 
-    const anySelect = document.querySelector("select");
-    if (anySelect && anySelect.options && anySelect.options.length > 1) {
-      const original = anySelect.selectedIndex;
-
-      anySelect.selectedIndex = (original + 1) % anySelect.options.length;
-      anySelect.dispatchEvent(new Event("input", { bubbles: true }));
-      anySelect.dispatchEvent(new Event("change", { bubbles: true }));
-
-      setTimeout(() => {
-        anySelect.selectedIndex = original;
-        anySelect.dispatchEvent(new Event("input", { bubbles: true }));
-        anySelect.dispatchEvent(new Event("change", { bubbles: true }));
-      }, 40);
-
-      console.log("✅ Re-render disparado via select nudge");
-      return true;
+    // 4) Label font size (nudge 49->50->49)
+    {
+      const fontSize = findControlByNearbyText(["label font size", "font size", "tamaño fuente", "tamano fuente"]);
+      if (fontSize && fontSize.tagName === "INPUT") {
+        const original = fontSize.value;
+        const n = parseFloat(original);
+        if (!Number.isNaN(n)) {
+          fontSize.value = String(n + 1);
+          fire(fontSize);
+          setTimeout(() => {
+            fontSize.value = original;
+            fire(fontSize);
+          }, 30);
+          console.log("✅ Re-render: nudge label font size");
+          return true;
+        }
+      }
     }
 
-    console.log("⚠️ No se pudo forzar re-render por UI nudge");
+    // 5) Label font color (micro change y vuelve)
+    {
+      const fontColor = findControlByNearbyText(["label font color", "font color", "color fuente", "#000", "#000000"]);
+      if (fontColor && fontColor.tagName === "INPUT") {
+        const original = fontColor.value;
+        fontColor.value = (original + " ").trimEnd(); // micro-cambio
+        fire(fontColor);
+        setTimeout(() => {
+          fontColor.value = original;
+          fire(fontColor);
+        }, 30);
+        console.log("✅ Re-render: nudge label font color");
+        return true;
+      }
+    }
+
+    // 6) SVG size multiplier (range nudge)
+    {
+      const range = document.querySelector('input[type="range"]');
+      if (range) {
+        const original = range.value;
+        const n = parseFloat(original);
+        range.value = String(n + 0.01);
+        fire(range);
+        setTimeout(() => {
+          range.value = original;
+          fire(range);
+        }, 30);
+        console.log("✅ Re-render: nudge svg size multiplier");
+        return true;
+      }
+    }
+
+    console.log("⚠️ No se pudo forzar re-render via UI");
     return false;
   }
 
@@ -255,25 +312,19 @@
   // ======================
 
   function instalarHookGeneracion() {
-    // Buscar generateSVG en el scope global
     if (typeof window.generateSVG === "function" && !generarSVGOriginal) {
       generarSVGOriginal = window.generateSVG;
 
       window.generateSVG = function (...args) {
         console.log("🎯 Interceptado generateSVG()");
 
-        // Llamar función original
         const resultado = generarSVGOriginal.apply(this, args);
 
-        // Esperar a que el SVG se renderice y aplicar DAYU
         setTimeout(() => {
           if (Object.keys(window.dayuMapping).length > 0) {
             console.log("🎨 Aplicando DAYU después de generación...");
             const r = actualizarSVG();
-            mostrarStatus(
-              `🎨 DAYU aplicado: ${r.textos} textos | ${r.colores} áreas`,
-              "success"
-            );
+            mostrarStatus(`🎨 DAYU aplicado: ${r.textos} textos | ${r.colores} áreas`, "success");
           }
         }, 200);
 
@@ -292,7 +343,6 @@
     const p = document.getElementById("palette");
     if (!p) return false;
 
-    // Indicador de versión
     if (!document.getElementById("dayuVersion")) {
       const versionDiv = document.createElement("div");
       versionDiv.id = "dayuVersion";
@@ -302,7 +352,6 @@
       p.parentNode.insertBefore(versionDiv, p);
     }
 
-    // Botón mapear
     if (!document.getElementById("btnDayu")) {
       const btn = document.createElement("button");
       btn.id = "btnDayu";
@@ -314,7 +363,6 @@
       p.parentNode.insertBefore(btn, p);
     }
 
-    // Botón regenerar SVG
     if (!document.getElementById("btnRegenerar")) {
       const btnRegen = document.createElement("button");
       btnRegen.id = "btnRegenerar";
@@ -323,27 +371,21 @@
       btnRegen.style.cssText =
         "margin:10px 5px;background:#00BCD4;font-weight:bold;display:none;";
       btnRegen.onclick = () => {
-        console.log("🔄 Regenerando/Re-renderizando...");
+        console.log("🔄 Re-render/regenerando...");
 
-        // NUEVO: primero disparar el camino tipo "borders"
-        const exito = forzarRerenderComoBorders() || forzarRegeneracionSVG();
+        const exito = forzarRerenderComoUI() || forzarRegeneracionSVG();
 
         if (exito) {
           mostrarStatus("🔄 Re-render/regeneración disparada...", "info");
         } else {
-          // Si no funciona, al menos actualizar manualmente
           actualizarCajitas();
           const resultado = actualizarSVG();
-          mostrarStatus(
-            `🔄 Actualizado: ${resultado.textos} textos | ${resultado.colores} áreas`,
-            "info"
-          );
+          mostrarStatus(`🔄 Actualizado: ${resultado.textos} textos | ${resultado.colores} áreas`, "info");
         }
       };
       p.parentNode.insertBefore(btnRegen, p);
     }
 
-    // Botón limpiar
     if (!document.getElementById("btnLimpiar")) {
       const btn2 = document.createElement("button");
       btn2.id = "btnLimpiar";
@@ -360,7 +402,6 @@
       p.parentNode.insertBefore(btn2, p);
     }
 
-    // Status
     if (!document.getElementById("dayuStatus")) {
       const status = document.createElement("div");
       status.id = "dayuStatus";
@@ -393,7 +434,6 @@
   function mostrarBotonesActivos() {
     const btnRegenerar = document.getElementById("btnRegenerar");
     const btnLimpiar = document.getElementById("btnLimpiar");
-
     if (btnRegenerar) btnRegenerar.style.display = "inline-block";
     if (btnLimpiar) btnLimpiar.style.display = "inline-block";
   }
@@ -415,13 +455,7 @@
       .map((caja, idx) => {
         const rgb = parseRgb(caja);
         const num = caja.textContent.trim();
-
-        return {
-          numero: num,
-          rgb: rgb,
-          caja: caja,
-          indice: idx,
-        };
+        return { numero: num, rgb, caja, indice: idx };
       })
       .filter((c) => c.rgb);
 
@@ -438,8 +472,7 @@
         distancias.push({
           numOriginal: orig.numero,
           rgbOriginal: orig.rgb,
-          caja: orig.caja,
-          dayuIdx: dayuIdx,
+          dayuIdx,
           dayuCode: dayu.code,
           dayuHex: dayu.hex,
           dayuRgb: dayu.rgb,
@@ -455,9 +488,7 @@
     window.dayuMapping = {};
 
     for (const d of distancias) {
-      if (numerosUsados.has(d.numOriginal) || dayuUsados.has(d.dayuIdx)) {
-        continue;
-      }
+      if (numerosUsados.has(d.numOriginal) || dayuUsados.has(d.dayuIdx)) continue;
 
       numerosUsados.add(d.numOriginal);
       dayuUsados.add(d.dayuIdx);
@@ -470,27 +501,19 @@
         hexOriginal: hex(d.rgbOriginal),
       };
 
-      if (Object.keys(window.dayuMapping).length === coloresOriginales.length) {
-        break;
-      }
+      if (Object.keys(window.dayuMapping).length === coloresOriginales.length) break;
     }
 
     console.log("✅ Mapeo creado:", window.dayuMapping);
 
-    // Actualizar cajitas
     actualizarCajitas();
-
-    // Aplicar al SVG
     const resultado = actualizarSVG();
 
-    // Iniciar observers y hooks
     iniciarObservers();
     instalarHookGeneracion();
 
-    // Mostrar botones
     mostrarBotonesActivos();
 
-    // Status
     mostrarStatus(
       `✅ Mapeo completado: ${Object.keys(window.dayuMapping).length} colores | ${resultado.textos} textos | ${resultado.colores} áreas`,
       "success"
@@ -577,14 +600,12 @@
       }
 
       const dayu = encontrarDayuPorCodigo(nuevoCodigo);
-
       if (!dayu) {
         alert(`❌ "${nuevoCodigo}" no existe en la paleta DAYU`);
         caja.textContent = codigoActual;
         return;
       }
 
-      // Actualizar el mapeo
       window.dayuMapping[numOriginal] = {
         code: dayu.code,
         hex: dayu.hex,
@@ -593,25 +614,17 @@
         hexOriginal: window.dayuMapping[numOriginal].hexOriginal,
       };
 
-      // Actualizar cajita
       caja.textContent = dayu.code;
       caja.style.backgroundColor = dayu.hex;
       caja.dataset.dayuCode = dayu.code;
 
       console.log(`✅ Color ${numOriginal} cambiado a ${dayu.code}`);
 
-      // RE-RENDER AUTOMÁTICO (tipo show borders)
       mostrarStatus(`⏳ Re-render con ${dayu.code}...`, "info");
 
       setTimeout(() => {
-        // 1) Primero intentar disparar el mismo "camino" que Show Borders
-        const exitoRerender = forzarRerenderComoBorders();
-
-        // 2) Si no se pudo, intenta regeneración vieja
-        const exitoRegen = exitoRerender ? true : forzarRegeneracionSVG();
-
-        // 3) Fallback final: aplicar manualmente (por si el sistema no re-renderiza)
-        if (!exitoRegen) {
+        const exito = forzarRerenderComoUI() || forzarRegeneracionSVG();
+        if (!exito) {
           const resultado = actualizarSVG();
           mostrarStatus(
             `✏️ ${numOriginal} → ${dayu.code} | ${resultado.textos}t | ${resultado.colores}c`,
@@ -652,10 +665,8 @@
     let textos = 0;
     let colores = 0;
 
-    // ACTUALIZAR TEXTOS
     svg.querySelectorAll("text").forEach((texto) => {
       const contenido = texto.textContent.trim();
-
       if (window.dayuMapping[contenido]) {
         texto.textContent = window.dayuMapping[contenido].code;
         texto.dataset.numOriginal = contenido;
@@ -663,7 +674,6 @@
       }
     });
 
-    // ACTUALIZAR COLORES
     svg.querySelectorAll("path, polygon").forEach((area) => {
       const style = area.getAttribute("style");
       if (!style) return;
@@ -689,7 +699,6 @@
 
       for (const [numOriginal, dayu] of Object.entries(window.dayuMapping)) {
         const distancia = dist(rgbActual, dayu.rgbOriginal);
-
         if (distancia < menorDistancia) {
           menorDistancia = distancia;
           mejorMatch = { numOriginal, dayu };
@@ -737,9 +746,7 @@
       return;
     }
 
-    if (svgObserver) {
-      svgObserver.disconnect();
-    }
+    if (svgObserver) svgObserver.disconnect();
 
     svgObserver = new MutationObserver(() => {
       if (isUpdating) return;
@@ -766,11 +773,7 @@
       }
     });
 
-    svgObserver.observe(container, {
-      childList: true,
-      subtree: true,
-    });
-
+    svgObserver.observe(container, { childList: true, subtree: true });
     console.log("👁️ Observer SVG activo");
   }
 
@@ -781,9 +784,7 @@
       return;
     }
 
-    if (paletaObserver) {
-      paletaObserver.disconnect();
-    }
+    if (paletaObserver) paletaObserver.disconnect();
 
     paletaObserver = new MutationObserver(() => {
       if (isUpdating) return;
@@ -796,7 +797,6 @@
 
       if (tieneNumerosOriginales && Object.keys(window.dayuMapping).length > 0) {
         console.log("🔄 Paleta regenerada, re-aplicando...");
-
         setTimeout(() => {
           actualizarCajitas();
         }, 100);
@@ -819,7 +819,7 @@
   }
 
   // ======================
-  // INICIALIZACIÓN
+  // INIT
   // ======================
 
   function init() {
@@ -828,8 +828,6 @@
       if (crearBotones() || ++intentos > 30) {
         clearInterval(intervalo);
         console.log(`✅ DAYU ${VERSION} inicializado`);
-
-        // Intentar instalar hook desde el inicio
         setTimeout(instalarHookGeneracion, 1000);
       }
     }, 500);
@@ -865,7 +863,7 @@
   };
 
   window.regenerarSVG = forzarRegeneracionSVG;
-  window.rerenderUI = forzarRerenderComoBorders;
+  window.rerenderUI = forzarRerenderComoUI;
 
   console.log(`✅ DAYU ${VERSION} cargado`);
 })();
