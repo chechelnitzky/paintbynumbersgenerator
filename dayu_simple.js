@@ -1,16 +1,15 @@
-/* dayu_simple.js - FIX FINAL: Edición + Persistencia */
+/* dayu_simple.js - v8 FINAL: Sin observer, re-aplicar manual */
 
 (function() {
   'use strict';
   
-  console.log('🎨 DAYU v7 - Fix edición + persistencia');
+  console.log('🎨 DAYU v8 - Re-aplicar manual');
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
     return;
   }
   
-  // Hacer mapping global y persistente
   if (!window.dayuMapping) {
     window.dayuMapping = {};
   }
@@ -28,16 +27,35 @@
     return m ? [+m[1],+m[2],+m[3]] : null;
   }
   
-  function crearBoton() {
+  function crearBotones() {
     const p = document.getElementById('palette');
-    if (!p || document.getElementById('btnDayu')) return !!p;
-    const btn = document.createElement('button');
-    btn.id = 'btnDayu';
-    btn.textContent = '🎨 MAPEAR A DAYU';
-    btn.className = 'waves-effect waves-light btn';
-    btn.style.cssText = 'margin:10px 0;background:linear-gradient(135deg,#667eea,#764ba2);font-weight:bold;';
-    btn.onclick = mapear;
-    p.parentNode.insertBefore(btn, p);
+    if (!p) return false;
+    
+    // Botón mapear
+    if (!document.getElementById('btnDayu')) {
+      const btn = document.createElement('button');
+      btn.id = 'btnDayu';
+      btn.textContent = '🎨 MAPEAR A DAYU';
+      btn.className = 'waves-effect waves-light btn';
+      btn.style.cssText = 'margin:10px 5px 10px 0;background:linear-gradient(135deg,#667eea,#764ba2);font-weight:bold;';
+      btn.onclick = mapear;
+      p.parentNode.insertBefore(btn, p);
+    }
+    
+    // Botón re-aplicar
+    if (!document.getElementById('btnReaplicar')) {
+      const btn2 = document.createElement('button');
+      btn2.id = 'btnReaplicar';
+      btn2.textContent = '🔄 RE-APLICAR';
+      btn2.className = 'waves-effect waves-light btn';
+      btn2.style.cssText = 'margin:10px 0;background:#26a69a;font-weight:bold;display:none;';
+      btn2.onclick = () => {
+        const r = actualizar();
+        alert(`✅ Re-aplicado!\n${r.textos} textos\n${r.colores} colores`);
+      };
+      p.parentNode.insertBefore(btn2, p);
+    }
+    
     return true;
   }
   
@@ -108,24 +126,24 @@
     hacerEditables();
     const r = actualizar();
     
-    alert(`✅ Listo!\n${Object.keys(window.dayuMapping).length} colores\n${r.textos} textos\n${r.colores} colores`);
+    // Mostrar botón re-aplicar
+    const btnReaplicar = document.getElementById('btnReaplicar');
+    if (btnReaplicar) btnReaplicar.style.display = 'inline-block';
+    
+    alert(`✅ Listo!\n${Object.keys(window.dayuMapping).length} colores\n${r.textos} textos\n${r.colores} colores\n\n💡 Si cambias el SVG multiplier, usa el botón "RE-APLICAR"`);
   }
   
   function hacerEditables() {
     const cajitas = Array.from(document.getElementById('palette').children)
       .filter(c => c.dataset.num);
     
-    console.log(`✏️ Haciendo ${cajitas.length} cajitas editables`);
-    
     cajitas.forEach(caja => {
-      // Remover listeners anteriores clonando
       const nueva = caja.cloneNode(true);
       caja.parentNode.replaceChild(nueva, caja);
       
       nueva.style.cursor = 'pointer';
-      nueva.title = 'Clic para editar código DAYU';
+      nueva.title = 'Clic para editar';
       
-      // Agregar handler directamente
       nueva.addEventListener('click', function(e) {
         e.stopPropagation();
         editarCajita(this);
@@ -136,9 +154,6 @@
   function editarCajita(caja) {
     const num = caja.dataset.num;
     const actual = caja.textContent.trim();
-    
-    console.log(`✏️ === EDITANDO CAJITA ${num} ===`);
-    console.log(`Código actual: ${actual}`);
     
     const inp = document.createElement('input');
     inp.value = actual;
@@ -152,8 +167,6 @@
     const aplicarCambio = () => {
       const nuevo = inp.value.trim().toUpperCase();
       
-      console.log(`📝 Nuevo código: "${nuevo}"`);
-      
       if (!nuevo) {
         caja.textContent = actual;
         return;
@@ -162,15 +175,11 @@
       const dayu = window.DAYU_PALETTE.find(d => d.code.toUpperCase() === nuevo);
       
       if (!dayu) {
-        console.error(`❌ Código "${nuevo}" NO encontrado`);
-        alert(`❌ "${nuevo}" no existe\n\nEjemplos: 2, 64, 167, WG3, BG5`);
+        alert(`❌ "${nuevo}" no existe`);
         caja.textContent = actual;
         return;
       }
       
-      console.log(`✅ DAYU encontrado: ${dayu.code} (${dayu.hex})`);
-      
-      // Actualizar mapping global
       window.dayuMapping[num] = {
         code: dayu.code,
         hex: dayu.hex,
@@ -178,16 +187,11 @@
         rgbOriginal: caja.dataset.rgbOrig
       };
       
-      // Actualizar cajita
       caja.textContent = dayu.code;
       caja.style.backgroundColor = dayu.hex;
       
-      console.log(`🔄 Actualizando SVG...`);
-      
-      // Actualizar SVG
-      const resultado = actualizar();
-      
-      console.log(`✅ SVG actualizado: ${resultado.textos} textos, ${resultado.colores} colores`);
+      const r = actualizar();
+      console.log(`✏️ ${num} → ${dayu.code}: ${r.textos}t, ${r.colores}c`);
     };
     
     inp.addEventListener('blur', aplicarCambio);
@@ -206,116 +210,58 @@
     const svg = document.querySelector('#svgContainer svg');
     if (!svg) return {textos:0, colores:0};
     
-    console.log('🔄 Actualizando SVG...');
-    
     let textos = 0;
     let colores = 0;
     
-    // Actualizar textos - buscar por número original O por texto actual
+    // Actualizar textos
     svg.querySelectorAll('text').forEach(t => {
-      const txtActual = t.textContent.trim();
-      const txtOriginal = t.dataset.orig || txtActual;
+      const txt = t.textContent.trim();
       
-      // Buscar en mapping (puede ser que el texto sea el número original o ya sea código DAYU)
-      let numMatch = null;
-      
-      // Opción 1: El texto es un número (0-15)
-      if (window.dayuMapping[txtActual]) {
-        numMatch = txtActual;
-      }
-      // Opción 2: El texto ya es código DAYU, buscar por dataset.orig
-      else if (window.dayuMapping[txtOriginal]) {
-        numMatch = txtOriginal;
-      }
-      
-      if (numMatch) {
-        t.dataset.orig = numMatch;
-        t.textContent = window.dayuMapping[numMatch].code;
+      // Buscar en mapping (por número original)
+      if (window.dayuMapping[txt]) {
+        t.dataset.orig = txt;
+        t.textContent = window.dayuMapping[txt].code;
         textos++;
       }
     });
     
-    // Actualizar colores - siempre por RGB original
+    // Actualizar colores - MEJORADO
     svg.querySelectorAll('path, polygon').forEach(s => {
       const style = s.getAttribute('style');
       if (!style) return;
       
+      // Extraer RGB del style
       const m = style.match(/fill:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
       if (!m) return;
       
-      const key = `${m[1]},${m[2]},${m[3]}`;
+      const rgbActual = `${m[1]},${m[2]},${m[3]}`;
       
+      // Buscar qué número corresponde a este RGB
       for (const [num, data] of Object.entries(window.dayuMapping)) {
-        if (data.rgbOriginal === key) {
-          s.dataset.origStyle = style;
-          s.dataset.num = num;
+        if (data.rgbOriginal === rgbActual) {
+          // Reemplazar el fill en el style
+          const nuevoStyle = style.replace(
+            /fill:\s*rgb\([^)]+\)/,
+            `fill: ${data.hex}`
+          );
           
-          const newStyle = style.replace(/fill:\s*rgb\([^)]+\)/, `fill: ${data.hex}`);
-          s.setAttribute('style', newStyle);
+          s.setAttribute('style', nuevoStyle);
+          s.dataset.num = num;
           colores++;
           break;
         }
       }
     });
     
-    console.log(`✅ ${textos} textos, ${colores} colores`);
+    console.log(`✅ ${textos}t, ${colores}c`);
     return {textos, colores};
-  }
-  
-  // Observar cambios en el SVG para re-aplicar DAYU automáticamente
-  function observarSVG() {
-    const container = document.getElementById('svgContainer');
-    if (!container) return;
-    
-    let timeoutId = null;
-    
-    const observer = new MutationObserver((mutations) => {
-      // Debounce: esperar a que termine de mutar
-      clearTimeout(timeoutId);
-      
-      timeoutId = setTimeout(() => {
-        // Verificar que tenemos mapping válido
-        if (!window.dayuMapping || Object.keys(window.dayuMapping).length === 0) {
-          console.log('⚠️ No hay mapping activo, ignorando cambio SVG');
-          return;
-        }
-        
-        const haySVG = container.querySelector('svg');
-        if (!haySVG) return;
-        
-        const textos = haySVG.querySelectorAll('text');
-        if (textos.length === 0) return;
-        
-        // Verificar que los textos son números (0-15), no códigos DAYU
-        const primerTexto = textos[0].textContent.trim();
-        const esNumero = /^\d+$/.test(primerTexto);
-        
-        if (esNumero && window.dayuMapping[primerTexto]) {
-          console.log('🔄 SVG regenerado con números originales, re-aplicando DAYU...');
-          const r = actualizar();
-          console.log(`✅ Re-aplicado: ${r.textos} textos, ${r.colores} colores`);
-        } else {
-          console.log('⏭️ SVG ya tiene códigos DAYU o no hay match');
-        }
-      }, 300); // Esperar 300ms a que termine de mutar
-    });
-    
-    observer.observe(container, {
-      childList: true,
-      subtree: false // Solo observar cambios directos en container
-    });
-    
-    console.log('👁️ Observer instalado en SVG container');
   }
   
   function init() {
     let i = 0;
     const t = setInterval(() => {
-      if (crearBoton() || ++i > 20) clearInterval(t);
+      if (crearBotones() || ++i > 20) clearInterval(t);
     }, 500);
-    
-    // Instalar observer para re-aplicar cuando cambie el SVG
-    setTimeout(observarSVG, 1000);
   }
   
   if (document.readyState === 'loading') {
@@ -324,5 +270,8 @@
     setTimeout(init, 500);
   }
   
-  console.log('✅ DAYU v7 listo');
+  // API pública
+  window.reaplicarDayu = actualizar;
+  
+  console.log('✅ DAYU v8 listo');
 })();
