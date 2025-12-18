@@ -267,23 +267,42 @@
     const container = document.getElementById('svgContainer');
     if (!container) return;
     
+    let timeoutId = null;
+    
     const observer = new MutationObserver((mutations) => {
-      // Si cambió el SVG y tenemos mapping, re-aplicar
-      if (Object.keys(window.dayuMapping).length > 0) {
-        const haySVG = container.querySelector('svg');
-        if (haySVG) {
-          console.log('🔄 SVG regenerado, re-aplicando DAYU...');
-          setTimeout(() => {
-            const r = actualizar();
-            console.log(`✅ Re-aplicado: ${r.textos} textos, ${r.colores} colores`);
-          }, 100);
+      // Debounce: esperar a que termine de mutar
+      clearTimeout(timeoutId);
+      
+      timeoutId = setTimeout(() => {
+        // Verificar que tenemos mapping válido
+        if (!window.dayuMapping || Object.keys(window.dayuMapping).length === 0) {
+          console.log('⚠️ No hay mapping activo, ignorando cambio SVG');
+          return;
         }
-      }
+        
+        const haySVG = container.querySelector('svg');
+        if (!haySVG) return;
+        
+        const textos = haySVG.querySelectorAll('text');
+        if (textos.length === 0) return;
+        
+        // Verificar que los textos son números (0-15), no códigos DAYU
+        const primerTexto = textos[0].textContent.trim();
+        const esNumero = /^\d+$/.test(primerTexto);
+        
+        if (esNumero && window.dayuMapping[primerTexto]) {
+          console.log('🔄 SVG regenerado con números originales, re-aplicando DAYU...');
+          const r = actualizar();
+          console.log(`✅ Re-aplicado: ${r.textos} textos, ${r.colores} colores`);
+        } else {
+          console.log('⏭️ SVG ya tiene códigos DAYU o no hay match');
+        }
+      }, 300); // Esperar 300ms a que termine de mutar
     });
     
     observer.observe(container, {
       childList: true,
-      subtree: true
+      subtree: false // Solo observar cambios directos en container
     });
     
     console.log('👁️ Observer instalado en SVG container');
