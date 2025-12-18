@@ -1,22 +1,22 @@
-/* dayu_simple.js - v14: Regeneración forzada + Tiempo real */
+/* dayu_simple.js - v13: Botón regenerar + Indicador de versión */
 
 (function() {
   'use strict';
   
-  const VERSION = 'v14';
-  console.log(`🎨 DAYU ${VERSION} - Regeneración forzada + Tiempo real`);
+  const VERSION = 'v13';
+  console.log(`🎨 DAYU ${VERSION} - Regeneración manual + Indicador`);
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
     return;
   }
   
+  // Estado del mapeo: número_original → código_dayu
   window.dayuMapping = window.dayuMapping || {};
   
   let svgObserver = null;
   let paletaObserver = null;
   let isUpdating = false;
-  let generarSVGOriginal = null; // Guardar la función original
   
   // ======================
   // UTILIDADES
@@ -56,93 +56,6 @@
   }
   
   // ======================
-  // FORZAR REGENERACIÓN SVG
-  // ======================
-  
-  function forzarRegeneracionSVG() {
-    console.log('🔄 Forzando regeneración del SVG...');
-    
-    // Método 1: Buscar el botón de generar SVG
-    const btnGenerar = document.querySelector('button[onclick*="generate"]') || 
-                       document.querySelector('button:contains("Generate")') ||
-                       Array.from(document.querySelectorAll('button')).find(b => 
-                         b.textContent.toLowerCase().includes('generate') || 
-                         b.textContent.toLowerCase().includes('generar')
-                       );
-    
-    if (btnGenerar) {
-      console.log('✅ Encontrado botón generar, ejecutando...');
-      btnGenerar.click();
-      return true;
-    }
-    
-    // Método 2: Buscar función generateSVG en window
-    if (typeof window.generateSVG === 'function') {
-      console.log('✅ Encontrada función generateSVG(), ejecutando...');
-      window.generateSVG();
-      return true;
-    }
-    
-    // Método 3: Simular cambio en el slider
-    const slider = document.querySelector('input[type="range"]');
-    if (slider) {
-      console.log('✅ Simulando cambio en slider...');
-      const valorActual = parseFloat(slider.value);
-      
-      // Cambiar temporalmente
-      slider.value = valorActual + 0.01;
-      slider.dispatchEvent(new Event('input', { bubbles: true }));
-      slider.dispatchEvent(new Event('change', { bubbles: true }));
-      
-      // Volver al valor original
-      setTimeout(() => {
-        slider.value = valorActual;
-        slider.dispatchEvent(new Event('input', { bubbles: true }));
-        slider.dispatchEvent(new Event('change', { bubbles: true }));
-      }, 100);
-      
-      return true;
-    }
-    
-    console.log('⚠️ No se encontró método de regeneración');
-    return false;
-  }
-  
-  // ======================
-  // HOOK EN LA GENERACIÓN
-  // ======================
-  
-  function instalarHookGeneracion() {
-    // Intentar interceptar la función de generación
-    const scriptTags = document.querySelectorAll('script');
-    
-    // Buscar generateSVG en el scope global
-    if (typeof window.generateSVG === 'function' && !generarSVGOriginal) {
-      generarSVGOriginal = window.generateSVG;
-      
-      window.generateSVG = function(...args) {
-        console.log('🎯 Interceptado generateSVG()');
-        
-        // Llamar función original
-        const resultado = generarSVGOriginal.apply(this, args);
-        
-        // Esperar a que el SVG se renderice y aplicar DAYU
-        setTimeout(() => {
-          if (Object.keys(window.dayuMapping).length > 0) {
-            console.log('🎨 Aplicando DAYU después de generación...');
-            const r = actualizarSVG();
-            mostrarStatus(`🎨 DAYU aplicado: ${r.textos} textos | ${r.colores} áreas`, 'success');
-          }
-        }, 200);
-        
-        return resultado;
-      };
-      
-      console.log('✅ Hook instalado en generateSVG()');
-    }
-  }
-  
-  // ======================
   // UI - BOTONES
   // ======================
   
@@ -170,7 +83,7 @@
       p.parentNode.insertBefore(btn, p);
     }
     
-    // Botón regenerar SVG
+    // Botón regenerar SVG (nuevo)
     if (!document.getElementById('btnRegenerar')) {
       const btnRegen = document.createElement('button');
       btnRegen.id = 'btnRegenerar';
@@ -178,18 +91,10 @@
       btnRegen.className = 'waves-effect waves-light btn';
       btnRegen.style.cssText = 'margin:10px 5px;background:#00BCD4;font-weight:bold;display:none;';
       btnRegen.onclick = () => {
-        console.log('🔄 Regenerando SVG...');
-        
-        const exito = forzarRegeneracionSVG();
-        
-        if (exito) {
-          mostrarStatus('🔄 Regenerando SVG...', 'info');
-        } else {
-          // Si no funciona la regeneración forzada, al menos actualizar
-          actualizarCajitas();
-          const resultado = actualizarSVG();
-          mostrarStatus(`🔄 Actualizado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'info');
-        }
+        console.log('🔄 Regenerando SVG manualmente...');
+        actualizarCajitas();
+        const resultado = actualizarSVG();
+        mostrarStatus(`🔄 SVG regenerado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'info');
       };
       p.parentNode.insertBefore(btnRegen, p);
     }
@@ -261,6 +166,7 @@
       return;
     }
     
+    // Extraer colores RGB de las cajitas
     const coloresOriginales = cajitas.map((caja, idx) => {
       const rgb = parseRgb(caja);
       const num = caja.textContent.trim();
@@ -280,6 +186,7 @@
     
     console.log(`📊 ${coloresOriginales.length} colores originales detectados`);
     
+    // Calcular todas las distancias
     const distancias = [];
     coloresOriginales.forEach(orig => {
       window.DAYU_PALETTE.forEach((dayu, dayuIdx) => {
@@ -296,8 +203,10 @@
       });
     });
     
+    // Ordenar por distancia
     distancias.sort((a, b) => a.distancia - b.distancia);
     
+    // Asignar sin repeticiones
     const numerosUsados = new Set();
     const dayuUsados = new Set();
     window.dayuMapping = {};
@@ -310,6 +219,7 @@
       numerosUsados.add(d.numOriginal);
       dayuUsados.add(d.dayuIdx);
       
+      // Guardar mapeo: número_original → info_dayu
       window.dayuMapping[d.numOriginal] = {
         code: d.dayuCode,
         hex: d.dayuHex,
@@ -331,11 +241,10 @@
     // Aplicar al SVG
     const resultado = actualizarSVG();
     
-    // Iniciar observers y hooks
+    // Iniciar observers
     iniciarObservers();
-    instalarHookGeneracion();
     
-    // Mostrar botones
+    // Mostrar botones activos
     mostrarBotonesActivos();
     
     // Status
@@ -367,15 +276,20 @@
     cajitas.forEach(caja => {
       const numActual = caja.textContent.trim();
       
+      // Si este número tiene mapeo, aplicarlo
       if (window.dayuMapping[numActual]) {
         const dayu = window.dayuMapping[numActual];
         
+        // Actualizar visual
         caja.style.backgroundColor = dayu.hex;
         caja.textContent = dayu.code;
+        
+        // Guardar datos
         caja.dataset.numOriginal = numActual;
         caja.dataset.dayuCode = dayu.code;
         caja.dataset.editable = 'true';
         
+        // Hacer editable
         hacerEditable(caja);
       }
     });
@@ -385,11 +299,12 @@
   }
   
   function hacerEditable(caja) {
+    // Quitar listeners anteriores
     const nueva = caja.cloneNode(true);
     caja.parentNode.replaceChild(nueva, caja);
     
     nueva.style.cursor = 'pointer';
-    nueva.title = 'Clic para editar → Regenera automáticamente';
+    nueva.title = 'Clic para editar (Enter para aplicar)';
     
     nueva.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -444,18 +359,9 @@
       
       console.log(`✅ Color ${numOriginal} cambiado a ${dayu.code}`);
       
-      // REGENERAR SVG AUTOMÁTICAMENTE
-      mostrarStatus(`⏳ Regenerando con ${dayu.code}...`, 'info');
-      
-      setTimeout(() => {
-        const exito = forzarRegeneracionSVG();
-        
-        if (!exito) {
-          // Si no se pudo regenerar, actualizar manualmente
-          const resultado = actualizarSVG();
-          mostrarStatus(`✏️ ${numOriginal} → ${dayu.code} | ${resultado.textos}t | ${resultado.colores}c`, 'info');
-        }
-      }, 50);
+      // APLICAR AL SVG INMEDIATAMENTE
+      const resultado = actualizarSVG();
+      mostrarStatus(`✏️ Color ${numOriginal} → ${dayu.code} | ${resultado.textos} textos | ${resultado.colores} áreas actualizadas`, 'info');
     };
     
     inp.addEventListener('blur', aplicarCambio);
@@ -489,10 +395,11 @@
     let textos = 0;
     let colores = 0;
     
-    // ACTUALIZAR TEXTOS
+    // 1. ACTUALIZAR TEXTOS
     svg.querySelectorAll('text').forEach(texto => {
       const contenido = texto.textContent.trim();
       
+      // Si es un número original que está mapeado
       if (window.dayuMapping[contenido]) {
         texto.textContent = window.dayuMapping[contenido].code;
         texto.dataset.numOriginal = contenido;
@@ -500,11 +407,12 @@
       }
     });
     
-    // ACTUALIZAR COLORES
+    // 2. ACTUALIZAR COLORES DE ÁREAS
     svg.querySelectorAll('path, polygon').forEach(area => {
       const style = area.getAttribute('style');
       if (!style) return;
       
+      // Extraer color actual
       let rgbActual = null;
       let esHex = false;
       
@@ -521,6 +429,7 @@
       
       if (!rgbActual) return;
       
+      // Buscar el número original que corresponde a este color
       let mejorMatch = null;
       let menorDistancia = Infinity;
       
@@ -533,6 +442,7 @@
         }
       }
       
+      // Si encontramos un match razonable, aplicar color DAYU
       if (mejorMatch && menorDistancia < 200) {
         let nuevoStyle;
         
@@ -578,6 +488,7 @@
       const svg = container.querySelector('svg');
       if (!svg) return;
       
+      // Detectar si hay textos con números originales (0-15)
       const textos = Array.from(svg.querySelectorAll('text'));
       const tieneNumerosOriginales = textos.some(t => {
         const txt = t.textContent.trim();
@@ -585,11 +496,11 @@
       });
       
       if (tieneNumerosOriginales && Object.keys(window.dayuMapping).length > 0) {
-        console.log('🔄 SVG regenerado por sistema, re-aplicando...');
+        console.log('🔄 SVG regenerado, re-aplicando...');
         
         setTimeout(() => {
           const resultado = actualizarSVG();
-          mostrarStatus(`🔄 Auto-aplicado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
+          mostrarStatus(`🔄 Auto-aplicado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'info');
         }, 150);
       }
     });
@@ -616,6 +527,7 @@
     paletaObserver = new MutationObserver(() => {
       if (isUpdating) return;
       
+      // Detectar si las cajitas volvieron a números originales
       const cajitas = obtenerCajitas();
       const tieneNumerosOriginales = cajitas.some(c => {
         const txt = c.textContent.trim();
@@ -656,9 +568,6 @@
       if (crearBotones() || ++intentos > 30) {
         clearInterval(intervalo);
         console.log(`✅ DAYU ${VERSION} inicializado`);
-        
-        // Intentar instalar hook desde el inicio
-        setTimeout(instalarHookGeneracion, 1000);
       }
     }, 500);
   }
@@ -679,7 +588,6 @@
     console.log('Total colores:', Object.keys(window.dayuMapping).length);
     console.log('Observer SVG:', !!svgObserver);
     console.log('Observer Paleta:', !!paletaObserver);
-    console.log('Hook instalado:', !!generarSVGOriginal);
   };
   
   window.reaplicarDayu = () => {
@@ -692,8 +600,5 @@
     return VERSION;
   };
   
-  window.regenerarSVG = forzarRegeneracionSVG;
-  
   console.log(`✅ DAYU ${VERSION} cargado`);
 })();
-
