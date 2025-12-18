@@ -235,6 +235,8 @@
     const numeroOriginal = caja.dataset.numeroOriginal;
     const codigoActual = caja.textContent.trim();
     
+    console.log(`✏️ Editando cajita: número original="${numeroOriginal}", código actual="${codigoActual}"`);
+    
     const input = document.createElement('input');
     input.type = 'text';
     input.value = codigoActual;
@@ -266,18 +268,23 @@
       const dayu = getDayu(nuevo);
       
       if (dayu) {
+        console.log(`🔄 Cambiando ${numeroOriginal}: "${codigoActual}" → "${dayu.code}"`);
+        
+        // Actualizar el mapping global
         numeroToDayu.set(numeroOriginal, {
           code: dayu.code,
           hex: dayu.hex,
           rgb: dayu.rgb
         });
         
+        // Actualizar cajita
         caja.textContent = dayu.code;
         caja.style.backgroundColor = dayu.hex;
         
-        actualizarSVG();
+        // Actualizar SOLO los textos con ese número original en el SVG
+        actualizarTextosSVG(numeroOriginal, dayu);
         
-        console.log(`✏️ ${numeroOriginal} → ${dayu.code}`);
+        console.log(`✅ Actualizado correctamente`);
       } else {
         alert(`❌ "${nuevo}" no encontrado\n\nEjemplos: 42, 64, WG3, BG5`);
         caja.textContent = codigoActual;
@@ -289,6 +296,58 @@
       if (e.key === 'Enter') aplicar();
       if (e.key === 'Escape') caja.textContent = codigoActual;
     };
+  }
+  
+  // ============================================
+  // ACTUALIZAR SOLO UN NÚMERO EN EL SVG
+  // ============================================
+  
+  function actualizarTextosSVG(numeroOriginal, nuevoDayu) {
+    const svg = document.querySelector('#svgContainer svg');
+    if (!svg) {
+      console.warn('⚠️ SVG no encontrado');
+      return;
+    }
+    
+    console.log(`🔍 Buscando textos con número original "${numeroOriginal}" en SVG...`);
+    
+    let encontrados = 0;
+    const textos = svg.querySelectorAll('text');
+    
+    textos.forEach(texto => {
+      // Verificar si este texto tiene guardado el número original
+      if (texto.dataset.original === numeroOriginal) {
+        console.log(`  ✅ Encontrado texto con original="${numeroOriginal}", cambiando a "${nuevoDayu.code}"`);
+        
+        // Cambiar texto
+        texto.textContent = nuevoDayu.code;
+        encontrados++;
+        
+        // Cambiar color de faceta
+        const parent = texto.parentElement;
+        if (parent) {
+          const shapes = parent.querySelectorAll('path, polygon, rect, circle, ellipse');
+          shapes.forEach(shape => {
+            const fill = shape.getAttribute('fill');
+            if (fill && fill !== 'none') {
+              shape.setAttribute('fill', nuevoDayu.hex);
+              if (shape.style) {
+                shape.style.fill = nuevoDayu.hex;
+              }
+              console.log(`    🎨 Color cambiado a ${nuevoDayu.hex}`);
+            }
+          });
+        }
+      }
+    });
+    
+    console.log(`📊 Total actualizado: ${encontrados} textos`);
+    
+    if (encontrados === 0) {
+      console.warn(`⚠️ No se encontraron textos con original="${numeroOriginal}"`);
+      console.warn('Ejecutando actualización completa del SVG...');
+      actualizarSVG();
+    }
   }
   
   // ============================================
