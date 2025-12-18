@@ -1,29 +1,23 @@
-/* dayu_kitmode_patch.js (FIXED: no touch min facet; observer only svg/palette)
-   Requires: dayu_palette.js (window.DAYU_PALETTE) loaded BEFORE this file.
+/* dayu_kitmode_patch.js
+   POST-MAP MODE:
+   - No restringe k-means.
+   - Genera normal con colores libres.
+   - Luego mapea cada cluster (0..K-1) al color DAYU más cercano
+     SIN REPETIR códigos (si está ocupado -> 2do, 3ro...).
+   Requiere: dayu_palette.js (window.DAYU_PALETTE) cargado antes.
 */
 
 (function () {
   "use strict";
 
   // =========================
-  // CONFIG
-  // =========================
-  let KITMODE_ENABLED = true;
-
-  // Si el resultado usa MENOS colores que los pedidos, recolorea facets GRANDES
-  // para llegar a K sin crear micro-zonas nuevas.
-  const FORCE_EXACT_K_BY_RECOLORING_LARGE_FACETS = true;
-
-  // Solo recoloreamos facets con bbox >= a esto (NO afecta el pruning)
-  const MIN_BBOX_SIDE_FOR_RECOLOR = 20;
-
-  // =========================
   // HELPERS
   // =========================
   const $ = (id) => document.getElementById(id);
 
-  function clamp(n, a, b) {
-    return Math.max(a, Math.min(b, n));
+  function dist2(a, b) {
+    const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+    return dr * dr + dg * dg + db * db;
   }
 
   function sanitizeHex(hex) {
@@ -33,11 +27,6 @@
     if (/^[0-9a-fA-F]{6}$/.test(hex)) return hex.toLowerCase();
     if (/^[0-9a-fA-F]{3}$/.test(hex)) return hex.split("").map((c) => c + c).join("").toLowerCase();
     return null;
-  }
-
-  function rgbToHex(rgb) {
-    const to2 = (n) => n.toString(16).padStart(2, "0");
-    return `${to2(rgb[0])}${to2(rgb[1])}${to2(rgb[2])}`;
   }
 
   function hexToRgb(hex) {
@@ -50,11 +39,6 @@
     return `${rgb[0]},${rgb[1]},${rgb[2]}`;
   }
 
-  function dist2(a, b) {
-    const dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
-    return dr * dr + dg * dg + db * db;
-  }
-
   function parseRgbText(t) {
     const m = (t || "").match(/RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
     if (!m) return null;
@@ -64,7 +48,7 @@
   function getDesiredK() {
     const el = $("txtNrOfClusters");
     const k = el ? parseInt(el.value || "16", 10) : 16;
-    return clamp(isFinite(k) ? k : 16, 1, 167);
+    return Number.isFinite(k) && k > 0 ? k : 16;
   }
 
   function getDayuList() {
@@ -76,54 +60,23 @@
       const code = String(item.code || "").trim();
       if (!code) continue;
 
+      // prefer rgb, fallback a hex
       let rgb = item.rgb;
       if (!rgb || !Array.isArray(rgb) || rgb.length !== 3) {
         const fromHex = hexToRgb(item.hex);
         if (!fromHex) continue;
         rgb = fromHex;
       }
-
-      const hex = sanitizeHex(item.hex) || sanitizeHex(rgbToHex(rgb));
-      if (!hex) continue;
-
+      const hex = sanitizeHex(item.hex) || null;
       out.push({ code, rgb: [rgb[0], rgb[1], rgb[2]], hex });
     }
-
     return out;
   }
 
   // =========================
-  // 1) Restrict clustering colors (Dayu 167) -> textarea
-  // =========================
-  function buildDayuRestrictionText(dayuList) {
-    const header = [
-      "// DAYU_RESTRICTION_AUTOGEN",
-      "// Formato: r,g,b   // CODE #HEX",
-      ""
-    ].join("\n");
-
-    const lines = dayuList.map((d) => `${d.rgb[0]},${d.rgb[1]},${d.rgb[2]}   // ${d.code} #${d.hex}`);
-    return header + lines.join("\n") + "\n";
-  }
-
-  function applyDayuRestrictionsToTextarea() {
-    if (!KITMODE_ENABLED) return false;
-
-    const ta = $("txtKMeansColorRestrictions");
-    if (!ta) return false;
-
-    const dayu = getDayuList();
-    if (!dayu.length) return false;
-
-    const cur = String(ta.value || "");
-    if (cur.includes("DAYU_RESTRICTION_AUTOGEN")) return true;
-
-    ta.value = buildDayuRestrictionText(dayu);
-    return true;
-  }
-
-  // =========================
-  // 2) Build idx(0..K-1)->RGB from #palette by order of "RGB:" lines
+  // 1) Leer paleta final (K clusters) desde #palette
+  //    La forma más robusta: tomar los textos "RGB: r,g,b" en orden,
+  //    y asignarlos a índices 0..K-1 por aparición.
   // =========================
   function buildIdxToRgbFromPalette() {
     const palette = $("palette");
@@ -134,7 +87,6 @@
 
     const idxToRgb = new Map();
     let idx = 0;
-
     for (const el of rgbEls) {
       const rgb = parseRgbText((el.textContent || "").trim());
       if (!rgb) continue;
@@ -144,76 +96,59 @@
     return idxToRgb;
   }
 
-  function buildIdxToCode(idxToRgb) {
-    const dayu = getDayuList();
-    if (!dayu.length) return new Map();
-
-    const exact = new Map(dayu.map(d => [rgbKey(d.rgb), d.code]));
-    const used = new Set();
-    const idxToCode = new Map();
-
+  // =========================
+  // 2) Asignación 1:1 SIN REPETIR:
+  //    Para cada idx (cluster), crea ranking de DAYU por distancia.
+  //    Luego asigna greedily global por el menor costo disponible.
+  //
+  //    Esto evita duplicados: si el mejor ya está usado,
+  //    toma el siguiente.
+  // =========================
+  function buildUniqueIdxToDayu(idxToRgb, dayuList) {
     const idxs = Array.from(idxToRgb.keys()).sort((a, b) => Number(a) - Number(b));
-    for (const idx of idxs) {
-      const rgb = idxToRgb.get(idx);
-      const e = exact.get(rgbKey(rgb));
+    const dayu = dayuList;
 
-      if (e && !used.has(e)) {
-        idxToCode.set(idx, e);
-        used.add(e);
-        continue;
-      }
-
-      // fallback nearest unused
-      let best = null;
-      for (const d of dayu) {
-        if (used.has(d.code)) continue;
-        const d2 = dist2(rgb, d.rgb);
-        if (!best || d2 < best.d2) best = { code: d.code, d2 };
-      }
-      if (best) {
-        idxToCode.set(idx, best.code);
-        used.add(best.code);
+    // matriz de pares (i,j,dist) para greedy global
+    const pairs = [];
+    for (let i = 0; i < idxs.length; i++) {
+      const rgb = idxToRgb.get(idxs[i]);
+      for (let j = 0; j < dayu.length; j++) {
+        pairs.push({ i, j, d: dist2(rgb, dayu[j].rgb) });
       }
     }
+    pairs.sort((a, b) => a.d - b.d);
 
-    return idxToCode;
-  }
+    const usedI = new Set();
+    const usedJ = new Set();
+    const idxToDayu = new Map();
 
-  function relabelSvgTextsNumericToDayu(idxToCode) {
-    const svg = document.querySelector("#svgContainer svg");
-    if (!svg) return false;
+    for (const p of pairs) {
+      if (usedI.has(p.i) || usedJ.has(p.j)) continue;
 
-    const texts = svg.querySelectorAll("text");
-    if (!texts.length) return false;
+      usedI.add(p.i);
+      usedJ.add(p.j);
 
-    let changed = false;
-    texts.forEach((t) => {
-      const v = (t.textContent || "").trim();
-      if (/^\d+$/.test(v) && idxToCode.has(v)) {
-        t.textContent = idxToCode.get(v);
-        changed = true;
-      }
-    });
+      const idxLabel = idxs[p.i];      // "0","1","2"...
+      const code = dayu[p.j].code;     // "64","WG3","BG5"...
+      const hex = sanitizeHex(dayu[p.j].hex) || null; // puede ser null si no lo guardaste
 
-    return changed;
+      idxToDayu.set(idxLabel, { code, hex, rgb: dayu[p.j].rgb });
+
+      if (idxToDayu.size === idxs.length) break;
+    }
+
+    return idxToDayu;
   }
 
   // =========================
-  // 3) Force EXACT K by recoloring LARGE facets (plan B)
+  // 3) Aplicar a SVG:
+  //    - Cambiar textos 0..K-1 -> DAYU code
+  //    - Cambiar fill de la zona al color DAYU (hex o rgb)
   // =========================
-  function getDayuHexByCodeMap(dayuList) {
-    const m = new Map();
-    for (const d of dayuList) m.set(d.code, d.hex);
-    return m;
-  }
-
-  function getBBoxSafe(el) {
-    try { return el.getBBox(); } catch { return null; }
-  }
-
   function findFacetShapeFromText(textEl) {
     const g = textEl.closest("g") || textEl.parentElement;
     if (!g) return null;
+    // Buscamos una forma con fill
     const shapes = g.querySelectorAll("path,polygon,rect");
     for (const s of shapes) {
       const fill = (s.getAttribute("fill") || "").trim();
@@ -224,110 +159,111 @@
     return null;
   }
 
-  function setShapeFill(shapeEl, hex) {
-    const color = `#${hex}`;
+  function setShapeFill(shapeEl, dayuHex, dayuRgb) {
+    const color = dayuHex ? `#${dayuHex}` : `rgb(${dayuRgb[0]},${dayuRgb[1]},${dayuRgb[2]})`;
     shapeEl.setAttribute("fill", color);
+
     const style = shapeEl.getAttribute("style") || "";
     if (/fill\s*:/i.test(style)) {
       shapeEl.setAttribute("style", style.replace(/fill\s*:\s*[^;]+/i, `fill:${color}`));
     } else {
-      shapeEl.setAttribute(
-        "style",
-        `${style}${style && !style.trim().endsWith(";") ? ";" : ""}fill:${color};`
-      );
+      shapeEl.setAttribute("style", `${style}${style && !style.trim().endsWith(";") ? ";" : ""}fill:${color};`);
     }
   }
 
-  function getCurrentCodesInSvg(svg) {
-    const codes = new Set();
-    svg.querySelectorAll("text").forEach((t) => {
-      const v = (t.textContent || "").trim();
-      if (v) codes.add(v);
-    });
-    return codes;
-  }
-
-  function forceExactKByRecoloringLargeFacets(desiredK) {
-    if (!FORCE_EXACT_K_BY_RECOLORING_LARGE_FACETS) return false;
-
+  function relabelAndRecolorSvg(idxToDayu) {
     const svg = document.querySelector("#svgContainer svg");
     if (!svg) return false;
 
-    const dayu = getDayuList();
-    if (!dayu.length) return false;
+    let changed = false;
+    const texts = svg.querySelectorAll("text");
 
-    const codeToHex = getDayuHexByCodeMap(dayu);
+    texts.forEach((t) => {
+      const v = (t.textContent || "").trim();
+      if (!/^\d+$/.test(v)) return;
+      const map = idxToDayu.get(v);
+      if (!map) return;
 
-    const existing = Array.from(getCurrentCodesInSvg(svg)).filter(x => x && !/^\d+$/.test(x));
-    const used = new Set(existing);
+      // text
+      t.textContent = map.code;
+      changed = true;
 
-    const currentCount = used.size;
-    if (currentCount >= desiredK) return true;
-
-    const missing = desiredK - currentCount;
-    const unused = dayu.map(d => d.code).filter(code => !used.has(code));
-    if (!unused.length) return false;
-
-    // candidates: facets grandes
-    const candidates = [];
-    svg.querySelectorAll("text").forEach((t) => {
+      // fill
       const shape = findFacetShapeFromText(t);
-      if (!shape) return;
-
-      const box = getBBoxSafe(shape) || getBBoxSafe(t.closest("g") || t);
-      if (!box) return;
-
-      if (box.width < MIN_BBOX_SIDE_FOR_RECOLOR || box.height < MIN_BBOX_SIDE_FOR_RECOLOR) return;
-
-      candidates.push({ textEl: t, shapeEl: shape, area: box.width * box.height });
+      if (shape) setShapeFill(shape, map.hex, map.rgb);
     });
 
-    candidates.sort((a, b) => b.area - a.area);
-
-    let recolored = 0;
-    let i = 0;
-
-    while (recolored < missing && i < candidates.length && unused.length) {
-      const c = candidates[i++];
-      const newCode = unused.shift();
-      const hex = codeToHex.get(newCode);
-      if (!hex) continue;
-
-      c.textEl.textContent = newCode;
-      setShapeFill(c.shapeEl, hex);
-
-      recolored++;
-    }
-
-    return recolored > 0;
+    return changed;
   }
 
   // =========================
-  // 4) Orchestration (NO toca inputs de facets)
+  // 4) Actualizar la paleta visual (opcional):
+  //    - si el UI muestra cuadritos con background-color, intentamos
+  //      reemplazarlos por los dayu colors.
+  //    - Esto es “best effort” porque el HTML exacto depende del repo.
   // =========================
-  function applyAllOnce() {
-    if (KITMODE_ENABLED) applyDayuRestrictionsToTextarea();
-
-    const svg = document.querySelector("#svgContainer svg");
+  function recolorPaletteSwatches(idxToDayu) {
     const palette = $("palette");
-    if (!svg || !palette) return false;
+    if (!palette) return false;
+
+    const swatches = Array.from(palette.querySelectorAll("*")).filter(el => {
+      const cls = (el.className || "").toString();
+      return /swatch|color|palette/i.test(cls) || el.tagName === "DIV";
+    });
+
+    // Best-effort: buscar los elementos que contienen el número idx
+    // y pintar su bloque cercano.
+    let changed = false;
+
+    // Busca textos "0".."K-1" dentro del palette
+    const idxNodes = Array.from(palette.querySelectorAll("*"))
+      .filter(el => /^\d+$/.test((el.textContent || "").trim()));
+
+    for (const n of idxNodes) {
+      const idx = (n.textContent || "").trim();
+      const map = idxToDayu.get(idx);
+      if (!map) continue;
+
+      // intenta pintar el contenedor
+      const container = n.closest("div") || n.parentElement;
+      if (!container) continue;
+
+      const color = map.hex ? `#${map.hex}` : `rgb(${map.rgb[0]},${map.rgb[1]},${map.rgb[2]})`;
+      container.style.background = color;
+      container.style.backgroundColor = color;
+
+      changed = true;
+    }
+
+    return changed;
+  }
+
+  // =========================
+  // 5) Orquestación
+  // =========================
+  function applyPostMap() {
+    const dayu = getDayuList();
+    if (!dayu.length) return false;
 
     const idxToRgb = buildIdxToRgbFromPalette();
     if (!idxToRgb.size) return false;
 
-    const idxToCode = buildIdxToCode(idxToRgb);
-    if (!idxToCode.size) return false;
+    // Asegurar que idxToRgb tenga tamaño K esperado (a veces el UI no pinta todos)
+    // Si el UI trae menos, igual mapeamos lo que exista.
+    const desiredK = getDesiredK();
 
-    relabelSvgTextsNumericToDayu(idxToCode);
+    // Mapeo 1:1 sin repetir
+    const idxToDayu = buildUniqueIdxToDayu(idxToRgb, dayu);
 
-    if (KITMODE_ENABLED && FORCE_EXACT_K_BY_RECOLORING_LARGE_FACETS) {
-      forceExactKByRecoloringLargeFacets(getDesiredK());
-    }
+    // Aplicar a SVG + paleta
+    const ok1 = relabelAndRecolorSvg(idxToDayu);
+    recolorPaletteSwatches(idxToDayu);
 
-    return true;
+    // Nota: si deseas “sí o sí K”, eso depende de cómo k-means encontró clusters.
+    // Aquí NO alteramos k-means (como pediste), solo reemplazamos colores elegidos.
+    return ok1 || idxToDayu.size > 0;
   }
 
-  // Debounce para no spamear
   function debounce(fn, wait) {
     let t = null;
     return () => {
@@ -336,57 +272,45 @@
     };
   }
 
-  function installHooks() {
-    const btn = $("btnProcess");
-    if (btn) {
-      btn.addEventListener(
-        "click",
-        () => {
-          if (KITMODE_ENABLED) applyDayuRestrictionsToTextarea();
-        },
-        true
-      );
-    }
+  function installObservers() {
+    const runDebounced = debounce(applyPostMap, 150);
 
-    const runDebounced = debounce(applyAllOnce, 150);
-
-    // OBSERVAR SOLO output (NO el body)
     const palette = $("palette");
     const svgContainer = $("svgContainer");
 
+    // Observa solo salida (NO body para no romper inputs)
     if (palette) {
-      new MutationObserver(runDebounced).observe(palette, {
-        childList: true,
-        subtree: true
-      });
+      new MutationObserver(runDebounced).observe(palette, { childList: true, subtree: true });
+    }
+    if (svgContainer) {
+      new MutationObserver(runDebounced).observe(svgContainer, { childList: true, subtree: true });
     }
 
-    if (svgContainer) {
-      new MutationObserver(runDebounced).observe(svgContainer, {
-        childList: true,
-        subtree: true
-      });
+    // Post-run cuando aprietas Process
+    const btn = $("btnProcess");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        // reintenta unos ticks después de que termine de renderizar
+        let tries = 0;
+        const timer = setInterval(() => {
+          tries++;
+          const ok = applyPostMap();
+          if (ok || tries > 80) clearInterval(timer); // ~20s
+        }, 250);
+      }, true);
     }
   }
 
   function boot() {
-    installHooks();
+    installObservers();
 
+    // Primer intento (por si ya hay algo cargado)
     let tries = 0;
     const timer = setInterval(() => {
       tries++;
-      const ok = applyAllOnce();
-      if (ok || tries > 120) clearInterval(timer);
+      const ok = applyPostMap();
+      if (ok || tries > 40) clearInterval(timer);
     }, 250);
-
-    // Toggle desde consola si quieres:
-    // window.DAYU_KITMODE(false)
-    window.DAYU_KITMODE = (on) => {
-      KITMODE_ENABLED = !!on;
-      if (KITMODE_ENABLED) applyDayuRestrictionsToTextarea();
-      applyAllOnce();
-      return KITMODE_ENABLED;
-    };
   }
 
   window.addEventListener("DOMContentLoaded", boot);
