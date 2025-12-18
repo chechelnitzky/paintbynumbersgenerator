@@ -1,9 +1,9 @@
-/* dayu_simple.js - v8 FINAL: Sin observer, re-aplicar manual */
+/* dayu_simple.js - v9 FINAL: Maneja HEX y RGB */
 
 (function() {
   'use strict';
   
-  console.log('🎨 DAYU v8 - Re-aplicar manual');
+  console.log('🎨 DAYU v9 - Soporte HEX + RGB');
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -20,6 +20,22 @@
   
   function hex(rgb) {
     return '#' + rgb.map(v => ('0'+Math.round(v).toString(16)).slice(-2)).join('');
+  }
+  
+  function hexToRgb(hexColor) {
+    const h = hexColor.replace('#','');
+    if (h.length === 3) {
+      return [
+        parseInt(h[0]+h[0], 16),
+        parseInt(h[1]+h[1], 16),
+        parseInt(h[2]+h[2], 16)
+      ];
+    }
+    return [
+      parseInt(h.substr(0,2), 16),
+      parseInt(h.substr(2,2), 16),
+      parseInt(h.substr(4,2), 16)
+    ];
   }
   
   function parseRgb(el) {
@@ -112,13 +128,14 @@
         code: dayu.code,
         hex: dayu.hex,
         rgb: dayu.rgb,
-        rgbOriginal: `${d.rgb[0]},${d.rgb[1]},${d.rgb[2]}`
+        rgbOriginal: d.rgb,
+        hexOriginal: hex(d.rgb)
       };
       
       d.caja.style.backgroundColor = dayu.hex;
       d.caja.textContent = dayu.code;
       d.caja.dataset.num = d.num;
-      d.caja.dataset.rgbOrig = window.dayuMapping[d.num].rgbOriginal;
+      d.caja.dataset.hexOrig = window.dayuMapping[d.num].hexOriginal;
       
       if (Object.keys(window.dayuMapping).length === datos.length) break;
     }
@@ -184,7 +201,8 @@
         code: dayu.code,
         hex: dayu.hex,
         rgb: dayu.rgb,
-        rgbOriginal: caja.dataset.rgbOrig
+        rgbOriginal: window.dayuMapping[num].rgbOriginal,
+        hexOriginal: caja.dataset.hexOrig
       };
       
       caja.textContent = dayu.code;
@@ -217,7 +235,6 @@
     svg.querySelectorAll('text').forEach(t => {
       const txt = t.textContent.trim();
       
-      // Buscar en mapping (por número original)
       if (window.dayuMapping[txt]) {
         t.dataset.orig = txt;
         t.textContent = window.dayuMapping[txt].code;
@@ -225,25 +242,42 @@
       }
     });
     
-    // Actualizar colores - MEJORADO
+    // Actualizar colores - SOPORTA HEX Y RGB
     svg.querySelectorAll('path, polygon').forEach(s => {
       const style = s.getAttribute('style');
       if (!style) return;
       
-      // Extraer RGB del style
-      const m = style.match(/fill:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-      if (!m) return;
+      let rgbActual = null;
+      let esHex = false;
       
-      const rgbActual = `${m[1]},${m[2]},${m[3]}`;
+      // Intentar extraer HEX
+      const mHex = style.match(/fill:\s*(#[0-9a-fA-F]{3,6})/);
+      if (mHex) {
+        rgbActual = hexToRgb(mHex[1]);
+        esHex = true;
+      } else {
+        // Intentar extraer RGB
+        const mRgb = style.match(/fill:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+        if (mRgb) {
+          rgbActual = [+mRgb[1], +mRgb[2], +mRgb[3]];
+        }
+      }
       
-      // Buscar qué número corresponde a este RGB
+      if (!rgbActual) return;
+      
+      // Buscar qué número corresponde a este color
       for (const [num, data] of Object.entries(window.dayuMapping)) {
-        if (data.rgbOriginal === rgbActual) {
+        const distancia = dist(rgbActual, data.rgbOriginal);
+        
+        // Tolerancia de 5 para variaciones de redondeo
+        if (distancia < 5) {
           // Reemplazar el fill en el style
-          const nuevoStyle = style.replace(
-            /fill:\s*rgb\([^)]+\)/,
-            `fill: ${data.hex}`
-          );
+          let nuevoStyle;
+          if (esHex) {
+            nuevoStyle = style.replace(/fill:\s*#[0-9a-fA-F]{3,6}/, `fill: ${data.hex}`);
+          } else {
+            nuevoStyle = style.replace(/fill:\s*rgb\([^)]+\)/, `fill: ${data.hex}`);
+          }
           
           s.setAttribute('style', nuevoStyle);
           s.dataset.num = num;
@@ -253,7 +287,7 @@
       }
     });
     
-    console.log(`✅ ${textos}t, ${colores}c`);
+    console.log(`✅ Actualizado: ${textos} textos, ${colores} colores`);
     return {textos, colores};
   }
   
@@ -273,5 +307,5 @@
   // API pública
   window.reaplicarDayu = actualizar;
   
-  console.log('✅ DAYU v8 listo');
+  console.log('✅ DAYU v9 listo - Soporta HEX y RGB');
 })();
