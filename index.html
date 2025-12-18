@@ -425,35 +425,66 @@
 <script>
 (function () {
 
+  function parseRgbText(t) {
+    // "RGB: 116,140,92"
+    const m = (t || "").match(/RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+    if (!m) return null;
+    return [Number(m[1]), Number(m[2]), Number(m[3])];
+  }
+
   function dist2(a, b) {
     const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
     return dr*dr + dg*dg + db*db;
   }
 
-  // Lee TODOS los text nodes y extrae RGBs aunque estén en spans / saltos / etc.
-  function getSwatchRgbsFromTextNodes() {
-    const rgbs = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-    let node;
+  // Encuentra el bloque de paleta (donde están los cuadritos 0..15 + "RGB:")
+  // y arma mapping exacto: idx -> rgb
+  function buildIndexToRgbFromPaletteBlock() {
+    const idxToRgb = new Map();
 
-    // Busca patrones tipo: RGB: 116,140,92  (con o sin espacios)
-    const re = /RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/gi;
+    // Tomamos todos los elementos que contengan "RGB:" (pero trabajamos LOCALMENTE por contenedor)
+    const rgbEls = Array.from(document.querySelectorAll("body *"))
+      .filter(el => /RGB:\s*\d+\s*,\s*\d+\s*,\s*\d+/i.test((el.textContent || "").trim()));
 
-    while ((node = walker.nextNode())) {
-      const t = node.nodeValue || "";
-      let m;
-      while ((m = re.exec(t)) !== null) {
-        rgbs.push([Number(m[1]), Number(m[2]), Number(m[3])]);
+    for (const rgbEl of rgbEls) {
+      const rgb = parseRgbText((rgbEl.textContent || "").trim());
+      if (!rgb) continue;
+
+      // Buscamos el número (0..99) en el MISMO “bloque” (padre / abuelo)
+      let container = rgbEl.parentElement;
+      let foundIdx = null;
+
+      for (let hops = 0; hops < 3 && container; hops++) {
+        const nums = Array.from(container.querySelectorAll("*"))
+          .filter(x => /^\d+$/.test((x.textContent || "").trim()))
+          .map(x => (x.textContent || "").trim());
+
+        // En el bloque correcto suele haber exactamente 1 número grande asociado al RGB
+        // Si hay varios, no elegimos (para no mapear mal).
+        const uniq = Array.from(new Set(nums));
+        if (uniq.length === 1) {
+          foundIdx = uniq[0];
+          break;
+        }
+        container = container.parentElement;
+      }
+
+      if (foundIdx !== null) {
+        // si el mismo índice aparece varias veces, nos quedamos con el primero (el de la paleta)
+        if (!idxToRgb.has(foundIdx)) idxToRgb.set(foundIdx, rgb);
       }
     }
 
-    return rgbs; // en orden de aparición: idx 0..N-1
+    return idxToRgb;
   }
 
-  // Asignación 1:1 (sin repetir códigos)
-  function buildUniqueIndexToDayuCode(swatchesRgb) {
+  // Asignación 1:1 sin repetir: idx -> code (DAYU)
+  function buildUniqueIdxToCode(idxToRgb) {
     const dayu = (window.DAYU_PALETTE || []).filter(x => x && x.rgb && x.code);
     if (!dayu.length) return new Map();
+
+    const idxs = Array.from(idxToRgb.keys()).sort((a,b) => Number(a)-Number(b));
+    const swatchesRgb = idxs.map(i => idxToRgb.get(i));
 
     const pairs = [];
     for (let i = 0; i < swatchesRgb.length; i++) {
@@ -471,29 +502,26 @@
       if (usedI.has(p.i) || usedJ.has(p.j)) continue;
       usedI.add(p.i);
       usedJ.add(p.j);
-      idxToCode.set(String(p.i), String(dayu[p.j].code).trim());
+
+      const idxLabel = idxs[p.i];                 // "0","1","2"...
+      const code = String(dayu[p.j].code).trim(); // "WG4","BG5","45"...
+      idxToCode.set(idxLabel, code);
+
       if (idxToCode.size === swatchesRgb.length) break;
     }
 
     return idxToCode;
   }
 
-  function relabelSvg(idxToCode) {
-    const svgs = Array.from(document.querySelectorAll("svg"));
-    if (!svgs.length) return false;
+  function relabelAllSvgTexts(idxToCode) {
+    if (!idxToCode.size) return false;
 
-    // SVG más grande
-    let target = null, bestArea = 0;
-    for (const s of svgs) {
-      const r = s.getBoundingClientRect();
-      const area = r.width * r.height;
-      if (area > bestArea) { bestArea = area; target = s; }
-    }
-    if (!target) return false;
+    const texts = document.querySelectorAll("svg text");
+    if (!texts.length) return false;
 
     let changed = false;
 
-    target.querySelectorAll("text").forEach(t => {
+    texts.forEach(t => {
       const v = (t.textContent || "").trim();
       if (/^\d+$/.test(v) && idxToCode.has(v)) {
         t.textContent = idxToCode.get(v);
@@ -501,40 +529,32 @@
       }
     });
 
-    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
-    let node;
-    while ((node = walker.nextNode())) {
-      const v = (node.nodeValue || "").trim();
-      if (/^\d+$/.test(v) && idxToCode.has(v)) {
-        node.nodeValue = idxToCode.get(v);
-        changed = true;
-      }
-    }
-
     return changed;
   }
 
   function run() {
     if (!window.DAYU_PALETTE || !window.DAYU_PALETTE.length) return false;
 
-    const swatchesRgb = getSwatchRgbsFromTextNodes();
-    if (!swatchesRgb.length) return false;
+    const idxToRgb = buildIndexToRgbFromPaletteBlock();
+    if (!idxToRgb.size) return false;
 
-    const idxToCode = buildUniqueIndexToDayuCode(swatchesRgb);
+    const idxToCode = buildUniqueIdxToCode(idxToRgb);
     if (!idxToCode.size) return false;
 
-    return relabelSvg(idxToCode);
+    return relabelAllSvgTexts(idxToCode);
   }
 
   window.addEventListener("DOMContentLoaded", () => {
-    // Reintenta varios segundos (porque el resultado se arma después)
-    const start = Date.now();
+    // Reintentar mientras se termina de generar
+    let tries = 0;
     const timer = setInterval(() => {
+      tries++;
       const ok = run();
-      if (ok || Date.now() - start > 12000) clearInterval(timer);
+      // cuando ya cambió algo, dejamos de spammear
+      if (ok || tries > 60) clearInterval(timer); // ~15s
     }, 250);
 
-    // Reaplica al regenerar
+    // Cuando regeneras, vuelve a intentar
     const obs = new MutationObserver(() => run());
     obs.observe(document.body, { childList:true, subtree:true, characterData:true });
   });
