@@ -696,5 +696,4 @@
   
   console.log(`✅ DAYU ${VERSION} cargado`);
 })();
-git commit --allow-empty -m "Retry deploy"
-git push
+
