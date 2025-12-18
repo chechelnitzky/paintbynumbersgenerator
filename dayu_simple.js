@@ -1,21 +1,43 @@
-/* dayu_simple.js - v10: Auto-detección de cambios en SVG */
+/* dayu_simple.js - v11: Persistencia + Updates en tiempo real */
 
 (function() {
   'use strict';
   
-  console.log('🎨 DAYU v10 - Auto-actualización');
+  console.log('🎨 DAYU v11 - Persistencia mejorada');
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
     return;
   }
   
-  if (!window.dayuMapping) {
-    window.dayuMapping = {};
+  // Guardar mapeo en localStorage para persistencia
+  function guardarMapeo() {
+    if (Object.keys(window.dayuMapping || {}).length > 0) {
+      localStorage.setItem('dayuMapping', JSON.stringify(window.dayuMapping));
+      console.log('💾 Mapeo guardado');
+    }
   }
   
+  function cargarMapeo() {
+    const saved = localStorage.getItem('dayuMapping');
+    if (saved) {
+      try {
+        window.dayuMapping = JSON.parse(saved);
+        console.log('📂 Mapeo cargado:', Object.keys(window.dayuMapping).length, 'colores');
+        return true;
+      } catch(e) {
+        console.error('❌ Error cargando mapeo:', e);
+      }
+    }
+    window.dayuMapping = {};
+    return false;
+  }
+  
+  // Inicializar
+  cargarMapeo();
+  
   let svgObserver = null;
-  let lastSvgContent = '';
+  let isUpdating = false;
   
   function dist(rgb1, rgb2) {
     return Math.pow(rgb1[0]-rgb2[0],2) + Math.pow(rgb1[1]-rgb2[1],2) + Math.pow(rgb1[2]-rgb2[2],2);
@@ -61,36 +83,53 @@
       p.parentNode.insertBefore(btn, p);
     }
     
-    // Botón re-aplicar (mantener por si acaso)
-    if (!document.getElementById('btnReaplicar')) {
-      const btn2 = document.createElement('button');
-      btn2.id = 'btnReaplicar';
-      btn2.textContent = '🔄 RE-APLICAR MANUAL';
-      btn2.className = 'waves-effect waves-light btn';
-      btn2.style.cssText = 'margin:10px 0;background:#26a69a;font-weight:bold;display:none;';
-      btn2.onclick = () => {
-        const r = actualizar();
-        alert(`✅ Re-aplicado!\n${r.textos} textos\n${r.colores} colores`);
+    // Botón limpiar mapeo
+    if (!document.getElementById('btnLimpiar')) {
+      const btn3 = document.createElement('button');
+      btn3.id = 'btnLimpiar';
+      btn3.textContent = '🗑️ LIMPIAR';
+      btn3.className = 'waves-effect waves-light btn red';
+      btn3.style.cssText = 'margin:10px 5px;font-weight:bold;display:none;';
+      btn3.onclick = () => {
+        if (confirm('¿Seguro que quieres limpiar el mapeo DAYU?')) {
+          window.dayuMapping = {};
+          localStorage.removeItem('dayuMapping');
+          location.reload();
+        }
       };
-      p.parentNode.insertBefore(btn2, p);
+      p.parentNode.insertBefore(btn3, p);
     }
     
-    // Indicador de auto-actualización
-    if (!document.getElementById('dayuAutoIndicator')) {
-      const indicator = document.createElement('span');
-      indicator.id = 'dayuAutoIndicator';
-      indicator.textContent = '🔄 Auto-actualización: OFF';
-      indicator.style.cssText = 'margin-left:10px;padding:5px 10px;background:#ff9800;color:white;border-radius:4px;font-size:12px;font-weight:bold;display:none;';
-      p.parentNode.insertBefore(indicator, p);
+    // Indicador de estado
+    if (!document.getElementById('dayuStatus')) {
+      const status = document.createElement('div');
+      status.id = 'dayuStatus';
+      status.style.cssText = 'margin:10px 0;padding:8px 12px;background:#f5f5f5;border-radius:4px;font-size:13px;display:none;';
+      p.parentNode.insertBefore(status, p);
     }
     
     return true;
   }
   
+  function actualizarStatus(mensaje, color = '#4CAF50') {
+    const status = document.getElementById('dayuStatus');
+    if (status) {
+      status.style.display = 'block';
+      status.style.background = color;
+      status.style.color = 'white';
+      status.textContent = mensaje;
+      
+      setTimeout(() => {
+        status.style.background = '#f5f5f5';
+        status.style.color = '#333';
+      }, 2000);
+    }
+  }
+  
   function iniciarObservador() {
     const container = document.getElementById('svgContainer');
     if (!container) {
-      console.log('⏳ Esperando svgContainer...');
+      setTimeout(iniciarObservador, 500);
       return false;
     }
     
@@ -99,69 +138,36 @@
     }
     
     svgObserver = new MutationObserver((mutations) => {
-      // Detectar si el SVG cambió
+      if (isUpdating) return;
+      
       const svg = container.querySelector('svg');
       if (!svg) return;
       
-      const currentContent = svg.innerHTML.substring(0, 1000); // Solo comparar inicio
+      // Detectar si hay elementos sin mapear (números 0-9 en vez de códigos DAYU)
+      const textos = Array.from(svg.querySelectorAll('text'));
+      const tieneNumeros = textos.some(t => {
+        const txt = t.textContent.trim();
+        return /^\d+$/.test(txt) && txt.length < 3; // Números cortos (0-99)
+      });
       
-      if (currentContent !== lastSvgContent && lastSvgContent !== '') {
-        console.log('🔄 SVG cambió, re-aplicando DAYU...');
+      if (tieneNumeros && Object.keys(window.dayuMapping).length > 0) {
+        console.log('🔄 SVG regenerado, re-aplicando DAYU...');
         
-        // Esperar un poco para que el SVG termine de renderizar
         setTimeout(() => {
           const r = actualizar();
           console.log(`✅ Auto-aplicado: ${r.textos}t, ${r.colores}c`);
-          
-          // Mostrar notificación visual
-          mostrarNotificacion(`✅ DAYU aplicado: ${r.textos} textos, ${r.colores} colores`);
-        }, 100);
+          actualizarStatus(`✅ DAYU aplicado: ${r.textos} textos, ${r.colores} colores`);
+        }, 200);
       }
-      
-      lastSvgContent = currentContent;
     });
     
     svgObserver.observe(container, {
       childList: true,
-      subtree: true,
-      attributes: false
+      subtree: true
     });
     
-    console.log('👁️ Observer activado en svgContainer');
-    
-    // Actualizar indicador
-    const indicator = document.getElementById('dayuAutoIndicator');
-    if (indicator) {
-      indicator.textContent = '🔄 Auto-actualización: ON';
-      indicator.style.background = '#4CAF50';
-    }
-    
+    console.log('👁️ Observer activado');
     return true;
-  }
-  
-  function mostrarNotificacion(mensaje) {
-    const notif = document.createElement('div');
-    notif.textContent = mensaje;
-    notif.style.cssText = `
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: #4CAF50;
-      color: white;
-      padding: 15px 25px;
-      border-radius: 8px;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-      z-index: 10000;
-      font-weight: bold;
-      animation: slideIn 0.3s ease-out;
-    `;
-    
-    document.body.appendChild(notif);
-    
-    setTimeout(() => {
-      notif.style.animation = 'slideOut 0.3s ease-out';
-      setTimeout(() => notif.remove(), 300);
-    }, 3000);
   }
   
   function mapear() {
@@ -229,20 +235,25 @@
       if (Object.keys(window.dayuMapping).length === datos.length) break;
     }
     
+    // Guardar mapeo
+    guardarMapeo();
+    
+    // Hacer cajitas editables
     hacerEditables();
+    
+    // Aplicar al SVG actual
     const r = actualizar();
     
-    // Iniciar el observer después del primer mapeo
-    const observerIniciado = iniciarObservador();
+    // Iniciar observer
+    iniciarObservador();
     
-    // Mostrar botón re-aplicar e indicador
-    const btnReaplicar = document.getElementById('btnReaplicar');
-    if (btnReaplicar) btnReaplicar.style.display = 'inline-block';
+    // Mostrar botón limpiar
+    const btnLimpiar = document.getElementById('btnLimpiar');
+    if (btnLimpiar) btnLimpiar.style.display = 'inline-block';
     
-    const indicator = document.getElementById('dayuAutoIndicator');
-    if (indicator) indicator.style.display = 'inline-block';
+    actualizarStatus(`✅ ${Object.keys(window.dayuMapping).length} colores mapeados | ${r.textos} textos | ${r.colores} colores`, '#4CAF50');
     
-    alert(`✅ Listo!\n${Object.keys(window.dayuMapping).length} colores mapeados\n${r.textos} textos actualizados\n${r.colores} colores aplicados\n\n🤖 Auto-actualización ${observerIniciado ? 'ACTIVADA' : 'pendiente'}\n💡 Los cambios se aplicarán automáticamente al cambiar SVG multiplier`);
+    alert(`✅ Mapeo completado!\n\n📊 ${Object.keys(window.dayuMapping).length} colores DAYU\n📝 ${r.textos} textos actualizados\n🎨 ${r.colores} colores aplicados\n\n🤖 Auto-actualización ACTIVADA\n💾 Mapeo guardado\n\n💡 Ahora puedes:\n• Cambiar SVG multiplier (se aplicará automáticamente)\n• Editar colores haciendo clic en las cajitas`);
   }
   
   function hacerEditables() {
@@ -254,7 +265,7 @@
       caja.parentNode.replaceChild(nueva, caja);
       
       nueva.style.cursor = 'pointer';
-      nueva.title = 'Clic para editar';
+      nueva.title = 'Clic para editar (Enter para aplicar)';
       
       nueva.addEventListener('click', function(e) {
         e.stopPropagation();
@@ -292,6 +303,7 @@
         return;
       }
       
+      // Actualizar el mapeo
       window.dayuMapping[num] = {
         code: dayu.code,
         hex: dayu.hex,
@@ -303,9 +315,13 @@
       caja.textContent = dayu.code;
       caja.style.backgroundColor = dayu.hex;
       
+      // Guardar cambio
+      guardarMapeo();
+      
+      // APLICAR INMEDIATAMENTE AL SVG
       const r = actualizar();
       console.log(`✏️ ${num} → ${dayu.code}: ${r.textos}t, ${r.colores}c`);
-      mostrarNotificacion(`✏️ Color ${num} cambiado a ${dayu.code}`);
+      actualizarStatus(`✏️ Color ${num} → ${dayu.code} (${r.textos}t, ${r.colores}c)`, '#2196F3');
     };
     
     inp.addEventListener('blur', aplicarCambio);
@@ -324,6 +340,13 @@
     const svg = document.querySelector('#svgContainer svg');
     if (!svg) return {textos:0, colores:0};
     
+    if (Object.keys(window.dayuMapping).length === 0) {
+      console.log('⚠️ No hay mapeo guardado');
+      return {textos:0, colores:0};
+    }
+    
+    isUpdating = true;
+    
     let textos = 0;
     let colores = 0;
     
@@ -332,79 +355,108 @@
       const txt = t.textContent.trim();
       
       if (window.dayuMapping[txt]) {
-        t.dataset.orig = txt;
         t.textContent = window.dayuMapping[txt].code;
+        t.dataset.origNum = txt;
         textos++;
       }
     });
     
-    // Actualizar colores - SOPORTA HEX Y RGB
+    // Actualizar colores
     svg.querySelectorAll('path, polygon').forEach(s => {
       const style = s.getAttribute('style');
       if (!style) return;
       
       let rgbActual = null;
       let esHex = false;
+      let matchOriginal = null;
       
       // Intentar extraer HEX
       const mHex = style.match(/fill:\s*(#[0-9a-fA-F]{3,6})/);
       if (mHex) {
         rgbActual = hexToRgb(mHex[1]);
         esHex = true;
+        matchOriginal = mHex[1];
       } else {
         // Intentar extraer RGB
         const mRgb = style.match(/fill:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
         if (mRgb) {
           rgbActual = [+mRgb[1], +mRgb[2], +mRgb[3]];
+          matchOriginal = `rgb(${mRgb[1]},${mRgb[2]},${mRgb[3]})`;
         }
       }
       
       if (!rgbActual) return;
       
-      // Buscar qué número corresponde a este color
+      // Buscar el color más cercano en el mapeo
+      let mejorMatch = null;
+      let menorDist = Infinity;
+      
       for (const [num, data] of Object.entries(window.dayuMapping)) {
         const distancia = dist(rgbActual, data.rgbOriginal);
         
-        // Tolerancia de 5 para variaciones de redondeo
-        if (distancia < 5) {
-          // Reemplazar el fill en el style
-          let nuevoStyle;
-          if (esHex) {
-            nuevoStyle = style.replace(/fill:\s*#[0-9a-fA-F]{3,6}/, `fill: ${data.hex}`);
-          } else {
-            nuevoStyle = style.replace(/fill:\s*rgb\([^)]+\)/, `fill: ${data.hex}`);
-          }
-          
-          s.setAttribute('style', nuevoStyle);
-          s.dataset.num = num;
-          colores++;
-          break;
+        if (distancia < menorDist) {
+          menorDist = distancia;
+          mejorMatch = {num, data};
         }
       }
+      
+      // Si la distancia es razonable, aplicar
+      if (mejorMatch && menorDist < 100) {
+        let nuevoStyle;
+        if (esHex) {
+          nuevoStyle = style.replace(/fill:\s*#[0-9a-fA-F]{3,6}/, `fill: ${mejorMatch.data.hex}`);
+        } else {
+          nuevoStyle = style.replace(/fill:\s*rgb\([^)]+\)/, `fill: ${mejorMatch.data.hex}`);
+        }
+        
+        s.setAttribute('style', nuevoStyle);
+        s.dataset.origNum = mejorMatch.num;
+        colores++;
+      }
     });
+    
+    isUpdating = false;
     
     console.log(`✅ Actualizado: ${textos} textos, ${colores} colores`);
     return {textos, colores};
   }
   
   function init() {
-    // Agregar estilos para animaciones
+    // Agregar estilos
     const style = document.createElement('style');
     style.textContent = `
-      @keyframes slideIn {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-      }
-      @keyframes slideOut {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(100%); opacity: 0; }
+      #dayuStatus {
+        transition: all 0.3s ease;
+        font-weight: 600;
       }
     `;
     document.head.appendChild(style);
     
     let i = 0;
     const t = setInterval(() => {
-      if (crearBotones() || ++i > 20) clearInterval(t);
+      if (crearBotones() || ++i > 20) {
+        clearInterval(t);
+        
+        // Si hay mapeo guardado, iniciar observer y aplicar
+        if (Object.keys(window.dayuMapping).length > 0) {
+          console.log('📂 Mapeo detectado, activando auto-aplicación...');
+          iniciarObservador();
+          
+          const btnLimpiar = document.getElementById('btnLimpiar');
+          if (btnLimpiar) btnLimpiar.style.display = 'inline-block';
+          
+          // Aplicar si hay SVG
+          setTimeout(() => {
+            const svg = document.querySelector('#svgContainer svg');
+            if (svg) {
+              const r = actualizar();
+              if (r.textos > 0 || r.colores > 0) {
+                actualizarStatus(`📂 Mapeo restaurado: ${r.textos}t, ${r.colores}c`, '#9C27B0');
+              }
+            }
+          }, 1000);
+        }
+      }
     }, 500);
   }
   
@@ -415,11 +467,23 @@
   }
   
   // API pública
-  window.reaplicarDayu = actualizar;
+  window.reaplicarDayu = () => {
+    const r = actualizar();
+    console.log('🔄 Re-aplicado:', r);
+    return r;
+  };
+  
   window.dayuInfo = () => {
     console.log('🎨 DAYU Mapping:', window.dayuMapping);
     console.log('👁️ Observer activo:', !!svgObserver);
+    console.log('💾 En localStorage:', !!localStorage.getItem('dayuMapping'));
   };
   
-  console.log('✅ DAYU v10 listo - Auto-actualización inteligente');
+  window.limpiarDayu = () => {
+    window.dayuMapping = {};
+    localStorage.removeItem('dayuMapping');
+    console.log('🗑️ Mapeo limpiado');
+  };
+  
+  console.log('✅ DAYU v11 listo - Persistencia + Updates en tiempo real');
 })();
