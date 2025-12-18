@@ -131,9 +131,11 @@
     const num = caja.dataset.num;
     const actual = caja.textContent.trim();
     
+    console.log(`✏️ Editando cajita ${num}, código actual: ${actual}`);
+    
     const inp = document.createElement('input');
     inp.value = actual;
-    inp.style.cssText = 'width:100%;height:100%;border:3px solid #f00;text-align:center;font:inherit;box-sizing:border-box;';
+    inp.style.cssText = 'width:100%;height:100%;border:3px solid #f00;text-align:center;font:inherit;box-sizing:border-box;background:white;color:black;';
     caja.textContent = '';
     caja.appendChild(inp);
     inp.focus();
@@ -141,14 +143,26 @@
     
     const ok = () => {
       const nuevo = inp.value.trim().toUpperCase();
-      if (!nuevo) return caja.textContent = actual;
       
-      const dayu = window.DAYU_PALETTE.find(d => d.code.toUpperCase() === nuevo);
-      if (!dayu) {
-        alert(`❌ "${nuevo}" no existe`);
-        return caja.textContent = actual;
+      console.log(`📝 Nuevo código ingresado: "${nuevo}"`);
+      
+      if (!nuevo) {
+        caja.textContent = actual;
+        return;
       }
       
+      const dayu = window.DAYU_PALETTE.find(d => d.code.toUpperCase() === nuevo);
+      
+      if (!dayu) {
+        console.error(`❌ Código "${nuevo}" no encontrado`);
+        alert(`❌ "${nuevo}" no existe\n\nEjemplos: 64, 167, WG3, BG5`);
+        caja.textContent = actual;
+        return;
+      }
+      
+      console.log(`✅ DAYU encontrado: ${dayu.code} (${dayu.hex})`);
+      
+      // Actualizar mapping
       mapping[num] = {
         code: dayu.code,
         hex: dayu.hex,
@@ -156,15 +170,27 @@
         rgbOriginal: caja.dataset.rgbOrig
       };
       
+      // Actualizar cajita
       caja.textContent = dayu.code;
       caja.style.backgroundColor = dayu.hex;
-      actualizar();
+      
+      console.log(`🔄 Llamando a actualizar()...`);
+      
+      // Actualizar SVG
+      const resultado = actualizar();
+      
+      console.log(`✅ Actualización completada: ${resultado.textos} textos, ${resultado.colores} colores`);
     };
     
     inp.onblur = ok;
     inp.onkeydown = e => {
-      if (e.key === 'Enter') ok();
-      if (e.key === 'Escape') caja.textContent = actual;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        ok();
+      }
+      if (e.key === 'Escape') {
+        caja.textContent = actual;
+      }
     };
   }
   
