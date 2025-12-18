@@ -425,49 +425,42 @@
 <script>
 (function () {
 
-  function parseRgbLine(str) {
-    // "RGB: 116,140,92"
-    const m = (str || "").match(/^RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*$/i);
-    if (!m) return null;
-    return [Number(m[1]), Number(m[2]), Number(m[3])];
-  }
-
   function dist2(a, b) {
     const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
     return dr*dr + dg*dg + db*db;
   }
 
-  // 1) Sacar lista de swatches desde los textos "RGB: r,g,b"
-  //    y asociarlos al índice 0..N-1 (en orden de aparición).
-  function getSwatchRgbsFromDom() {
-    // Busca nodos que sean exactamente "RGB: x,y,z"
-    const rgbEls = Array.from(document.querySelectorAll("body *"))
-      .filter(el => {
-        const t = (el.textContent || "").trim();
-        return /^RGB:\s*\d+\s*,\s*\d+\s*,\s*\d+\s*$/i.test(t);
-      });
-
+  // Lee TODOS los text nodes y extrae RGBs aunque estén en spans / saltos / etc.
+  function getSwatchRgbsFromTextNodes() {
     const rgbs = [];
-    for (const el of rgbEls) {
-      const rgb = parseRgbLine((el.textContent || "").trim());
-      if (rgb) rgbs.push(rgb);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+    let node;
+
+    // Busca patrones tipo: RGB: 116,140,92  (con o sin espacios)
+    const re = /RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/gi;
+
+    while ((node = walker.nextNode())) {
+      const t = node.nodeValue || "";
+      let m;
+      while ((m = re.exec(t)) !== null) {
+        rgbs.push([Number(m[1]), Number(m[2]), Number(m[3])]);
+      }
     }
-    return rgbs; // en orden: idx 0..N-1
+
+    return rgbs; // en orden de aparición: idx 0..N-1
   }
 
-  // 2) Asignación 1:1: cada swatch toma el Dayu más cercano sin repetir códigos
+  // Asignación 1:1 (sin repetir códigos)
   function buildUniqueIndexToDayuCode(swatchesRgb) {
     const dayu = (window.DAYU_PALETTE || []).filter(x => x && x.rgb && x.code);
+    if (!dayu.length) return new Map();
 
-    // lista de todos los pares (i, j, d)
     const pairs = [];
     for (let i = 0; i < swatchesRgb.length; i++) {
       for (let j = 0; j < dayu.length; j++) {
         pairs.push({ i, j, d: dist2(swatchesRgb[i], dayu[j].rgb) });
       }
     }
-
-    // Ordenar por distancia (mejor match primero)
     pairs.sort((a,b) => a.d - b.d);
 
     const usedI = new Set();
@@ -475,25 +468,21 @@
     const idxToCode = new Map();
 
     for (const p of pairs) {
-      if (usedI.has(p.i)) continue;
-      if (usedJ.has(p.j)) continue;
-
+      if (usedI.has(p.i) || usedJ.has(p.j)) continue;
       usedI.add(p.i);
       usedJ.add(p.j);
       idxToCode.set(String(p.i), String(dayu[p.j].code).trim());
-
       if (idxToCode.size === swatchesRgb.length) break;
     }
 
     return idxToCode;
   }
 
-  // 3) Reemplazar labels en el SVG resultado
   function relabelSvg(idxToCode) {
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return false;
 
-    // Tomamos el SVG más grande como "resultado"
+    // SVG más grande
     let target = null, bestArea = 0;
     for (const s of svgs) {
       const r = s.getBoundingClientRect();
@@ -502,25 +491,33 @@
     }
     if (!target) return false;
 
-    // Cambiar textos numéricos
+    let changed = false;
+
     target.querySelectorAll("text").forEach(t => {
       const v = (t.textContent || "").trim();
-      if (/^\d+$/.test(v) && idxToCode.has(v)) t.textContent = idxToCode.get(v);
+      if (/^\d+$/.test(v) && idxToCode.has(v)) {
+        t.textContent = idxToCode.get(v);
+        changed = true;
+      }
     });
 
-    // fallback por si hay nodos de texto sueltos
     const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, null);
     let node;
     while ((node = walker.nextNode())) {
       const v = (node.nodeValue || "").trim();
-      if (/^\d+$/.test(v) && idxToCode.has(v)) node.nodeValue = idxToCode.get(v);
+      if (/^\d+$/.test(v) && idxToCode.has(v)) {
+        node.nodeValue = idxToCode.get(v);
+        changed = true;
+      }
     }
 
-    return true;
+    return changed;
   }
 
   function run() {
-    const swatchesRgb = getSwatchRgbsFromDom();
+    if (!window.DAYU_PALETTE || !window.DAYU_PALETTE.length) return false;
+
+    const swatchesRgb = getSwatchRgbsFromTextNodes();
     if (!swatchesRgb.length) return false;
 
     const idxToCode = buildUniqueIndexToDayuCode(swatchesRgb);
@@ -530,14 +527,14 @@
   }
 
   window.addEventListener("DOMContentLoaded", () => {
-    // Reintentos (la UI renderiza en etapas)
+    // Reintenta varios segundos (porque el resultado se arma después)
     const start = Date.now();
     const timer = setInterval(() => {
       const ok = run();
-      if (ok || Date.now() - start > 8000) clearInterval(timer);
+      if (ok || Date.now() - start > 12000) clearInterval(timer);
     }, 250);
 
-    // Reaplicar cuando regeneras
+    // Reaplica al regenerar
     const obs = new MutationObserver(() => run());
     obs.observe(document.body, { childList:true, subtree:true, characterData:true });
   });
