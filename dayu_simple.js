@@ -326,7 +326,17 @@
         // Cambiar color de faceta
         const parent = texto.parentElement;
         if (parent) {
-          const shapes = parent.querySelectorAll('path, polygon, rect, circle, ellipse');
+          // Buscar shapes en múltiples niveles
+          let shapes = parent.querySelectorAll('path, polygon, rect, circle, ellipse');
+          
+          // Si no encuentra shapes en el parent directo, buscar en nivel superior
+          if (shapes.length === 0) {
+            const grandParent = parent.parentElement;
+            if (grandParent) {
+              shapes = grandParent.querySelectorAll('path, polygon, rect, circle, ellipse');
+            }
+          }
+          
           shapes.forEach(shape => {
             const fill = shape.getAttribute('fill');
             if (fill && fill !== 'none') {
@@ -395,21 +405,41 @@
         // CAMBIAR COLOR de la faceta asociada
         const parent = texto.parentElement;
         if (parent) {
+          // Buscar shapes en el mismo grupo
           const shapes = parent.querySelectorAll('path, polygon, rect, circle, ellipse');
-          shapes.forEach(shape => {
-            const fill = shape.getAttribute('fill');
-            if (fill && fill !== 'none') {
-              if (!shape.dataset.originalFill) {
-                shape.dataset.originalFill = fill;
-              }
-              shape.setAttribute('fill', dayu.hex);
-              if (shape.style) {
-                shape.style.fill = dayu.hex;
-              }
-              coloresActualizados++;
-              console.log(`    🎨 Color cambiado: ${fill} → ${dayu.hex}`);
+          
+          if (shapes.length === 0) {
+            // Si no hay shapes en el parent directo, buscar en hermanos
+            const grandParent = parent.parentElement;
+            if (grandParent) {
+              const allShapes = grandParent.querySelectorAll('path, polygon, rect, circle, ellipse');
+              allShapes.forEach(shape => {
+                const fill = shape.getAttribute('fill');
+                if (fill && fill !== 'none') {
+                  if (!shape.dataset.originalFill) {
+                    shape.dataset.originalFill = fill;
+                  }
+                  shape.setAttribute('fill', dayu.hex);
+                  shape.style.fill = dayu.hex;
+                  coloresActualizados++;
+                  console.log(`    🎨 Color cambiado (hermano): ${fill} → ${dayu.hex}`);
+                }
+              });
             }
-          });
+          } else {
+            shapes.forEach(shape => {
+              const fill = shape.getAttribute('fill');
+              if (fill && fill !== 'none') {
+                if (!shape.dataset.originalFill) {
+                  shape.dataset.originalFill = fill;
+                }
+                shape.setAttribute('fill', dayu.hex);
+                shape.style.fill = dayu.hex;
+                coloresActualizados++;
+                console.log(`    🎨 Color cambiado: ${fill} → ${dayu.hex}`);
+              }
+            });
+          }
         }
       }
     });
