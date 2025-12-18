@@ -1,5 +1,5 @@
 // dayu_palette.js
-// Paleta DAYU (167 colores, sin el "0"). Incluye hex definitivos y genera RGB automáticamente.
+// Paleta DAYU (167 colores)
 (() => {
   const DAYU_HEX = {
     "1":"#68303e","2":"#8e3954","3":"#ca3b5e","4":"#c22f5a","5":"#c02143","6":"#e451af","7":"#de7fab","8":"#e077a7","9":"#ef96c3",
@@ -14,7 +14,7 @@
     "91":"#894c4c","92":"#9f5b43","93":"#b06e64","94":"#9c5757","95":"#8b5949","96":"#b06852","97":"#cb8279","98":"#765151","99":"#7b5e55",
     "100":"#a57243","101":"#b38153","102":"#936c52","103":"#c2615d","104":"#be9a54","107":"#efa763","109":"#e1d5bd",
     "120":"#000000","121":"#ef418a","122":"#ef5a6a","123":"#dade83","124":"#aedf7d","125":"#ef3993","126":"#ef55a7",
-    "131":"#e9dab2","132":"#efc99d","133":"#efb96e","134":"#efb766","135":"#eacbaf","136":"#ebcae2","137":"#e883bf","138":"#eecee1","139":"#ebc281",
+    "131":"#e9dab2","132":"#efc99d","133":"#efb966","134":"#efb766","135":"#eacbaf","136":"#ebcae2","137":"#e883bf","138":"#eecee1","139":"#ebc281",
     "140":"#ef7e74","141":"#e9bf7b","142":"#e2cd98","143":"#bce5e0","144":"#91ccee","145":"#e9d9e2","146":"#dac6e2","147":"#e6bbde",
     "163":"#d4e5ab","164":"#e8d36d","166":"#b3dfa9","167":"#91db7b","169":"#d8d3ba",
     "171":"#c1e1e3","172":"#c5e3e0","173":"#e7e1b9","174":"#decd95","175":"#a9d2a5",
@@ -24,16 +24,15 @@
     "GG1":"#dde4e5","GG3":"#d8d7dd","GG5":"#929593","GG7":"#6e7778","GG9":"#49564d",
     "WG0.5":"#e0e0e0","WG1":"#d8cfd2","WG2":"#d0b7c6","WG3":"#b8909e","WG4":"#af8193","WG5":"#ad8c94","WG6":"#937882","WG7":"#855f64","WG8":"#775a65","WG9":"#534547"
   };
-
   function hexToRgb(hex) {
     const h = (hex || "").replace("#", "").trim();
     return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
   }
-
   window.DAYU_HEX = DAYU_HEX;
   window.DAYU_PALETTE = Object.entries(DAYU_HEX).map(([code, hex]) => ({
     code,
     hex: hex.toLowerCase(),
     rgb: hexToRgb(hex)
   }));
+  console.log('✅ DAYU_PALETTE cargada:', window.DAYU_PALETTE.length, 'colores');
 })();
