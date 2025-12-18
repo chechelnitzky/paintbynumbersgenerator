@@ -420,110 +420,100 @@
         });
     </script>
 <!-- Load Dayu palette -->
+<!-- Dayu: load palette + force restrictions + rename SVG labels -->
 <script src="./dayu_palette.js"></script>
-
 <script>
-(function () {
+(() => {
+  const DAYU = Array.isArray(window.DAYU_PALETTE) ? window.DAYU_PALETTE : [];
+  const DAYU_BY_RGB = window.DAYU_BY_RGB instanceof Map
+    ? window.DAYU_BY_RGB
+    : new Map(DAYU.map(p => [p.rgb.join(','), p.code]));
 
-  function parseRgbText(t) {
-    // "RGB: 116,140,92"
-    const m = (t || "").match(/RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-    if (!m) return null;
-    return [Number(m[1]), Number(m[2]), Number(m[3])];
-  }
+  const rgbRe = /^RGB:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$/i;
 
-  function dist2(a, b) {
-    const dr = a[0]-b[0], dg = a[1]-b[1], db = a[2]-b[2];
+  const dist2 = (a,b) => {
+    const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2];
     return dr*dr + dg*dg + db*db;
+  };
+
+  function fillKMeansRestrictionsWithDayu() {
+    const ta = document.getElementById('txtKMeansColorRestrictions');
+    if (!ta || !DAYU.length) return;
+
+    // 167 líneas: "r,g,b"
+    ta.value = DAYU.map(p => p.rgb.join(',')).join('\n');
+    ta.setAttribute('readonly', 'readonly');
+
+    // si Materialize está activo, ajusta altura
+    if (window.M && typeof M.textareaAutoResize === 'function') {
+      M.textareaAutoResize(ta);
+    }
   }
 
-  // Encuentra el bloque de paleta (donde están los cuadritos 0..15 + "RGB:")
-  // y arma mapping exacto: idx -> rgb
-  function buildIndexToRgbFromPaletteBlock() {
+  // Lee los RGB de la paleta final mostrada en #palette.
+  // IMPORTANT: el orden de los "RGB: ..." corresponde a índices 0..K-1.
+  function getIdxToRgbFromPaletteUI() {
+    const paletteEl = document.getElementById('palette');
+    if (!paletteEl) return null;
+
+    const rgbEls = Array.from(paletteEl.querySelectorAll('*'))
+      .filter(el => rgbRe.test((el.textContent || '').trim()));
+
+    if (!rgbEls.length) return null;
+
     const idxToRgb = new Map();
-
-    // Tomamos todos los elementos que contengan "RGB:" (pero trabajamos LOCALMENTE por contenedor)
-    const rgbEls = Array.from(document.querySelectorAll("body *"))
-      .filter(el => /RGB:\s*\d+\s*,\s*\d+\s*,\s*\d+/i.test((el.textContent || "").trim()));
-
-    for (const rgbEl of rgbEls) {
-      const rgb = parseRgbText((rgbEl.textContent || "").trim());
-      if (!rgb) continue;
-
-      // Buscamos el número (0..99) en el MISMO “bloque” (padre / abuelo)
-      let container = rgbEl.parentElement;
-      let foundIdx = null;
-
-      for (let hops = 0; hops < 3 && container; hops++) {
-        const nums = Array.from(container.querySelectorAll("*"))
-          .filter(x => /^\d+$/.test((x.textContent || "").trim()))
-          .map(x => (x.textContent || "").trim());
-
-        // En el bloque correcto suele haber exactamente 1 número grande asociado al RGB
-        // Si hay varios, no elegimos (para no mapear mal).
-        const uniq = Array.from(new Set(nums));
-        if (uniq.length === 1) {
-          foundIdx = uniq[0];
-          break;
-        }
-        container = container.parentElement;
-      }
-
-      if (foundIdx !== null) {
-        // si el mismo índice aparece varias veces, nos quedamos con el primero (el de la paleta)
-        if (!idxToRgb.has(foundIdx)) idxToRgb.set(foundIdx, rgb);
-      }
-    }
+    rgbEls.forEach((el, idx) => {
+      const m = (el.textContent || '').trim().match(rgbRe);
+      idxToRgb.set(String(idx), [Number(m[1]), Number(m[2]), Number(m[3])]);
+    });
 
     return idxToRgb;
   }
 
-  // Asignación 1:1 sin repetir: idx -> code (DAYU)
-  function buildUniqueIdxToCode(idxToRgb) {
-    const dayu = (window.DAYU_PALETTE || []).filter(x => x && x.rgb && x.code);
-    if (!dayu.length) return new Map();
+  function buildIdxToCode(idxToRgb) {
+    const idxToCode = new Map();
+    if (!idxToRgb || !idxToRgb.size || !DAYU.length) return idxToCode;
 
-    const idxs = Array.from(idxToRgb.keys()).sort((a,b) => Number(a)-Number(b));
-    const swatchesRgb = idxs.map(i => idxToRgb.get(i));
+    const used = new Set();
 
-    const pairs = [];
-    for (let i = 0; i < swatchesRgb.length; i++) {
-      for (let j = 0; j < dayu.length; j++) {
-        pairs.push({ i, j, d: dist2(swatchesRgb[i], dayu[j].rgb) });
+    // 1) match exacto (ideal si el clustering quedó restringido a Dayu)
+    for (const [idx, rgb] of idxToRgb.entries()) {
+      const key = rgb.join(',');
+      const code = DAYU_BY_RGB.get(key);
+      if (code) {
+        idxToCode.set(idx, code);
+        used.add(code);
       }
     }
-    pairs.sort((a,b) => a.d - b.d);
 
-    const usedI = new Set();
-    const usedJ = new Set();
-    const idxToCode = new Map();
+    // 2) fallback: nearest-unused (por si sale un RGB “casi igual”)
+    for (const [idx, rgb] of idxToRgb.entries()) {
+      if (idxToCode.has(idx)) continue;
 
-    for (const p of pairs) {
-      if (usedI.has(p.i) || usedJ.has(p.j)) continue;
-      usedI.add(p.i);
-      usedJ.add(p.j);
+      let best = null;
+      for (const p of DAYU) {
+        if (used.has(p.code)) continue;
+        const d = dist2(rgb, p.rgb);
+        if (!best || d < best.d) best = { code: p.code, d };
+      }
 
-      const idxLabel = idxs[p.i];                 // "0","1","2"...
-      const code = String(dayu[p.j].code).trim(); // "WG4","BG5","45"...
-      idxToCode.set(idxLabel, code);
-
-      if (idxToCode.size === swatchesRgb.length) break;
+      if (best) {
+        idxToCode.set(idx, best.code);
+        used.add(best.code);
+      }
     }
 
     return idxToCode;
   }
 
-  function relabelAllSvgTexts(idxToCode) {
-    if (!idxToCode.size) return false;
-
-    const texts = document.querySelectorAll("svg text");
-    if (!texts.length) return false;
+  function relabelSvg(idxToCode) {
+    const svg = document.querySelector('#svgContainer svg');
+    if (!svg) return false;
 
     let changed = false;
-
-    texts.forEach(t => {
-      const v = (t.textContent || "").trim();
-      if (/^\d+$/.test(v) && idxToCode.has(v)) {
+    svg.querySelectorAll('text').forEach(t => {
+      const v = (t.textContent || '').trim();
+      if (idxToCode.has(v)) {
         t.textContent = idxToCode.get(v);
         changed = true;
       }
@@ -532,33 +522,39 @@
     return changed;
   }
 
-  function run() {
-    if (!window.DAYU_PALETTE || !window.DAYU_PALETTE.length) return false;
+  function runDayuRelabel() {
+    const idxToRgb = getIdxToRgbFromPaletteUI();
+    if (!idxToRgb) return false;
 
-    const idxToRgb = buildIndexToRgbFromPaletteBlock();
-    if (!idxToRgb.size) return false;
-
-    const idxToCode = buildUniqueIdxToCode(idxToRgb);
+    const idxToCode = buildIdxToCode(idxToRgb);
     if (!idxToCode.size) return false;
 
-    return relabelAllSvgTexts(idxToCode);
+    return relabelSvg(idxToCode);
   }
 
-  window.addEventListener("DOMContentLoaded", () => {
-    // Reintentar mientras se termina de generar
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries++;
-      const ok = run();
-      // cuando ya cambió algo, dejamos de spammear
-      if (ok || tries > 60) clearInterval(timer); // ~15s
-    }, 250);
+  function armWatchers() {
+    fillKMeansRestrictionsWithDayu();
 
-    // Cuando regeneras, vuelve a intentar
-    const obs = new MutationObserver(() => run());
-    obs.observe(document.body, { childList:true, subtree:true, characterData:true });
-  });
+    // Reintenta después de "Process image" mientras el SVG se genera
+    const btn = document.getElementById('btnProcess');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        let tries = 0;
+        const timer = setInterval(() => {
+          tries++;
+          const ok = runDayuRelabel();
+          if (ok || tries > 120) clearInterval(timer); // ~30s
+        }, 250);
+      });
+    }
 
+    // Si regeneras, vuelve a renombrar
+    const target = document.getElementById('svgContainer') || document.body;
+    const obs = new MutationObserver(() => runDayuRelabel());
+    obs.observe(target, { childList: true, subtree: true });
+  }
+
+  window.addEventListener('DOMContentLoaded', armWatchers);
 })();
 </script>
 
