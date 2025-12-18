@@ -1,9 +1,9 @@
-/* dayu_simple.js - VERSIÓN FINAL - FIX COLORES */
+/* dayu_simple.js - VERSIÓN FINAL - FIX STYLE */
 
 (function() {
   'use strict';
   
-  console.log('🎨 DAYU Simple v4 - Fix colores');
+  console.log('🎨 DAYU Simple v5 - Fix style colors');
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -13,7 +13,7 @@
   console.log('✅ DAYU_PALETTE:', window.DAYU_PALETTE.length, 'colores');
   
   let numeroToDayu = new Map();
-  let colorToNumero = new Map(); // color original → número
+  let rgbToNumero = new Map(); // "155,202,98" → "0"
   
   function colorDist(rgb1, rgb2) {
     const dr = rgb1[0] - rgb2[0];
@@ -35,13 +35,14 @@
     return m ? [+m[1], +m[2], +m[3]] : null;
   }
   
-  function normalizeHex(color) {
-    if (!color) return null;
-    let hex = color.toLowerCase().replace('#', '').trim();
-    if (hex.length === 3) {
-      hex = hex.split('').map(c => c + c).join('');
-    }
-    return hex.length === 6 ? '#' + hex : null;
+  function rgbKey(rgb) {
+    return `${rgb[0]},${rgb[1]},${rgb[2]}`;
+  }
+  
+  function parseRgbFromStyle(style) {
+    if (!style) return null;
+    const m = style.match(/fill:\s*rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    return m ? [+m[1], +m[2], +m[3]] : null;
   }
   
   function getDayu(code) {
@@ -89,9 +90,8 @@
       const rgb = parseRgb(caja);
       const numero = caja.textContent.trim();
       if (rgb && numero) {
-        const hex = rgbToHex(rgb);
-        datos.push({ idx, numero, rgb, hex, caja });
-        console.log(`📦 ${numero}: ${hex}`);
+        datos.push({ idx, numero, rgb, caja });
+        console.log(`📦 ${numero}: rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`);
       }
     });
     
@@ -103,7 +103,13 @@
     const distancias = [];
     datos.forEach(d => {
       window.DAYU_PALETTE.forEach((dayu, di) => {
-        distancias.push({ idx: d.idx, numero: d.numero, hex: d.hex, dayuIdx: di, dist: colorDist(d.rgb, dayu.rgb) });
+        distancias.push({ 
+          idx: d.idx, 
+          numero: d.numero, 
+          rgb: d.rgb,
+          dayuIdx: di, 
+          dist: colorDist(d.rgb, dayu.rgb) 
+        });
       });
     });
     
@@ -112,7 +118,7 @@
     const usadosIdx = new Set();
     const usadosDayu = new Set();
     numeroToDayu.clear();
-    colorToNumero.clear();
+    rgbToNumero.clear();
     
     for (const d of distancias) {
       if (usadosIdx.has(d.idx) || usadosDayu.has(d.dayuIdx)) continue;
@@ -123,15 +129,20 @@
       const dayu = window.DAYU_PALETTE[d.dayuIdx];
       const item = datos[d.idx];
       
-      numeroToDayu.set(item.numero, { code: dayu.code, hex: dayu.hex, rgb: dayu.rgb });
-      colorToNumero.set(normalizeHex(item.hex), item.numero);
+      numeroToDayu.set(item.numero, { 
+        code: dayu.code, 
+        hex: dayu.hex, 
+        rgb: dayu.rgb 
+      });
+      
+      rgbToNumero.set(rgbKey(item.rgb), item.numero);
       
       item.caja.style.backgroundColor = dayu.hex;
       item.caja.textContent = dayu.code;
       item.caja.dataset.numeroOriginal = item.numero;
-      item.caja.dataset.hexOriginal = item.hex;
+      item.caja.dataset.rgbOriginal = rgbKey(item.rgb);
       
-      console.log(`✅ ${item.numero} (${item.hex}) → ${dayu.code} (${dayu.hex})`);
+      console.log(`✅ ${item.numero} → ${dayu.code}`);
       
       if (numeroToDayu.size === datos.length) break;
     }
@@ -184,7 +195,11 @@
       
       const dayu = getDayu(nuevo);
       if (dayu) {
-        numeroToDayu.set(numeroOriginal, { code: dayu.code, hex: dayu.hex, rgb: dayu.rgb });
+        numeroToDayu.set(numeroOriginal, { 
+          code: dayu.code, 
+          hex: dayu.hex, 
+          rgb: dayu.rgb 
+        });
         caja.textContent = dayu.code;
         caja.style.backgroundColor = dayu.hex;
         actualizarSVG();
@@ -211,13 +226,12 @@
     let actualizados = 0;
     let coloresActualizados = 0;
     
-    // Los textos y paths son hermanos directos en el SVG
     const textos = svg.querySelectorAll('text');
     const shapes = svg.querySelectorAll('path, polygon');
     
     console.log(`📊 ${textos.length} textos, ${shapes.length} shapes`);
     
-    // Primero actualizar textos
+    // Actualizar textos
     textos.forEach(texto => {
       const contenido = texto.textContent.trim();
       
@@ -233,27 +247,33 @@
       }
     });
     
-    // Ahora actualizar colores de shapes por proximidad y color original
+    // Actualizar colores en style
     shapes.forEach(shape => {
-      const fill = shape.getAttribute('fill');
-      if (!fill || fill === 'none') return;
+      const style = shape.getAttribute('style');
+      if (!style) return;
       
-      const normalFill = normalizeHex(fill);
-      if (!normalFill) return;
+      const rgb = parseRgbFromStyle(style);
+      if (!rgb) return;
       
-      // Buscar qué número corresponde a este color
-      const numero = colorToNumero.get(normalFill);
+      const key = rgbKey(rgb);
+      const numero = rgbToNumero.get(key);
       
       if (numero && numeroToDayu.has(numero)) {
         const dayu = numeroToDayu.get(numero);
         
-        if (!shape.dataset.originalFill) {
-          shape.dataset.originalFill = fill;
+        // Guardar style original
+        if (!shape.dataset.originalStyle) {
+          shape.dataset.originalStyle = style;
           shape.dataset.numeroOriginal = numero;
         }
         
-        shape.setAttribute('fill', dayu.hex);
-        shape.style.fill = dayu.hex;
+        // Reemplazar el color en el style
+        const newStyle = style.replace(
+          /fill:\s*rgb\(\d+,\s*\d+,\s*\d+\)/,
+          `fill: ${dayu.hex}`
+        );
+        
+        shape.setAttribute('style', newStyle);
         coloresActualizados++;
       }
     });
@@ -276,5 +296,5 @@
     setTimeout(init, 500);
   }
   
-  console.log('✅ DAYU Simple v4 listo');
+  console.log('✅ DAYU Simple v5 listo');
 })();
