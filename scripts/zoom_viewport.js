@@ -19,55 +19,69 @@
     if (read) read.textContent = `${Math.round(zoom * 100)}%`;
   }
 
-  function hasSVG() {
-    return !!(container && container.querySelector && container.querySelector('svg'));
+  function svgEl() {
+    return container ? container.querySelector('svg') : null;
   }
 
   function fitToViewport() {
-    if (!hasSVG()) return;
-    // Medimos el SVG real
-    const svg = container.querySelector('svg');
-    const bbox = svg.getBBox ? svg.getBBox() : null;
+    const svg = svgEl();
+    if (!svg || !viewport) return;
 
-    // Fallback: usa width/height del SVG si bbox no existe
-    const svgW = bbox ? bbox.width : (svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.width : svg.clientWidth);
-    const svgH = bbox ? bbox.height : (svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal.height : svg.clientHeight);
+    // Medir tamaño real del SVG (prioridad: viewBox)
+    let svgW = 0, svgH = 0;
 
-    const vpW = viewport.clientWidth - 20; // padding
-    const vpH = viewport.clientHeight - 20;
+    if (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width) {
+      svgW = svg.viewBox.baseVal.width;
+      svgH = svg.viewBox.baseVal.height;
+    } else {
+      // fallback a getBBox (a veces 0 si está hidden)
+      try {
+        const bb = svg.getBBox();
+        svgW = bb.width;
+        svgH = bb.height;
+      } catch (e) {}
+    }
 
+    // Si aún 0, fallback a client rect
+    if (!svgW || !svgH) {
+      const r = svg.getBoundingClientRect();
+      svgW = r.width;
+      svgH = r.height;
+    }
+
+    const vpW = viewport.clientWidth;
+    const vpH = viewport.clientHeight;
     if (!svgW || !svgH || !vpW || !vpH) return;
 
-    const scale = Math.min(vpW / svgW, vpH / svgH);
+    // Margen para que no toque bordes
+    const margin = 22;
+    const scale = Math.min((vpW - margin) / svgW, (vpH - margin) / svgH);
+
     setZoom(clamp(scale, 0.2, 6));
 
-    // Volvemos al origen para ver completo
+    // Volver al origen para ver completo
     viewport.scrollLeft = 0;
     viewport.scrollTop = 0;
   }
 
-  // Eventos
   if (btnIn) btnIn.addEventListener('click', () => setZoom(zoom * 1.15));
   if (btnOut) btnOut.addEventListener('click', () => setZoom(zoom / 1.15));
   if (btnReset) btnReset.addEventListener('click', () => setZoom(1));
   if (btnFit) btnFit.addEventListener('click', () => fitToViewport());
 
-  // Cuando el SVG se regenera, a veces se reemplaza innerHTML.
-  // Observamos cambios y hacemos "fit" suave si estabas en 100%.
+  // Observa regeneración del SVG (cuando main.js reemplaza innerHTML)
   const obs = new MutationObserver(() => {
-    if (zoom === 1) {
-      // Da un tick para que el SVG “asiente”
-      setTimeout(() => {
-        if (hasSVG()) {
-          // no forzamos fit automático, solo refrescamos lectura
-          if (read) read.textContent = `${Math.round(zoom * 100)}%`;
-        }
-      }, 30);
+    // refresca lectura
+    if (read) read.textContent = `${Math.round(zoom * 100)}%`;
+
+    // Si recién apareció el SVG, aplica Fit una vez (solo si estás en 100%)
+    const svg = svgEl();
+    if (svg && zoom === 1) {
+      setTimeout(() => fitToViewport(), 40);
     }
   });
 
   if (container) obs.observe(container, { childList: true, subtree: true });
 
-  // Inicial
   setZoom(1);
 })();
