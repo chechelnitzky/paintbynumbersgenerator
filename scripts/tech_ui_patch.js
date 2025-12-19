@@ -1,0 +1,178 @@
+/* ==========================================================
+   Tech UI Patch
+   - Zoom real sobre el SVG (no escala el marco)
+   - Evita que reaparezca "marco cortador"
+   - Reaplica zoom cuando se regenera el SVG (MutationObserver)
+   ========================================================== */
+
+(function () {
+  const state = {
+    scale: 1,
+    minScale: 0.1,
+    maxScale: 6,
+    step: 0.1,
+  };
+
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
+
+  function pct() {
+    return Math.round(state.scale * 100) + "%";
+  }
+
+  function getViewport() {
+    return document.getElementById("outputViewport");
+  }
+
+  function getSvg() {
+    const c = document.getElementById("svgContainer");
+    if (!c) return null;
+    return c.querySelector("svg");
+  }
+
+  function applyScale() {
+    const svg = getSvg();
+    const pctEl = document.getElementById("zoomPct");
+    if (pctEl) pctEl.textContent = pct();
+
+    if (!svg) return;
+
+    // Escalamos el SVG, no el contenedor
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = `scale(${state.scale})`;
+
+    // Asegurar que el SVG no quede con max-width 100% que arruina el zoom
+    svg.style.maxWidth = "none";
+  }
+
+  function zoomIn() {
+    state.scale = clamp(state.scale + state.step, state.minScale, state.maxScale);
+    applyScale();
+  }
+
+  function zoomOut() {
+    state.scale = clamp(state.scale - state.step, state.minScale, state.maxScale);
+    applyScale();
+  }
+
+  function zoomReset() {
+    state.scale = 1;
+    applyScale();
+    // opcional: volver al tope-izq
+    const vp = getViewport();
+    if (vp) {
+      vp.scrollLeft = 0;
+      vp.scrollTop = 0;
+    }
+  }
+
+  function zoomFit() {
+    const vp = getViewport();
+    const svg = getSvg();
+    if (!vp || !svg) return;
+
+    // Medimos bbox real del SVG
+    let vb = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : null;
+    let svgW = 0;
+    let svgH = 0;
+
+    if (vb && vb.width && vb.height) {
+      svgW = vb.width;
+      svgH = vb.height;
+    } else {
+      try {
+        const bb = svg.getBBox();
+        svgW = bb.width;
+        svgH = bb.height;
+      } catch (e) {
+        // fallback
+        svgW = svg.clientWidth || 1000;
+        svgH = svg.clientHeight || 1000;
+      }
+    }
+
+    const pad = 24; // coincide con padding interno
+    const availW = Math.max(50, vp.clientWidth - pad);
+    const availH = Math.max(50, vp.clientHeight - pad);
+
+    const s = Math.min(availW / svgW, availH / svgH);
+    state.scale = clamp(s, state.minScale, state.maxScale);
+    applyScale();
+
+    // al hacer fit, centramos un poco
+    vp.scrollLeft = 0;
+    vp.scrollTop = 0;
+  }
+
+  function hookButtons() {
+    const btnIn = document.getElementById("zoomIn");
+    const btnOut = document.getElementById("zoomOut");
+    const btnReset = document.getElementById("zoomReset");
+    const btnFit = document.getElementById("zoomFit");
+
+    if (btnIn) btnIn.addEventListener("click", zoomIn);
+    if (btnOut) btnOut.addEventListener("click", zoomOut);
+    if (btnReset) btnReset.addEventListener("click", zoomReset);
+    if (btnFit) btnFit.addEventListener("click", zoomFit);
+
+    // atajos básicos: Ctrl + rueda (opcional, sin romper)
+    const vp = getViewport();
+    if (vp) {
+      vp.addEventListener("wheel", (e) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        if (e.deltaY < 0) zoomIn();
+        else zoomOut();
+      }, { passive: false });
+    }
+  }
+
+  function observeSvgChanges() {
+    const container = document.getElementById("svgContainer");
+    if (!container) return;
+
+    const obs = new MutationObserver(() => {
+      // cada vez que se inserta/reemplaza SVG:
+      // reaplicamos escala (y evitamos que vuelva el "marco" por estilos inline)
+      requestAnimationFrame(() => {
+        applyScale();
+      });
+    });
+
+    obs.observe(container, { childList: true, subtree: true });
+  }
+
+  function materializeInit() {
+    // Re-inicializar tabs cuando cambia el layout (seguro)
+    if (window.M && M.Tabs) {
+      const el = document.getElementById("tabsOutput");
+      if (el) M.Tabs.init(el, {});
+    }
+    // tooltips
+    if (window.M && M.Tooltip) {
+      const t = document.querySelectorAll(".tooltipped");
+      M.Tooltip.init(t, {});
+    }
+  }
+
+  function boot() {
+    // Esperamos DOM listo
+    hookButtons();
+    observeSvgChanges();
+    materializeInit();
+
+    // estado inicial
+    applyScale();
+
+    // Si el SVG ya existe, hacemos fit solo una vez (opcional)
+    // Comentado para no sorprenderte:
+    // zoomFit();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
+})();
