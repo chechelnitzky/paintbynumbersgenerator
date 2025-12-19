@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paint by Numbers - Generador de plantillas</title>
+  
+  <style>
+    /* ========================================
+       PAINT BY NUMBERS - UI MODERNO
+       ======================================== */
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background: #0f0f0f;
+      color: #ffffff;
+      overflow: hidden;
+      height: 100vh;
+    }
+    
+    /* Header */
+    .pbn-header {
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    
+    .pbn-logo {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    
+    .pbn-logo-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #EC4899, #F472B6);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+    
+    .pbn-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0;
+    }
+    
+    .pbn-subtitle {
+      font-size: 14px;
+      color: #a0a0a0;
+      margin: 0;
+    }
+    
+    /* Layout principal */
+    .pbn-main {
+      display: flex;
+      height: calc(100vh - 73px);
+    }
+    
+    /* Sidebar */
+    .pbn-sidebar {
+      width: 450px;
+      background: #1a1a1a;
+      border-right: 1px solid #2a2a2a;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    /* Tabs */
+    .pbn-tabs {
+      display: flex;
+      padding: 16px;
+      gap: 8px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+    
+    .pbn-tab {
+      flex: 1;
+      background: transparent;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 16px;
+      color: #a0a0a0;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    
+    .pbn-tab:hover {
+      background: #252525;
+      border-color: #EC4899;
+      color: #EC4899;
+    }
+    
+    .pbn-tab.active {
+      background: linear-gradient(135deg, #EC4899, #F472B6);
+      border-color: transparent;
+      color: white;
+    }
+    
+    .pbn-tab-content {
+      display: none;
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    
+    .pbn-tab-content.active {
+      display: block;
+    }
+    
+    /* Upload area */
+    .pbn-upload-area {
+      background: #0f0f0f;
+      border: 2px dashed #2a2a2a;
+      border-radius: 16px;
+      padding: 48px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    .pbn-upload-area:hover {
+      border-color: #EC4899;
+      background: rgba(236, 72, 153, 0.05);
+    }
+    
+    .pbn-upload-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+    
+    .pbn-upload-text {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    
+    .pbn-upload-hint {
+      font-size: 14px;
+      color: #a0a0a0;
+    }
+    
+    /* Control groups */
+    .pbn-control-group {
+      background: #0f0f0f;
+      border: 1px solid #2a2a2a;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    
+    .pbn-control-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #EC4899;
+      margin-bottom: 16px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1px;
+    }
+    
+    .pbn-control {
+      margin-bottom: 20px;
+    }
+    
+    .pbn-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    
+    .pbn-value {
+      color: #EC4899;
+      font-weight: 700;
+    }
+    
+    /* Sliders */
+    .pbn-slider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 8px;
+      border-radius: 4px;
+      background: linear-gradient(to right, #EC4899, #F472B6);
+      outline: none;
+      cursor: pointer;
+    }
+    
+    .pbn-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: white;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      border: 2px solid #EC4899;
+    }
+    
+    .pbn-slider::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: white;
+      cursor: pointer;
+      border: 2px solid #EC4899;
+    }
+    
+    /* Inputs */
+    .pbn-input-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    
+    .pbn-input-group {
+      flex: 1;
+    }
+    
+    .pbn-input-label {
+      display: block;
+      font-size: 14px;
+      color: #a0a0a0;
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+    
+    .pbn-input {
+      width: 100%;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: white;
+      font-size: 14px;
+    }
+    
+    .pbn-input:hover {
+      border-color: #EC4899;
+    }
+    
+    .pbn-input:focus {
+      outline: none;
+      border-color: #EC4899;
+      box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1);
+    }
+    
+    /* Toggle */
+    .pbn-toggle-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 16px;
+    }
+    
+    .pbn-toggle {
+      position: relative;
+      width: 48px;
+      height: 28px;
+      background: #2a2a2a;
+      border-radius: 14px;
+      transition: background 0.3s;
+    }
+    
+    .pbn-toggle::after {
+      content: '';
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 20px;
+      height: 20px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.3s;
+    }
+    
+    input[type="checkbox"]:checked + .pbn-toggle {
+      background: linear-gradient(135deg, #EC4899, #F472B6);
+    }
+    
+    input[type="checkbox"]:checked + .pbn-toggle::after {
+      transform: translateX(20px);
+    }
+    
+    input[type="checkbox"] {
+      display: none;
+    }
+    
+    /* Preview area */
+    .pbn-preview {
+      flex: 1;
+      background: #0f0f0f;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .pbn-preview-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid #2a2a2a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .pbn-preview-title {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    
+    .pbn-preview-content {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,.03) 10px, rgba(255,255,255,.03) 20px);
+    }
+    
+    .pbn-preview-empty {
+      text-align: center;
+      color: #666;
+    }
+    
+    .pbn-empty-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      opacity: 0.3;
+    }
+    
+    .pbn-empty-text {
+      font-size: 18px;
+      font-weight: 600;
+      color: #a0a0a0;
+      margin-bottom: 8px;
+    }
+    
+    .pbn-empty-hint {
+      font-size: 14px;
+      color: #666;
+    }
+    
+    .pbn-preview-image {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(236, 72, 153, 0.3);
+    }
+    
+    /* Botón generar */
+    .pbn-generate-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #EC4899, #F472B6);
+      border: none;
+      border-radius: 12px;
+      padding: 16px;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      filter: drop-shadow(0 4px 8px rgba(236, 72, 153, 0.5));
+      margin-top: 24px;
+    }
+    
+    .pbn-generate-btn:hover {
+      transform: translateY(-2px);
+      filter: drop-shadow(0 8px 16px rgba(236, 72, 153, 0.5));
+    }
+    
+    .pbn-generate-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+      .pbn-main {
+        flex-direction: column;
+      }
+      
+      .pbn-sidebar {
+        width: 100%;
+        max-height: 50vh;
+      }
+      
+      .pbn-preview {
+        min-height: 50vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="pbn-header">
+    <div class="pbn-logo">
+      <div class="pbn-logo-icon">🎨</div>
+      <div>
+        <h1 class="pbn-title">Paint by Numbers</h1>
+        <p class="pbn-subtitle">Generador de plantillas</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="pbn-main">
+    <!-- Sidebar -->
+    <aside class="pbn-sidebar">
+      <!-- Tabs -->
+      <div class="pbn-tabs">
+        <button class="pbn-tab active" onclick="switchTab('entrada')">
+          📤 Entrada
+        </button>
+        <button class="pbn-tab" onclick="switchTab('opciones')">
+          ⚙️ Opciones
+        </button>
+      </div>
+
+      <!-- Tab: Entrada -->
+      <div id="tab-entrada" class="pbn-tab-content active">
+        <div class="pbn-upload-area" onclick="document.getElementById('imageInput').click()">
+          <div class="pbn-upload-icon">📤</div>
+          <p class="pbn-upload-text">Sube una imagen</p>
+          <p class="pbn-upload-hint">o arrastra y suelta</p>
+        </div>
+        <input type="file" id="imageInput" accept="image/*" style="display: none;">
+        
+        <button class="pbn-generate-btn" id="generateBtn" disabled>
+          🎨 Generar Paint by Numbers
+        </button>
+      </div>
+
+      <!-- Tab: Opciones -->
+      <div id="tab-opciones" class="pbn-tab-content">
+        <!-- COLORES -->
+        <div class="pbn-control-group">
+          <div class="pbn-control-header">
+            🎨 COLORES
+          </div>
+          
+          <div class="pbn-control">
+            <div class="pbn-label">
+              <span>Número de colores</span>
+              <span class="pbn-value" id="numColorsValue">24</span>
+            </div>
+            <input type="range" class="pbn-slider" id="numColors" min="2" max="64" value="24">
+          </div>
+          
+          <div class="pbn-control">
+            <div class="pbn-label">
+              <span>Precisión</span>
+              <span class="pbn-value" id="precisionValue">3</span>
+            </div>
+            <input type="range" class="pbn-slider" id="precision" min="1" max="5" value="3">
+          </div>
+        </div>
+
+        <!-- TAMAÑO -->
+        <div class="pbn-control-group">
+          <div class="pbn-control-header">
+            📐 TAMAÑO
+          </div>
+          
+          <div class="pbn-input-row">
+            <div class="pbn-input-group">
+              <label class="pbn-input-label">Ancho máx.</label>
+              <input type="number" class="pbn-input" id="maxWidth" value="800">
+            </div>
+            
+            <div class="pbn-input-group">
+              <label class="pbn-input-label">Alto máx.</label>
+              <input type="number" class="pbn-input" id="maxHeight" value="800">
+            </div>
+          </div>
+        </div>
+
+        <!-- FACETAS -->
+        <div class="pbn-control-group">
+          <div class="pbn-control-header">
+            🔲 FACETAS
+          </div>
+          
+          <label class="pbn-toggle-label">
+            <span>Eliminar facetas pequeñas</span>
+            <input type="checkbox" id="eliminateSmall" checked>
+            <div class="pbn-toggle"></div>
+          </label>
+          
+          <div class="pbn-control">
+            <div class="pbn-label">
+              <span>Tamaño mínimo</span>
+              <span class="pbn-value" id="minSizeValue">20px</span>
+            </div>
+            <input type="range" class="pbn-slider" id="minSize" min="5" max="50" value="20">
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Preview Area -->
+    <main class="pbn-preview">
+      <div class="pbn-preview-header">
+        <h2 class="pbn-preview-title">Vista previa</h2>
+      </div>
+      
+      <div class="pbn-preview-content" id="previewContent">
+        <div class="pbn-preview-empty">
+          <div class="pbn-empty-icon">📷</div>
+          <p class="pbn-empty-text">Sin imagen</p>
+          <p class="pbn-empty-hint">Sube una imagen para comenzar</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Variables globales
+    let currentImage = null;
+
+    // Cambiar tabs
+    function switchTab(tabName) {
+      // Ocultar todos los tabs
+      document.querySelectorAll('.pbn-tab-content').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      document.querySelectorAll('.pbn-tab').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      
+      // Mostrar tab seleccionado
+      document.getElementById('tab-' + tabName).classList.add('active');
+      event.target.classList.add('active');
+    }
+
+    // Upload de imagen
+    document.getElementById('imageInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          currentImage = event.target.result;
+          
+          // Mostrar preview
+          document.getElementById('previewContent').innerHTML = 
+            '<img src="' + currentImage + '" class="pbn-preview-image" alt="Preview">';
+          
+          // Habilitar botón generar
+          document.getElementById('generateBtn').disabled = false;
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    // Actualizar valores de sliders
+    document.getElementById('numColors').addEventListener('input', function(e) {
+      document.getElementById('numColorsValue').textContent = e.target.value;
+    });
+
+    document.getElementById('precision').addEventListener('input', function(e) {
+      document.getElementById('precisionValue').textContent = e.target.value;
+    });
+
+    document.getElementById('minSize').addEventListener('input', function(e) {
+      document.getElementById('minSizeValue').textContent = e.target.value + 'px';
+    });
+
+    // Botón generar (AQUÍ conecta con tu código DAYU)
+    document.getElementById('generateBtn').addEventListener('click', function() {
+      if (!currentImage) return;
+      
+      alert('Aquí se conectará con tu código DAYU para generar el paint by numbers');
+      
+      // TODO: Llamar a tu función de procesamiento
+      // Ejemplo: procesarImagenDayu(currentImage, opciones);
+    });
+
+    // Drag and drop
+    const uploadArea = document.querySelector('.pbn-upload-area');
+    
+    uploadArea.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      this.style.borderColor = '#EC4899';
+    });
+    
+    uploadArea.addEventListener('dragleave', function(e) {
+      this.style.borderColor = '#2a2a2a';
+    });
+    
+    uploadArea.addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.style.borderColor = '#2a2a2a';
+      
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        const input = document.getElementById('imageInput');
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        input.files = dataTransfer.files;
+        input.dispatchEvent(new Event('change'));
+      }
+    });
+  </script>
+</body>
+</html>
