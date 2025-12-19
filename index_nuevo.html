@@ -1,365 +1,429 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Paint by Numbers</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Paint by number generator</title>
 
+  <!-- Libs existentes -->
   <link rel="stylesheet" href="styles/lib/materialize.min.css">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="styles/main.css" />
-  <link rel="stylesheet" href="css/pbn-theme.css">
 
-  <!-- NUEVO: Tech UI (sobrescribe estilos sin romper funciones) -->
-  <link rel="stylesheet" href="css/tech-ui.css">
+  <!-- Tus estilos existentes (mantengo los que ya tenías) -->
+  <link rel="stylesheet" href="styles/main.css" />
+  <link rel="stylesheet" href="css/pbn-theme.css" />
+
+  <!-- NUEVO: Tech UI (override final) -->
+  <link rel="stylesheet" href="css/tech-ui.css" />
 </head>
 
 <body>
-  <!-- APP SHELL -->
-  <div class="app-shell">
-    <!-- TOP BAR -->
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-icon">🎨</div>
-        <div class="brand-text">
-          <div class="brand-title">Paint by Numbers</div>
-          <div class="brand-subtitle">Generador de plantillas</div>
+  <!-- HEADER -->
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-badge">🎨</span>
+      <div class="brand-text">
+        <div class="brand-title">Paint by Numbers</div>
+        <div class="brand-subtitle">Generador de plantillas</div>
+      </div>
+    </div>
+
+    <button class="tech-pill" type="button" title="Tech UI">
+      <i class="material-icons">tune</i>
+      Tech UI
+    </button>
+  </header>
+
+  <!-- APP LAYOUT -->
+  <main class="app-shell">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar">
+
+      <!-- INPUT CARD -->
+      <section class="panel panel-soft">
+        <div class="panel-title">
+          <i class="material-icons">image</i>
+          Entrada
         </div>
-      </div>
 
-      <div class="topbar-right">
-        <span class="chip tech-chip"><i class="material-icons">memory</i> Tech UI</span>
-      </div>
-    </header>
+        <div class="upload-hint">
+          <div class="upload-row">
+            <span class="muted">
+              Pega desde portapapeles (Ctrl+V) o selecciona un archivo:
+            </span>
+          </div>
 
-    <!-- MAIN GRID -->
-    <main class="main-grid">
-      <!-- LEFT SIDEBAR -->
-      <aside class="sidebar">
-        <!-- Tabs Input/Options (siguen existiendo para main.js) -->
-        <div class="panel panel-tabs">
-          <ul class="tabs">
-            <li class="tab">
-              <a class="active" href="#input-pane">
-                <i class="material-icons left">image</i> Entrada
-              </a>
-            </li>
-            <li class="tab">
-              <a href="#options-pane">
-                <i class="material-icons left">tune</i> Opciones
-              </a>
-            </li>
-          </ul>
+          <div class="upload-row">
+            <input id="file" type="file" accept="image/x-png,image/gif,image/jpeg" />
+          </div>
 
-          <!-- INPUT PANE -->
-          <section id="input-pane" class="tab-pane">
-            <div class="drop-card">
-              <div class="drop-head">
-                <div class="drop-title">Sube tu imagen</div>
-                <div class="drop-sub">Arrastra y suelta o selecciona un archivo (PNG/JPG). Recomendado &lt; 10MB.</div>
-              </div>
+          <div class="upload-row examples">
+            <span class="muted">Ejemplos:</span>
+            <a id="lnkTrivial" href="#">trivial</a>
+            <span class="muted">·</span>
+            <a id="lnkSmall" href="#">small</a>
+            <span class="muted">·</span>
+            <a id="lnkMedium" href="#">medium</a>
+          </div>
+        </div>
 
-              <div class="file-row">
-                <input id="file" type="file" accept="image/x-png,image/gif,image/jpeg" />
-              </div>
+        <div class="btn-row">
+          <a class="waves-effect waves-light btn tech-btn" id="btnProcess">
+            <i class="material-icons left">auto_fix_high</i>
+            Generar Paint by Numbers
+          </a>
+        </div>
 
-              <div class="examples-row">
-                <span>Ejemplos:</span>
-                <a id="lnkTrivial" href="#">trivial</a>
-                <span>·</span>
-                <a id="lnkSmall" href="#">small</a>
-                <span>·</span>
-                <a id="lnkMedium" href="#">medium</a>
-              </div>
+        <div class="divider-soft"></div>
 
-              <!-- Canvas SIEMPRE en el DOM y con altura mínima -->
-              <div class="canvas-wrap">
-                <canvas id="canvas"></canvas>
-              </div>
+        <div class="panel-title small">
+          <i class="material-icons">photo</i>
+          Imagen original
+        </div>
 
-              <!-- imgs hidden (original) -->
-              <img id="imgTrivial" crossorigin="anonymous" src="https://i.imgur.com/o5CqO57.png" style="display:none" />
-              <img id="imgSmall" crossorigin="anonymous" src="https://i.imgur.com/YgYLDGP.png" style="display:none" />
-              <img id="imgMedium" crossorigin="anonymous" src="https://i.imgur.com/nLeNgYbr.jpg" style="display:none" />
-            </div>
+        <!-- IMPORTANTE: Mantengo canvas e imágenes ocultas con mismos IDs -->
+        <div class="preview-card">
+          <canvas id="canvas"></canvas>
+          <img id="imgTrivial" crossorigin="anonymous" src="https://i.imgur.com/o5CqO57.png" style="display:none" />
+          <img id="imgSmall" crossorigin="anonymous" src="https://i.imgur.com/YgYLDGP.png" style="display:none" />
+          <img id="imgMedium" crossorigin="anonymous" src="https://i.imgur.com/nLeNgYbr.jpg" style="display:none" />
+        </div>
+      </section>
 
-            <div class="action-row">
-              <a class="waves-effect waves-light btn" id="btnProcess">
-                <i class="material-icons left">auto_fix_high</i> Generar Paint by Numbers
-              </a>
-            </div>
+      <!-- OPTIONS CARD (SIEMPRE VISIBLE, NO OCULTA) -->
+      <section class="panel panel-soft sidebar-scroll">
+        <div class="panel-title">
+          <i class="material-icons">settings</i>
+          Opciones
+        </div>
 
-            <!-- Status cards (sin cambiar IDs) -->
-            <div class="status-grid">
-              <div class="status-card">
-                <div class="status-title">K-means</div>
-                <div class="progress"><div id="statusKMeans" class="determinate" style="width:0%"></div></div>
+        <!-- TU UI ORIGINAL, MISMO CONTENIDO Y IDs -->
+        <ul class="collection tech-collection">
+          <li class="collection-item tech-item">
+            <div class="row tech-row">
+              <div class="col s12">
+                <label class="tech-check">
+                  <input id="chkResizeImage" type="checkbox" checked="checked" />
+                  <span>Resize image larger than</span>
+                  <i class="material-icons tooltipped"
+                     data-tooltip="If checked and the input image is larger than the given dimensions then it will be resized to fit but will maintain its ratio.">info</i>
+                </label>
               </div>
-              <div class="status-card">
-                <div class="status-title">Facetas</div>
-                <div class="progress"><div id="statusFacetBuilding" class="determinate" style="width:0%"></div></div>
+              <div class="col s6">
+                <label for="txtResizeWidth">width</label>
+                <input id="txtResizeWidth" type="number" value="1024" min="1" class="validate tech-input">
               </div>
-              <div class="status-card">
-                <div class="status-title">Pruning</div>
-                <div class="progress"><div id="statusFacetReduction" class="determinate" style="width:0%"></div></div>
-              </div>
-              <div class="status-card">
-                <div class="status-title">Bordes</div>
-                <div class="progress"><div id="statusFacetBorderPath" class="determinate" style="width:0%"></div></div>
-              </div>
-              <div class="status-card">
-                <div class="status-title">Segmentación</div>
-                <div class="progress"><div id="statusFacetBorderSegmentation" class="determinate" style="width:0%"></div></div>
-              </div>
-              <div class="status-card">
-                <div class="status-title">Labels</div>
-                <div class="progress"><div id="statusFacetLabelPlacement" class="determinate" style="width:0%"></div></div>
-              </div>
-              <div class="status-card wide">
-                <div class="status-title">SVG</div>
-                <div class="progress"><div id="statusSVGGenerate" class="determinate" style="width:0%"></div></div>
+              <div class="col s6">
+                <label for="txtResizeHeight">height</label>
+                <input id="txtResizeHeight" type="number" value="1024" min="1" class="validate tech-input">
               </div>
             </div>
-          </section>
+          </li>
 
-          <!-- OPTIONS PANE (contenido original, mismo HTML con pequeños wrappers) -->
-          <section id="options-pane" class="tab-pane">
-            <div class="panel-body-scroll">
-              <ul class="collection tech-collection">
+          <li class="collection-item tech-item">
+            <div class="row tech-row">
+              <div class="col s6">
+                <label for="txtNrOfClusters">Number of colors</label>
+                <input id="txtNrOfClusters" type="number" value="16" min="1" class="validate tech-input">
+              </div>
+              <div class="col s6">
+                <label for="txtClusterPrecision">Cluster precision</label>
+                <input id="txtClusterPrecision" type="number" value="1" min="1" step="0.05" class="validate tech-input">
+              </div>
+              <div class="col s12">
+                <label for="txtRandomSeed">Random seed</label>
+                <input id="txtRandomSeed" type="number" value="0" min="0" step="1" class="validate tech-input">
+              </div>
+            </div>
+          </li>
 
-                <li class="collection-item">
-                  <div class="row">
-                    <div class="col s12">
-                      <label>
-                        <input id="chkResizeImage" type="checkbox" checked="checked" />
-                        <span>Resize image larger than</span>
-                      </label>
-                    </div>
-                    <div class="col s6">
-                      <label for="txtResizeWidth">width</label>
-                      <input id="txtResizeWidth" type="number" value="1024" min="1" class="validate">
-                    </div>
-                    <div class="col s6">
-                      <label for="txtResizeHeight">height</label>
-                      <input id="txtResizeHeight" type="number" value="1024" min="1" class="validate">
-                    </div>
-                  </div>
-                </li>
+          <li class="collection-item tech-item">
+            <div class="row tech-row">
+              <div class="col s12">
+                <label>Clustering color space</label>
+                <div class="tech-radio-row">
+                  <label class="tech-radio">
+                    <input id="optColorSpaceRGB" name="colorspace" type="radio" checked />
+                    <span>RGB</span>
+                  </label>
+                  <label class="tech-radio">
+                    <input id="optColorSpaceHSL" name="colorspace" type="radio" />
+                    <span>HSL</span>
+                  </label>
+                  <label class="tech-radio">
+                    <input id="optColorSpaceLAB" name="colorspace" type="radio" />
+                    <span>Lab</span>
+                  </label>
+                </div>
+              </div>
 
-                <li class="collection-item">
-                  <div class="row">
-                    <div class="input-field col s6">
-                      <input id="txtNrOfClusters" type="number" value="16" min="1" class="validate">
-                      <label for="txtNrOfClusters" class="active">Number of colors</label>
-                    </div>
-                    <div class="input-field col s6">
-                      <input id="txtClusterPrecision" type="number" value="1" min="1" step="0.05" class="validate">
-                      <label for="txtClusterPrecision" class="active">Cluster precision</label>
-                    </div>
-
-                    <div class="input-field col s6">
-                      <input id="txtRandomSeed" type="number" value="0" min="0" step="1" class="validate">
-                      <label for="txtRandomSeed" class="active">Random seed</label>
-                    </div>
-                  </div>
-                </li>
-
-                <li class="collection-item">
-                  <div class="row">
-                    <div class="col s12">
-                      <label class="active">Clustering color space</label>
-                    </div>
-                    <div class="col s4">
-                      <label><input id="optColorSpaceRGB" name="colorspace" type="radio" checked /><span>RGB</span></label>
-                    </div>
-                    <div class="col s4">
-                      <label><input id="optColorSpaceHSL" name="colorspace" type="radio" /><span>HSL</span></label>
-                    </div>
-                    <div class="col s4">
-                      <label><input id="optColorSpaceLAB" name="colorspace" type="radio" /><span>Lab</span></label>
-                    </div>
-
-                    <div class="col s12">
-                      <label for="txtKMeansColorRestrictions" class="active">Restrict clustering colors</label>
-                      <textarea id="txtKMeansColorRestrictions" class="materialize-textarea validate">
+              <div class="col s12">
+                <label for="txtKMeansColorRestrictions">Restrict clustering colors</label>
+                <textarea id="txtKMeansColorRestrictions" class="materialize-textarea validate tech-textarea">
 //0,0,0
 //255,255,255
 </textarea>
-                    </div>
-                  </div>
-                </li>
-
-                <li class="collection-item">
-                  <div class="row">
-                    <div class="input-field col s6">
-                      <input id="txtNarrowPixelStripCleanupRuns" type="number" value="3" min="0" class="validate">
-                      <label for="txtNarrowPixelStripCleanupRuns" class="active">Narrow pixel cleanup runs</label>
-                    </div>
-                    <div class="input-field col s6">
-                      <input id="txtRemoveFacetsSmallerThan" type="number" value="20" min="1" class="validate">
-                      <label for="txtRemoveFacetsSmallerThan" class="active">Remove facets smaller than</label>
-                    </div>
-                    <div class="input-field col s12">
-                      <input id="txtMaximumNumberOfFacets" type="number" value="100000" min="1" class="validate">
-                      <label for="txtMaximumNumberOfFacets" class="active">Maximum number of facets</label>
-                    </div>
-                  </div>
-
-                  <div class="row">
-                    <div class="col s12">
-                      <label class="active">Small facet removal order</label>
-                    </div>
-                    <div class="col s6">
-                      <label><input id="optFacetRemovalLargestToSmallest" name="smallfacetremovalorder" type="radio" checked /><span>Largest to smallest</span></label>
-                    </div>
-                    <div class="col s6">
-                      <label><input id="optFacetRemovalSmallestToLargest" name="smallfacetremovalorder" type="radio" /><span>Smallest to largest</span></label>
-                    </div>
-                  </div>
-                </li>
-
-                <li class="collection-item">
-                  <div class="row">
-                    <div class="input-field col s12">
-                      <input id="txtNrOfTimesToHalveBorderSegments" type="number" value="2" min="0" class="validate">
-                      <label for="txtNrOfTimesToHalveBorderSegments" class="active">Halve border segment complexity</label>
-                    </div>
-                  </div>
-                </li>
-
-              </ul>
+              </div>
             </div>
-          </section>
+          </li>
+
+          <li class="collection-item tech-item">
+            <div class="row tech-row">
+              <div class="col s12">
+                <label for="txtNarrowPixelStripCleanupRuns">Narrow pixel cleanup runs</label>
+                <input id="txtNarrowPixelStripCleanupRuns" type="number" value="3" min="0" class="validate tech-input">
+              </div>
+
+              <div class="col s12">
+                <label for="txtRemoveFacetsSmallerThan">Remove small facets smaller than (pixels)</label>
+                <input id="txtRemoveFacetsSmallerThan" type="number" value="20" min="1" class="validate tech-input">
+              </div>
+
+              <div class="col s12">
+                <label for="txtMaximumNumberOfFacets">Maximum number of facets</label>
+                <input id="txtMaximumNumberOfFacets" type="number" value="100000" min="1" class="validate tech-input">
+              </div>
+
+              <div class="col s12">
+                <label>Small facet removal order</label>
+                <div class="tech-radio-row">
+                  <label class="tech-radio">
+                    <input id="optFacetRemovalLargestToSmallest" name="smallfacetremovalorder" type="radio" checked />
+                    <span>Largest to smallest</span>
+                  </label>
+                  <label class="tech-radio">
+                    <input id="optFacetRemovalSmallestToLargest" name="smallfacetremovalorder" type="radio" />
+                    <span>Smallest to largest</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </li>
+
+          <li class="collection-item tech-item">
+            <div class="row tech-row">
+              <div class="col s12">
+                <label for="txtNrOfTimesToHalveBorderSegments">Amount of times to halve border segment complexity</label>
+                <input id="txtNrOfTimesToHalveBorderSegments" type="number" value="2" min="0" class="validate tech-input">
+              </div>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <!-- PROGRESS (SIEMPRE VISIBLE) -->
+      <section class="panel panel-soft">
+        <div class="panel-title">
+          <i class="material-icons">insights</i>
+          Progreso
         </div>
-      </aside>
 
-      <!-- RIGHT CONTENT -->
-      <section class="content">
-        <div class="panel panel-content">
-          <!-- Output tabs (mismos IDs) -->
-          <ul id="tabsOutput" class="tabs">
-            <li class="tab"><a href="#kmeans-pane">Quantized</a></li>
-            <li class="tab"><a href="#reduction-pane">Reduction</a></li>
-            <li class="tab"><a href="#borderpath-pane">Border trace</a></li>
-            <li class="tab"><a href="#bordersegmentation-pane">Segmentation</a></li>
-            <li class="tab"><a href="#labelplacement-pane">Label placement</a></li>
-            <li class="tab"><a class="active" href="#output-pane">Output</a></li>
-            <li class="tab"><a href="#log-pane">Log</a></li>
-          </ul>
+        <div class="progress-grid">
+          <div class="status kMeans tech-status">
+            K-means
+            <div class="progress"><div id="statusKMeans" class="determinate" style="width: 0%"></div></div>
+          </div>
 
-          <!-- panes (mismos IDs, no romper main.js) -->
-          <div class="content-panes">
-            <div id="kmeans-pane" class="col s12"><canvas id="cKMeans"></canvas></div>
-            <div id="reduction-pane" class="col s12"><canvas id="cReduction"></canvas></div>
-            <div id="borderpath-pane" class="col s12"><canvas id="cBorderPath"></canvas></div>
-            <div id="bordersegmentation-pane" class="col s12"><canvas id="cBorderSegmentation"></canvas></div>
-            <div id="labelplacement-pane" class="col s12"><canvas id="cLabelPlacement"></canvas></div>
+          <div class="status facetBuilding tech-status">
+            Facetas
+            <div class="progress"><div id="statusFacetBuilding" class="determinate" style="width: 0%"></div></div>
+          </div>
 
-            <div id="output-pane" class="col s12">
-              <!-- Render options -->
-              <div class="panel-sub">
-                <div class="subgrid">
-                  <div class="subcol">
-                    <label class="active">SVG Render options</label>
-                    <div class="check-row">
-                      <label><input id="chkShowLabels" type="checkbox" checked="checked" /><span>Show labels</span></label>
-                      <label><input id="chkFillFacets" type="checkbox" checked="checked" /><span>Fill facets</span></label>
-                      <label><input id="chkShowBorders" type="checkbox" checked="checked" /><span>Show borders</span></label>
-                    </div>
-                  </div>
+          <div class="status facetReduction tech-status">
+            Pruning
+            <div class="progress"><div id="statusFacetReduction" class="determinate" style="width: 0%"></div></div>
+          </div>
 
-                  <div class="subcol">
-                    <div class="input-field">
-                      <input placeholder="SVG Size multiplier" id="txtSizeMultiplier" type="number" value="3" min="1" class="validate">
-                      <label for="txtSizeMultiplier" class="active">SVG size multiplier</label>
-                    </div>
-                  </div>
+          <div class="status facetBorderPath tech-status">
+            Bordes
+            <div class="progress"><div id="statusFacetBorderPath" class="determinate" style="width: 0%"></div></div>
+          </div>
 
-                  <div class="subcol">
-                    <div class="input-field">
-                      <input placeholder="Label font size" id="txtLabelFontSize" type="number" value="50" min="1" max="100">
-                      <label for="txtLabelFontSize" class="active">Label font size</label>
-                    </div>
-                  </div>
+          <div class="status facetBorderSegmentation tech-status">
+            Segmentación
+            <div class="progress"><div id="statusFacetBorderSegmentation" class="determinate" style="width: 0%"></div></div>
+          </div>
 
-                  <div class="subcol">
-                    <div class="input-field">
-                      <input placeholder="Label font color" id="txtLabelFontColor" type="text" value="#000">
-                      <label for="txtLabelFontColor" class="active">Label font color</label>
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <div class="status facetLabelPlacement tech-status">
+            Labels
+            <div class="progress"><div id="statusFacetLabelPlacement" class="determinate" style="width: 0%"></div></div>
+          </div>
 
-              <!-- Palette -->
-              <div class="panel-sub">
-                <div id="palette" class="palette"></div>
-              </div>
-
-              <!-- Output viewport + zoom toolbar -->
-              <div class="panel-sub">
-                <div class="viewport-header">
-                  <div class="vh-title"><i class="material-icons">grid_on</i> Output</div>
-
-                  <div class="zoombar" aria-label="Zoom">
-                    <button type="button" class="zbtn" id="zoomOut" title="Zoom out">−</button>
-                    <div class="zread" id="zoomRead">100%</div>
-                    <button type="button" class="zbtn" id="zoomIn" title="Zoom in">+</button>
-                    <button type="button" class="zbtn" id="zoomReset" title="Reset">
-                      <i class="material-icons">refresh</i>
-                    </button>
-                    <button type="button" class="zbtn" id="zoomFit" title="Fit">
-                      <i class="material-icons">search</i>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- IMPORTANTE: este es el contenedor que NO debe achicarse con zoom -->
-                <div class="svg-viewport" id="svgViewport">
-                  <div class="svg-stage" id="svgStage">
-                    <div id="svgContainer"></div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Downloads -->
-              <div class="panel-sub downloads-row">
-                <a class="waves-effect waves-light btn" id="btnDownloadSVG"><i class="material-icons left">download</i> Download SVG</a>
-                <a class="waves-effect waves-light btn" id="btnDownloadPNG"><i class="material-icons left">image</i> Download PNG</a>
-                <a class="waves-effect waves-light btn" id="btnDownloadPalettePNG"><i class="material-icons left">format_list_bulleted</i> Download palette</a>
-              </div>
-            </div>
-
-            <div id="log-pane" class="col s12">
-              <div class="panel-sub">
-                <div id="log" class="logbox"></div>
-              </div>
-            </div>
+          <div class="status SVGGenerate tech-status">
+            SVG
+            <div class="progress"><div id="statusSVGGenerate" class="determinate" style="width: 0%"></div></div>
           </div>
         </div>
       </section>
-    </main>
-  </div>
 
-  <!-- libs -->
+    </aside>
+
+    <!-- RIGHT MAIN -->
+    <section class="main">
+
+      <!-- OUTPUT TABS (top) -->
+      <div class="panel panel-strong main-tabs">
+        <ul id="tabsOutput" class="tabs tech-tabs">
+          <li class="tab"><a href="#kmeans-pane">Quantized</a></li>
+          <li class="tab"><a href="#reduction-pane">Reduction</a></li>
+          <li class="tab"><a href="#borderpath-pane">Border trace</a></li>
+          <li class="tab"><a href="#bordersegmentation-pane">Segmentation</a></li>
+          <li class="tab"><a href="#labelplacement-pane">Label placement</a></li>
+          <li class="tab"><a class="active" href="#output-pane">Output</a></li>
+          <li class="tab"><a href="#log-pane">Log</a></li>
+        </ul>
+
+        <div class="tab-body">
+
+          <div id="kmeans-pane" class="tab-pane">
+            <canvas id="cKMeans"></canvas>
+          </div>
+
+          <div id="reduction-pane" class="tab-pane">
+            <canvas id="cReduction"></canvas>
+          </div>
+
+          <div id="borderpath-pane" class="tab-pane">
+            <canvas id="cBorderPath"></canvas>
+          </div>
+
+          <div id="bordersegmentation-pane" class="tab-pane">
+            <canvas id="cBorderSegmentation"></canvas>
+          </div>
+
+          <div id="labelplacement-pane" class="tab-pane">
+            <canvas id="cLabelPlacement"></canvas>
+          </div>
+
+          <!-- OUTPUT -->
+          <div id="output-pane" class="tab-pane">
+            <div class="panel panel-soft">
+              <div class="panel-title">
+                <i class="material-icons">tune</i>
+                SVG Render options
+              </div>
+
+              <div class="render-row">
+                <label class="tech-check">
+                  <input id="chkShowLabels" type="checkbox" checked="checked" />
+                  <span>Show labels</span>
+                </label>
+
+                <label class="tech-check">
+                  <input id="chkFillFacets" type="checkbox" checked="checked" />
+                  <span>Fill facets</span>
+                </label>
+
+                <label class="tech-check">
+                  <input id="chkShowBorders" type="checkbox" checked="checked" />
+                  <span>Show borders</span>
+                </label>
+              </div>
+
+              <div class="render-grid">
+                <div>
+                  <label for="txtSizeMultiplier">SVG size multiplier</label>
+                  <input id="txtSizeMultiplier" type="number" value="3" min="1" class="validate tech-input">
+                </div>
+                <div>
+                  <label for="txtLabelFontSize">Label font size</label>
+                  <input id="txtLabelFontSize" type="number" value="50" min="1" max="100" class="tech-input">
+                </div>
+                <div>
+                  <label for="txtLabelFontColor">Label font color</label>
+                  <input id="txtLabelFontColor" type="text" value="#000" class="tech-input">
+                </div>
+              </div>
+            </div>
+
+            <!-- DAYU BAR (la maneja dayu_simple.js; aquí solo se ve bonito) -->
+            <div class="panel panel-accent">
+              <div class="dayu-controls-row">
+                <span class="dayu-version-badge" id="dayuVersionBadge">DAYU</span>
+                <!-- dayu_simple.js inserta/usa botones existentes -->
+                <!-- No rompo nada: dayu_simple ya los crea o los detecta -->
+              </div>
+            </div>
+
+            <!-- PALETTE -->
+            <div class="panel panel-soft">
+              <div class="panel-title">
+                <i class="material-icons">palette</i>
+                Paleta
+              </div>
+              <div id="palette" class="palette"></div>
+            </div>
+
+            <!-- OUTPUT VIEWPORT -->
+            <div class="panel panel-soft output-panel">
+              <div class="panel-title">
+                <i class="material-icons">grid_on</i>
+                Output
+              </div>
+
+              <!-- Toolbar zoom (JS patch la controla) -->
+              <div class="zoom-toolbar" id="zoomToolbar">
+                <button class="zoom-btn" id="zoomOut" type="button" title="Zoom out">−</button>
+                <div class="zoom-pill" id="zoomPct">100%</div>
+                <button class="zoom-btn" id="zoomIn" type="button" title="Zoom in">+</button>
+                <button class="zoom-btn" id="zoomReset" type="button" title="Reset">↻</button>
+                <button class="zoom-btn" id="zoomFit" type="button" title="Fit">🔍</button>
+              </div>
+
+              <!-- ESTE es el viewport real: NO se achica con el zoom -->
+              <div class="output-viewport" id="outputViewport">
+                <div id="svgContainer"></div>
+              </div>
+
+              <div class="download-row">
+                <a class="waves-effect waves-light btn tech-btn" id="btnDownloadSVG">
+                  <i class="material-icons left">download</i>Download SVG
+                </a>
+                <a class="waves-effect waves-light btn tech-btn" id="btnDownloadPNG">
+                  <i class="material-icons left">image</i>Download PNG
+                </a>
+                <a class="waves-effect waves-light btn tech-btn" id="btnDownloadPalettePNG">
+                  <i class="material-icons left">list</i>Download palette
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <!-- LOG -->
+          <div id="log-pane" class="tab-pane">
+            <div class="panel panel-soft">
+              <div class="panel-title">
+                <i class="material-icons">terminal</i>
+                Log
+              </div>
+              <div id="log" class="tech-log"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Scripts existentes -->
   <script src="scripts/lib/saveSvgAsPng.js"></script>
   <script src="scripts/lib/require.js"></script>
   <script src="scripts/lib/jquery-1.11.0.min.js"></script>
   <script src="scripts/lib/materialize.min.js"></script>
-
-  <!-- main app -->
   <script src="scripts/main.js"></script>
+
   <script>
     requirejs(['main'], function (MyApp) {});
   </script>
 
-  <!-- DAYU -->
+  <!-- Sistema DAYU (los tuyos) -->
   <script src="dayu_palette.js"></script>
   <script src="dayu_simple.js"></script>
 
-  <!-- NUEVO: zoom + pequeños fixes de viewport -->
-  <script src="scripts/zoom_viewport.js"></script>
-</body>
+  <!-- NUEVO: patch Tech UI (zoom + fixes de viewport) -->
+  <script src="scripts/tech_ui_patch.js"></script>
 
+</body>
 </html>
