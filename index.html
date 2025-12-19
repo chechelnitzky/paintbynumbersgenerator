@@ -6,6 +6,23 @@
     <link rel="stylesheet" href="styles/lib/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel='stylesheet' href='styles/main.css' />
+    <style>
+img[src], svg {
+  max-width: 100% !important;
+  max-height: 70vh !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+#svgContainer, .row:has(img), .row:has(svg) {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+</style>
 </head>
 
 <body>
