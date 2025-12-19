@@ -6,6 +6,977 @@
     <link rel="stylesheet" href="styles/lib/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel='stylesheet' href='styles/main.css' />
+<style>
+/* ========================================
+   DAYU FINAL: FIX DE IMÁGENES + UI MEJORADO
+   Solo CSS - Sin loops - Sin JavaScript
+   ======================================== */
+
+/* ==================== 
+   1. FIX DE IMÁGENES 
+   ==================== */
+
+/* Imagen original - completa y centrada */
+img[src]:not([src*="icon"]):not([width="20"]):not([class*="btn"]) {
+  max-width: 100% !important;
+  max-height: 70vh !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+/* SVG output - completo y centrado */
+#svgContainer svg,
+svg {
+  max-width: 100% !important;
+  max-height: 70vh !important;
+  width: auto !important;
+  height: auto !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+/* ==================== 
+   2. BOTONES MEJORADOS 
+   ==================== */
+
+.btn, 
+button:not(.dayu-picker-close) {
+  padding: 12px 24px !important;
+  border: none !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  text-transform: none !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+  border: 2px solid transparent !important;
+}
+
+.btn:hover, 
+button:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25) !important;
+  border-color: rgba(255,255,255,0.3) !important;
+}
+
+.btn:active, 
+button:active {
+  transform: translateY(0) !important;
+}
+
+/* ==================== 
+   3. INPUTS MEJORADOS 
+   ==================== */
+
+input[type="file"],
+input[type="number"],
+input[type="text"],
+select {
+  border: 2px solid #e0e0e0 !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  font-size: 14px !important;
+  transition: all 0.3s ease !important;
+  background: white !important;
+}
+
+input[type="file"]:hover,
+input[type="number"]:hover,
+input[type="text"]:hover,
+select:hover {
+  border-color: #667eea !important;
+}
+
+input[type="file"]:focus,
+input[type="number"]:focus,
+input[type="text"]:focus,
+select:focus {
+  outline: none !important;
+  border-color: #667eea !important;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+}
+
+/* ==================== 
+   4. RANGE SLIDER CUSTOM 
+   ==================== */
+
+input[type="range"] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  height: 8px !important;
+  border-radius: 8px !important;
+  background: linear-gradient(to right, #667eea, #764ba2) !important;
+  border: none !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  cursor: pointer;
+  border: 3px solid #667eea;
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  cursor: pointer;
+  border: 3px solid #667eea;
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* ==================== 
+   5. CHECKBOXES 
+   ==================== */
+
+input[type="checkbox"] {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  accent-color: #667eea !important;
+}
+
+/* ==================== 
+   6. LABELS 
+   ==================== */
+
+label {
+  font-weight: 500 !important;
+  color: #333 !important;
+  font-size: 14px !important;
+  margin-bottom: 8px !important;
+  display: inline-block !important;
+}
+
+/* ==================== 
+   7. TÍTULOS 
+   ==================== */
+
+h1 {
+  text-align: center !important;
+  font-weight: 800 !important;
+  font-size: 36px !important;
+  margin: 30px 0 !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+h2, h3, h4 {
+  font-weight: 700 !important;
+  color: #667eea !important;
+  margin-bottom: 16px !important;
+}
+
+/* ==================== 
+   8. PALETA DE COLORES 
+   ==================== */
+
+#palette {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)) !important;
+  gap: 14px !important;
+  padding: 20px !important;
+  background: white !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
+  margin-top: 20px !important;
+}
+
+#palette > div {
+  aspect-ratio: 1 !important;
+  border-radius: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.12) !important;
+  position: relative !important;
+  border: 2px solid transparent !important;
+}
+
+#palette > div:hover {
+  transform: scale(1.1) translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2) !important;
+  z-index: 10 !important;
+  border-color: rgba(102, 126, 234, 0.6) !important;
+}
+
+/* Icono de edición en cajitas */
+#palette > div[data-editable="true"]::after {
+  content: "✏️";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: rgba(255,255,255,0.95);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+
+#palette > div[data-editable="true"]:hover::after {
+  opacity: 1;
+}
+
+/* ==================== 
+   9. PROGRESS BARS 
+   ==================== */
+
+.progress {
+  height: 10px !important;
+  border-radius: 10px !important;
+  background: #f0f0f0 !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+
+.progress .determinate,
+.progress .indeterminate {
+  background: linear-gradient(135deg, #667eea, #764ba2) !important;
+  height: 100% !important;
+}
+
+/* ==================== 
+   10. CONTENEDORES 
+   ==================== */
+
+.section, 
+.card {
+  background: white !important;
+  border-radius: 16px !important;
+  padding: 24px !important;
+  margin: 20px 0 !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
+}
+
+/* ==================== 
+   11. CONTROLES DAYU 
+   ==================== */
+
+.dayu-controls {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  padding: 24px !important;
+  border-radius: 16px !important;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.35) !important;
+  margin: 20px 0 !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+.dayu-controls-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 14px !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.dayu-version-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 8px 18px !important;
+  background: rgba(255,255,255,0.25) !important;
+  color: white !important;
+  border-radius: 24px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  border: 1px solid rgba(255,255,255,0.3) !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+.dayu-status {
+  padding: 16px 20px !important;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  margin-top: 20px !important;
+  border-left: 4px solid !important;
+  animation: slideDown 0.3s ease !important;
+}
+
+@keyframes slideDown {
+  from { 
+    opacity: 0; 
+    transform: translateY(-10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+.dayu-status.info {
+  background: #e3f2fd !important;
+  border-color: #2196F3 !important;
+  color: #1565C0 !important;
+}
+
+.dayu-status.success {
+  background: #e8f5e9 !important;
+  border-color: #4CAF50 !important;
+  color: #2E7D32 !important;
+}
+
+.dayu-status.warning {
+  background: #fff3e0 !important;
+  border-color: #FF9800 !important;
+  color: #E65100 !important;
+}
+
+.dayu-status.error {
+  background: #ffebee !important;
+  border-color: #f44336 !important;
+  color: #C62828 !important;
+}
+
+/* ==================== 
+   12. SCROLLBAR CUSTOM 
+   ==================== */
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border-radius: 10px;
+  border: 2px solid #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #764ba2, #667eea);
+}
+
+/* ==================== 
+   13. RESPONSIVE MOBILE 
+   ==================== */
+
+@media (max-width: 768px) {
+  /* Imágenes más pequeñas en móvil */
+  img[src]:not([src*="icon"]),
+  #svgContainer svg {
+    max-height: 50vh !important;
+  }
+  
+  /* Paleta más compacta */
+  #palette {
+    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)) !important;
+    gap: 10px !important;
+    padding: 15px !important;
+  }
+  
+  /* Botones más pequeños */
+  .btn, button {
+    padding: 10px 18px !important;
+    font-size: 13px !important;
+  }
+  
+  /* Título más pequeño */
+  h1 {
+    font-size: 28px !important;
+  }
+  
+  /* Controles más compactos */
+  .dayu-controls {
+    padding: 16px !important;
+  }
+}
+
+/* ==================== 
+   14. ANIMACIONES SUAVES 
+   ==================== */
+
+* {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+button, .btn, input, select {
+  transition-duration: 0.3s !important;
+}
+
+/* ==================== 
+   15. MEJORAS ADICIONALES 
+   ==================== */
+
+/* Contenedor principal más bonito */
+body {
+  background: linear-gradient(to bottom right, #f8f9fa, #e9ecef) !important;
+}
+
+/* Tabs mejorados si existen */
+.tabs {
+  background: white !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+}
+
+.tabs .tab a {
+  color: #667eea !important;
+  font-weight: 600 !important;
+}
+
+.tabs .tab a:hover {
+  background: rgba(102, 126, 234, 0.1) !important;
+}
+
+.tabs .indicator {
+  background-color: #667eea !important;
+  height: 3px !important;
+}
+
+/* Tooltips */
+[title] {
+  position: relative;
+  cursor: help;
+}
+
+/* Links mejorados */
+a {
+  color: #667eea !important;
+  text-decoration: none !important;
+  transition: color 0.2s ease !important;
+}
+
+a:hover {
+  color: #764ba2 !important;
+  text-decoration: underline !important;
+}
+</style>
+ENDOFCSS
+
+cat /home/claude/dayu_inline_css_complete.txt
+Salida
+
+<!-- ========================================
+     COPIAR TODO ESTO EN EL <head> DE index.html
+     ======================================== -->
+
+<style>
+/* ========================================
+   DAYU FINAL: FIX DE IMÁGENES + UI MEJORADO
+   Solo CSS - Sin loops - Sin JavaScript
+   ======================================== */
+
+/* ==================== 
+   1. FIX DE IMÁGENES 
+   ==================== */
+
+/* Imagen original - completa y centrada */
+img[src]:not([src*="icon"]):not([width="20"]):not([class*="btn"]) {
+  max-width: 100% !important;
+  max-height: 70vh !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+/* SVG output - completo y centrado */
+#svgContainer svg,
+svg {
+  max-width: 100% !important;
+  max-height: 70vh !important;
+  width: auto !important;
+  height: auto !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+/* ==================== 
+   2. BOTONES MEJORADOS 
+   ==================== */
+
+.btn, 
+button:not(.dayu-picker-close) {
+  padding: 12px 24px !important;
+  border: none !important;
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  text-transform: none !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+  border: 2px solid transparent !important;
+}
+
+.btn:hover, 
+button:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25) !important;
+  border-color: rgba(255,255,255,0.3) !important;
+}
+
+.btn:active, 
+button:active {
+  transform: translateY(0) !important;
+}
+
+/* ==================== 
+   3. INPUTS MEJORADOS 
+   ==================== */
+
+input[type="file"],
+input[type="number"],
+input[type="text"],
+select {
+  border: 2px solid #e0e0e0 !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  font-size: 14px !important;
+  transition: all 0.3s ease !important;
+  background: white !important;
+}
+
+input[type="file"]:hover,
+input[type="number"]:hover,
+input[type="text"]:hover,
+select:hover {
+  border-color: #667eea !important;
+}
+
+input[type="file"]:focus,
+input[type="number"]:focus,
+input[type="text"]:focus,
+select:focus {
+  outline: none !important;
+  border-color: #667eea !important;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+}
+
+/* ==================== 
+   4. RANGE SLIDER CUSTOM 
+   ==================== */
+
+input[type="range"] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  height: 8px !important;
+  border-radius: 8px !important;
+  background: linear-gradient(to right, #667eea, #764ba2) !important;
+  border: none !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  cursor: pointer;
+  border: 3px solid #667eea;
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  cursor: pointer;
+  border: 3px solid #667eea;
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* ==================== 
+   5. CHECKBOXES 
+   ==================== */
+
+input[type="checkbox"] {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  accent-color: #667eea !important;
+}
+
+/* ==================== 
+   6. LABELS 
+   ==================== */
+
+label {
+  font-weight: 500 !important;
+  color: #333 !important;
+  font-size: 14px !important;
+  margin-bottom: 8px !important;
+  display: inline-block !important;
+}
+
+/* ==================== 
+   7. TÍTULOS 
+   ==================== */
+
+h1 {
+  text-align: center !important;
+  font-weight: 800 !important;
+  font-size: 36px !important;
+  margin: 30px 0 !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+h2, h3, h4 {
+  font-weight: 700 !important;
+  color: #667eea !important;
+  margin-bottom: 16px !important;
+}
+
+/* ==================== 
+   8. PALETA DE COLORES 
+   ==================== */
+
+#palette {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)) !important;
+  gap: 14px !important;
+  padding: 20px !important;
+  background: white !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
+  margin-top: 20px !important;
+}
+
+#palette > div {
+  aspect-ratio: 1 !important;
+  border-radius: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.12) !important;
+  position: relative !important;
+  border: 2px solid transparent !important;
+}
+
+#palette > div:hover {
+  transform: scale(1.1) translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2) !important;
+  z-index: 10 !important;
+  border-color: rgba(102, 126, 234, 0.6) !important;
+}
+
+/* Icono de edición en cajitas */
+#palette > div[data-editable="true"]::after {
+  content: "✏️";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: rgba(255,255,255,0.95);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+
+#palette > div[data-editable="true"]:hover::after {
+  opacity: 1;
+}
+
+/* ==================== 
+   9. PROGRESS BARS 
+   ==================== */
+
+.progress {
+  height: 10px !important;
+  border-radius: 10px !important;
+  background: #f0f0f0 !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+
+.progress .determinate,
+.progress .indeterminate {
+  background: linear-gradient(135deg, #667eea, #764ba2) !important;
+  height: 100% !important;
+}
+
+/* ==================== 
+   10. CONTENEDORES 
+   ==================== */
+
+.section, 
+.card {
+  background: white !important;
+  border-radius: 16px !important;
+  padding: 24px !important;
+  margin: 20px 0 !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
+}
+
+/* ==================== 
+   11. CONTROLES DAYU 
+   ==================== */
+
+.dayu-controls {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  padding: 24px !important;
+  border-radius: 16px !important;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.35) !important;
+  margin: 20px 0 !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+.dayu-controls-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 14px !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.dayu-version-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 8px 18px !important;
+  background: rgba(255,255,255,0.25) !important;
+  color: white !important;
+  border-radius: 24px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  border: 1px solid rgba(255,255,255,0.3) !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+.dayu-status {
+  padding: 16px 20px !important;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  margin-top: 20px !important;
+  border-left: 4px solid !important;
+  animation: slideDown 0.3s ease !important;
+}
+
+@keyframes slideDown {
+  from { 
+    opacity: 0; 
+    transform: translateY(-10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+.dayu-status.info {
+  background: #e3f2fd !important;
+  border-color: #2196F3 !important;
+  color: #1565C0 !important;
+}
+
+.dayu-status.success {
+  background: #e8f5e9 !important;
+  border-color: #4CAF50 !important;
+  color: #2E7D32 !important;
+}
+
+.dayu-status.warning {
+  background: #fff3e0 !important;
+  border-color: #FF9800 !important;
+  color: #E65100 !important;
+}
+
+.dayu-status.error {
+  background: #ffebee !important;
+  border-color: #f44336 !important;
+  color: #C62828 !important;
+}
+
+/* ==================== 
+   12. SCROLLBAR CUSTOM 
+   ==================== */
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  border-radius: 10px;
+  border: 2px solid #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #764ba2, #667eea);
+}
+
+/* ==================== 
+   13. RESPONSIVE MOBILE 
+   ==================== */
+
+@media (max-width: 768px) {
+  /* Imágenes más pequeñas en móvil */
+  img[src]:not([src*="icon"]),
+  #svgContainer svg {
+    max-height: 50vh !important;
+  }
+  
+  /* Paleta más compacta */
+  #palette {
+    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)) !important;
+    gap: 10px !important;
+    padding: 15px !important;
+  }
+  
+  /* Botones más pequeños */
+  .btn, button {
+    padding: 10px 18px !important;
+    font-size: 13px !important;
+  }
+  
+  /* Título más pequeño */
+  h1 {
+    font-size: 28px !important;
+  }
+  
+  /* Controles más compactos */
+  .dayu-controls {
+    padding: 16px !important;
+  }
+}
+
+/* ==================== 
+   14. ANIMACIONES SUAVES 
+   ==================== */
+
+* {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+button, .btn, input, select {
+  transition-duration: 0.3s !important;
+}
+
+/* ==================== 
+   15. MEJORAS ADICIONALES 
+   ==================== */
+
+/* Contenedor principal más bonito */
+body {
+  background: linear-gradient(to bottom right, #f8f9fa, #e9ecef) !important;
+}
+
+/* Tabs mejorados si existen */
+.tabs {
+  background: white !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important;
+}
+
+.tabs .tab a {
+  color: #667eea !important;
+  font-weight: 600 !important;
+}
+
+.tabs .tab a:hover {
+  background: rgba(102, 126, 234, 0.1) !important;
+}
+
+.tabs .indicator {
+  background-color: #667eea !important;
+  height: 3px !important;
+}
+
+/* Tooltips */
+[title] {
+  position: relative;
+  cursor: help;
+}
+
+/* Links mejorados */
+a {
+  color: #667eea !important;
+  text-decoration: none !important;
+  transition: color 0.2s ease !important;
+}
+
+a:hover {
+  color: #764ba2 !important;
+  text-decoration: underline !important;
+}
+</style>
 </head>
 
 <body>
