@@ -3,13 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Paint by Numbers - Generador de plantillas</title>
+  <title>Paint by Numbers - DAYU Generator</title>
   
+  <!-- Estilos del UI moderno -->
   <style>
-    /* ========================================
-       PAINT BY NUMBERS - UI MODERNO
-       ======================================== */
-    
     * {
       margin: 0;
       padding: 0;
@@ -76,54 +73,21 @@
       border-right: 1px solid #2a2a2a;
       display: flex;
       flex-direction: column;
-    }
-    
-    /* Tabs */
-    .pbn-tabs {
-      display: flex;
-      padding: 16px;
-      gap: 8px;
-      border-bottom: 1px solid #2a2a2a;
-    }
-    
-    .pbn-tab {
-      flex: 1;
-      background: transparent;
-      border: 1px solid #2a2a2a;
-      border-radius: 12px;
-      padding: 16px;
-      color: #a0a0a0;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-size: 14px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
-    
-    .pbn-tab:hover {
-      background: #252525;
-      border-color: #EC4899;
-      color: #EC4899;
-    }
-    
-    .pbn-tab.active {
-      background: linear-gradient(135deg, #EC4899, #F472B6);
-      border-color: transparent;
-      color: white;
-    }
-    
-    .pbn-tab-content {
-      display: none;
-      padding: 24px;
       overflow-y: auto;
-      flex: 1;
+      padding: 24px;
     }
     
-    .pbn-tab-content.active {
-      display: block;
+    .pbn-sidebar::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    .pbn-sidebar::-webkit-scrollbar-track {
+      background: #1a1a1a;
+    }
+    
+    .pbn-sidebar::-webkit-scrollbar-thumb {
+      background: #2a2a2a;
+      border-radius: 4px;
     }
     
     /* Upload area */
@@ -135,6 +99,7 @@
       text-align: center;
       cursor: pointer;
       transition: all 0.3s;
+      margin-bottom: 24px;
     }
     
     .pbn-upload-area:hover {
@@ -163,7 +128,7 @@
       background: #0f0f0f;
       border: 1px solid #2a2a2a;
       border-radius: 16px;
-      padding: 24px;
+      padding: 20px;
       margin-bottom: 16px;
     }
     
@@ -179,7 +144,7 @@
     }
     
     .pbn-control {
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
     
     .pbn-label {
@@ -230,8 +195,7 @@
     /* Inputs */
     .pbn-input-row {
       display: flex;
-      gap: 16px;
-      margin-bottom: 16px;
+      gap: 12px;
     }
     
     .pbn-input-group {
@@ -240,9 +204,9 @@
     
     .pbn-input-label {
       display: block;
-      font-size: 14px;
+      font-size: 13px;
       color: #a0a0a0;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       font-weight: 500;
     }
     
@@ -251,7 +215,7 @@
       background: #1a1a1a;
       border: 1px solid #2a2a2a;
       border-radius: 8px;
-      padding: 12px 16px;
+      padding: 10px 12px;
       color: white;
       font-size: 14px;
     }
@@ -266,48 +230,30 @@
       box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1);
     }
     
-    /* Toggle */
-    .pbn-toggle-label {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      margin-bottom: 16px;
-    }
-    
-    .pbn-toggle {
-      position: relative;
-      width: 48px;
-      height: 28px;
-      background: #2a2a2a;
-      border-radius: 14px;
-      transition: background 0.3s;
-    }
-    
-    .pbn-toggle::after {
-      content: '';
-      position: absolute;
-      top: 4px;
-      left: 4px;
-      width: 20px;
-      height: 20px;
-      background: white;
-      border-radius: 50%;
-      transition: transform 0.3s;
-    }
-    
-    input[type="checkbox"]:checked + .pbn-toggle {
+    /* Botón generar */
+    .pbn-generate-btn {
+      width: 100%;
       background: linear-gradient(135deg, #EC4899, #F472B6);
+      border: none;
+      border-radius: 12px;
+      padding: 16px;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      filter: drop-shadow(0 4px 8px rgba(236, 72, 153, 0.5));
+      margin-top: 16px;
     }
     
-    input[type="checkbox"]:checked + .pbn-toggle::after {
-      transform: translateX(20px);
+    .pbn-generate-btn:hover:not(:disabled) {
+      transform: translateY(-2px);
+      filter: drop-shadow(0 8px 16px rgba(236, 72, 153, 0.5));
     }
     
-    input[type="checkbox"] {
-      display: none;
+    .pbn-generate-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
     
     /* Preview area */
@@ -316,14 +262,12 @@
       background: #0f0f0f;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     }
     
     .pbn-preview-header {
       padding: 16px 24px;
       border-bottom: 1px solid #2a2a2a;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
     }
     
     .pbn-preview-title {
@@ -338,6 +282,7 @@
       justify-content: center;
       padding: 32px;
       background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,.03) 10px, rgba(255,255,255,.03) 20px);
+      overflow: auto;
     }
     
     .pbn-preview-empty {
@@ -363,7 +308,8 @@
       color: #666;
     }
     
-    .pbn-preview-image {
+    .pbn-preview-image,
+    .pbn-preview-svg {
       max-width: 100%;
       max-height: 100%;
       object-fit: contain;
@@ -371,31 +317,78 @@
       box-shadow: 0 8px 32px rgba(236, 72, 153, 0.3);
     }
     
-    /* Botón generar */
-    .pbn-generate-btn {
+    #svgContainer {
       width: 100%;
-      background: linear-gradient(135deg, #EC4899, #F472B6);
-      border: none;
-      border-radius: 12px;
-      padding: 16px;
-      color: white;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s;
-      filter: drop-shadow(0 4px 8px rgba(236, 72, 153, 0.5));
+      height: auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    
+    #svgContainer svg {
+      width: 100%;
+      height: auto;
+      max-width: 100%;
+    }
+    
+    /* Progress */
+    .pbn-progress {
+      margin-top: 16px;
+      display: none;
+    }
+    
+    .pbn-progress.active {
+      display: block;
+    }
+    
+    .pbn-progress-label {
+      font-size: 12px;
+      color: #a0a0a0;
+      margin-bottom: 6px;
+    }
+    
+    .pbn-progress-bar {
+      width: 100%;
+      height: 4px;
+      background: #2a2a2a;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    
+    .pbn-progress-fill {
+      height: 100%;
+      background: linear-gradient(to right, #EC4899, #F472B6);
+      width: 0%;
+      transition: width 0.3s;
+    }
+    
+    /* Paleta de colores */
+    #palette {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+      gap: 12px;
       margin-top: 24px;
+      padding: 16px;
+      background: #1a1a1a;
+      border-radius: 12px;
     }
     
-    .pbn-generate-btn:hover {
-      transform: translateY(-2px);
-      filter: drop-shadow(0 8px 16px rgba(236, 72, 153, 0.5));
+    #palette > div {
+      aspect-ratio: 1;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
     }
     
-    .pbn-generate-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none;
+    #palette > div:hover {
+      transform: scale(1.05) translateY(-2px);
+      box-shadow: 0 4px 16px rgba(236, 72, 153, 0.3);
     }
     
     /* Responsive */
@@ -408,10 +401,6 @@
         width: 100%;
         max-height: 50vh;
       }
-      
-      .pbn-preview {
-        min-height: 50vh;
-      }
     }
   </style>
 </head>
@@ -421,7 +410,7 @@
     <div class="pbn-logo">
       <div class="pbn-logo-icon">🎨</div>
       <div>
-        <h1 class="pbn-title">Paint by Numbers</h1>
+        <h1 class="pbn-title">Paint by Numbers - DAYU</h1>
         <p class="pbn-subtitle">Generador de plantillas</p>
       </div>
     </div>
@@ -431,95 +420,76 @@
   <div class="pbn-main">
     <!-- Sidebar -->
     <aside class="pbn-sidebar">
-      <!-- Tabs -->
-      <div class="pbn-tabs">
-        <button class="pbn-tab active" onclick="switchTab('entrada')">
-          📤 Entrada
-        </button>
-        <button class="pbn-tab" onclick="switchTab('opciones')">
-          ⚙️ Opciones
-        </button>
+      <!-- Upload -->
+      <div class="pbn-upload-area" onclick="document.getElementById('imageInput').click()">
+        <div class="pbn-upload-icon">📤</div>
+        <p class="pbn-upload-text">Sube una imagen</p>
+        <p class="pbn-upload-hint">Click aquí o arrastra una imagen</p>
       </div>
-
-      <!-- Tab: Entrada -->
-      <div id="tab-entrada" class="pbn-tab-content active">
-        <div class="pbn-upload-area" onclick="document.getElementById('imageInput').click()">
-          <div class="pbn-upload-icon">📤</div>
-          <p class="pbn-upload-text">Sube una imagen</p>
-          <p class="pbn-upload-hint">o arrastra y suelta</p>
+      <input type="file" id="imageInput" accept="image/*" style="display: none;">
+      
+      <!-- CONFIGURACIÓN DAYU -->
+      <div class="pbn-control-group">
+        <div class="pbn-control-header">
+          🎨 COLORES
         </div>
-        <input type="file" id="imageInput" accept="image/*" style="display: none;">
         
-        <button class="pbn-generate-btn" id="generateBtn" disabled>
-          🎨 Generar Paint by Numbers
-        </button>
+        <div class="pbn-control">
+          <div class="pbn-label">
+            <span>Número de colores</span>
+            <span class="pbn-value" id="numColorsValue">24</span>
+          </div>
+          <input type="range" class="pbn-slider" id="numColors" min="2" max="64" value="24">
+        </div>
       </div>
 
-      <!-- Tab: Opciones -->
-      <div id="tab-opciones" class="pbn-tab-content">
-        <!-- COLORES -->
-        <div class="pbn-control-group">
-          <div class="pbn-control-header">
-            🎨 COLORES
-          </div>
-          
-          <div class="pbn-control">
-            <div class="pbn-label">
-              <span>Número de colores</span>
-              <span class="pbn-value" id="numColorsValue">24</span>
-            </div>
-            <input type="range" class="pbn-slider" id="numColors" min="2" max="64" value="24">
-          </div>
-          
-          <div class="pbn-control">
-            <div class="pbn-label">
-              <span>Precisión</span>
-              <span class="pbn-value" id="precisionValue">3</span>
-            </div>
-            <input type="range" class="pbn-slider" id="precision" min="1" max="5" value="3">
-          </div>
+      <div class="pbn-control-group">
+        <div class="pbn-control-header">
+          📐 TAMAÑO SVG
         </div>
-
-        <!-- TAMAÑO -->
-        <div class="pbn-control-group">
-          <div class="pbn-control-header">
-            📐 TAMAÑO
+        
+        <div class="pbn-input-row">
+          <div class="pbn-input-group">
+            <label class="pbn-input-label">Multiplicador</label>
+            <input type="number" class="pbn-input" id="sizeMultiplier" value="3" min="1" max="10">
           </div>
           
-          <div class="pbn-input-row">
-            <div class="pbn-input-group">
-              <label class="pbn-input-label">Ancho máx.</label>
-              <input type="number" class="pbn-input" id="maxWidth" value="800">
-            </div>
-            
-            <div class="pbn-input-group">
-              <label class="pbn-input-label">Alto máx.</label>
-              <input type="number" class="pbn-input" id="maxHeight" value="800">
-            </div>
-          </div>
-        </div>
-
-        <!-- FACETAS -->
-        <div class="pbn-control-group">
-          <div class="pbn-control-header">
-            🔲 FACETAS
-          </div>
-          
-          <label class="pbn-toggle-label">
-            <span>Eliminar facetas pequeñas</span>
-            <input type="checkbox" id="eliminateSmall" checked>
-            <div class="pbn-toggle"></div>
-          </label>
-          
-          <div class="pbn-control">
-            <div class="pbn-label">
-              <span>Tamaño mínimo</span>
-              <span class="pbn-value" id="minSizeValue">20px</span>
-            </div>
-            <input type="range" class="pbn-slider" id="minSize" min="5" max="50" value="20">
+          <div class="pbn-input-group">
+            <label class="pbn-input-label">Tamaño fuente</label>
+            <input type="number" class="pbn-input" id="fontSize" value="50" min="10" max="100">
           </div>
         </div>
       </div>
+
+      <div class="pbn-control-group">
+        <div class="pbn-control-header">
+          🔲 FACETAS
+        </div>
+        
+        <div class="pbn-control">
+          <div class="pbn-label">
+            <span>Tamaño mínimo (px)</span>
+            <span class="pbn-value" id="minFacetValue">20</span>
+          </div>
+          <input type="range" class="pbn-slider" id="minFacet" min="5" max="100" value="20">
+        </div>
+      </div>
+      
+      <!-- Botón generar -->
+      <button class="pbn-generate-btn" id="generateBtn" disabled>
+        🎨 Generar Paint by Numbers
+      </button>
+      
+      <!-- Progress -->
+      <div class="pbn-progress" id="progressContainer">
+        <div class="pbn-progress-label" id="progressLabel">Procesando...</div>
+        <div class="pbn-progress-bar">
+          <div class="pbn-progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+      
+      <!-- Paleta de colores -->
+      <div id="palette"></div>
     </aside>
 
     <!-- Preview Area -->
@@ -538,24 +508,14 @@
     </main>
   </div>
 
+  <!-- Scripts DAYU originales -->
+  <script src="dayu_palette.js"></script>
+  <script src="dayu_simple.js"></script>
+
   <script>
     // Variables globales
     let currentImage = null;
-
-    // Cambiar tabs
-    function switchTab(tabName) {
-      // Ocultar todos los tabs
-      document.querySelectorAll('.pbn-tab-content').forEach(tab => {
-        tab.classList.remove('active');
-      });
-      document.querySelectorAll('.pbn-tab').forEach(btn => {
-        btn.classList.remove('active');
-      });
-      
-      // Mostrar tab seleccionado
-      document.getElementById('tab-' + tabName).classList.add('active');
-      event.target.classList.add('active');
-    }
+    let currentImageElement = null;
 
     // Upload de imagen
     document.getElementById('imageInput').addEventListener('change', function(e) {
@@ -565,38 +525,22 @@
         reader.onload = function(event) {
           currentImage = event.target.result;
           
-          // Mostrar preview
-          document.getElementById('previewContent').innerHTML = 
-            '<img src="' + currentImage + '" class="pbn-preview-image" alt="Preview">';
-          
-          // Habilitar botón generar
-          document.getElementById('generateBtn').disabled = false;
+          // Crear elemento de imagen
+          const img = new Image();
+          img.onload = function() {
+            currentImageElement = img;
+            
+            // Mostrar preview
+            document.getElementById('previewContent').innerHTML = 
+              '<img src="' + currentImage + '" class="pbn-preview-image" alt="Preview">';
+            
+            // Habilitar botón
+            document.getElementById('generateBtn').disabled = false;
+          };
+          img.src = currentImage;
         };
         reader.readAsDataURL(file);
       }
-    });
-
-    // Actualizar valores de sliders
-    document.getElementById('numColors').addEventListener('input', function(e) {
-      document.getElementById('numColorsValue').textContent = e.target.value;
-    });
-
-    document.getElementById('precision').addEventListener('input', function(e) {
-      document.getElementById('precisionValue').textContent = e.target.value;
-    });
-
-    document.getElementById('minSize').addEventListener('input', function(e) {
-      document.getElementById('minSizeValue').textContent = e.target.value + 'px';
-    });
-
-    // Botón generar (AQUÍ conecta con tu código DAYU)
-    document.getElementById('generateBtn').addEventListener('click', function() {
-      if (!currentImage) return;
-      
-      alert('Aquí se conectará con tu código DAYU para generar el paint by numbers');
-      
-      // TODO: Llamar a tu función de procesamiento
-      // Ejemplo: procesarImagenDayu(currentImage, opciones);
     });
 
     // Drag and drop
@@ -624,6 +568,103 @@
         input.dispatchEvent(new Event('change'));
       }
     });
+
+    // Actualizar valores de sliders
+    document.getElementById('numColors').addEventListener('input', function(e) {
+      document.getElementById('numColorsValue').textContent = e.target.value;
+    });
+
+    document.getElementById('minFacet').addEventListener('input', function(e) {
+      document.getElementById('minFacetValue').textContent = e.target.value;
+    });
+
+    // Botón generar - CONECTA CON DAYU
+    document.getElementById('generateBtn').addEventListener('click', async function() {
+      if (!currentImageElement) return;
+      
+      try {
+        // Deshabilitar botón
+        this.disabled = true;
+        
+        // Mostrar progress
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressLabel = document.getElementById('progressLabel');
+        progressContainer.classList.add('active');
+        
+        // Obtener valores
+        const numColors = parseInt(document.getElementById('numColors').value);
+        const sizeMultiplier = parseInt(document.getElementById('sizeMultiplier').value);
+        const fontSize = parseInt(document.getElementById('fontSize').value);
+        const minFacetSize = parseInt(document.getElementById('minFacet').value);
+        
+        // Actualizar progress
+        progressLabel.textContent = 'Procesando con DAYU...';
+        progressFill.style.width = '30%';
+        
+        // ⭐ LLAMAR A LA FUNCIÓN DAYU ⭐
+        // Asumiendo que existe una función global de DAYU
+        if (typeof processImageWithDAYU !== 'undefined') {
+          const result = await processImageWithDAYU(currentImageElement, {
+            numColors: numColors,
+            sizeMultiplier: sizeMultiplier,
+            fontSize: fontSize,
+            minFacetSize: minFacetSize
+          });
+          
+          progressFill.style.width = '100%';
+          progressLabel.textContent = '¡Completado!';
+          
+          // Mostrar resultado
+          if (result.svg) {
+            document.getElementById('previewContent').innerHTML = 
+              '<div id="svgContainer">' + result.svg + '</div>';
+          }
+          
+          // Mostrar paleta
+          if (result.palette) {
+            displayPalette(result.palette);
+          }
+        } else {
+          // Si no existe la función, mostrar error
+          alert('Error: No se encontró la función de procesamiento DAYU. Verifica que dayu_simple.js esté cargado correctamente.');
+        }
+        
+      } catch (error) {
+        console.error('Error al procesar:', error);
+        alert('Error al procesar la imagen: ' + error.message);
+      } finally {
+        // Re-habilitar botón
+        setTimeout(() => {
+          this.disabled = false;
+          document.getElementById('progressContainer').classList.remove('active');
+        }, 1000);
+      }
+    });
+
+    // Función para mostrar paleta
+    function displayPalette(colors) {
+      const paletteDiv = document.getElementById('palette');
+      paletteDiv.innerHTML = '';
+      
+      colors.forEach((color, index) => {
+        const colorDiv = document.createElement('div');
+        colorDiv.style.backgroundColor = color.hex || `rgb(${color.r},${color.g},${color.b})`;
+        colorDiv.style.color = getContrastColor(color);
+        colorDiv.textContent = index + 1;
+        colorDiv.title = color.hex || `RGB(${color.r},${color.g},${color.b})`;
+        paletteDiv.appendChild(colorDiv);
+      });
+    }
+
+    // Función para calcular color de contraste
+    function getContrastColor(color) {
+      const r = color.r || 0;
+      const g = color.g || 0;
+      const b = color.b || 0;
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return luminance > 0.5 ? '#000000' : '#ffffff';
+    }
   </script>
 </body>
 </html>
