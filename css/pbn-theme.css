@@ -1,233 +1,184 @@
-/* ========================================
-   VARIABLES CSS GLOBALES - TEMA ROSADO
-   Compatible con y sin Tailwind
-   ======================================== */
+/* =========================================================
+   PBN THEME - Lovable-like shell (sin romper tu app)
+   ========================================================= */
 
-:root {
-  /* Colores base del sistema */
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  
-  /* Rosado principal */
-  --primary: 330 81% 60%; /* #EC4899 */
-  --primary-foreground: 0 0% 100%;
-  
-  --secondary: 330 77% 69%; /* #F472B6 */
-  --secondary-foreground: 0 0% 100%;
-  
-  /* Acentos */
-  --accent: 326 78% 92%; /* #FBCFE8 */
-  --accent-foreground: 330 85% 48%;
-  
-  /* Mutado */
-  --muted: 326 100% 96%; /* #FCE7F3 */
-  --muted-foreground: 330 85% 41%;
-  
-  /* Destructivo */
-  --destructive: 350 89% 60%;
-  --destructive-foreground: 0 0% 100%;
-  
-  /* Bordes y inputs */
-  --border: 330 30% 90%;
-  --input: 330 30% 85%;
-  --ring: 330 81% 60%;
-  
-  /* Cards y Popovers */
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
-  
-  /* Border radius */
-  --radius: 14px;
-  
-  /* Sombras personalizadas */
-  --shadow-pbn: 0 4px 8px rgba(236, 72, 153, 0.5);
-  --shadow-pbn-hover: 0 8px 16px rgba(236, 72, 153, 0.5);
-  --shadow-pbn-sm: 0 2px 4px rgba(236, 72, 153, 0.5);
-  --shadow-soft: 0 4px 20px rgba(236, 72, 153, 0.15);
+.pbn-app{
+  min-height: 100vh;
+  color: #eaeaf0;
 }
 
-/* Modo oscuro (opcional) */
-.dark {
-  --background: 222.2 84% 4.9%;
-  --foreground: 0 0% 98%;
-  
-  --primary: 330 81% 60%;
-  --primary-foreground: 0 0% 100%;
-  
-  --secondary: 330 77% 69%;
-  --secondary-foreground: 0 0% 100%;
-  
-  --accent: 330 30% 15%;
-  --accent-foreground: 330 77% 69%;
-  
-  --muted: 330 30% 15%;
-  --muted-foreground: 330 30% 70%;
-  
-  --border: 330 30% 20%;
-  --input: 330 30% 20%;
-  --ring: 330 81% 60%;
-  
-  --card: 222.2 84% 10%;
-  --card-foreground: 0 0% 98%;
-  --popover: 222.2 84% 10%;
-  --popover-foreground: 0 0% 98%;
-}
-
-/* ========================================
-   UTILIDADES CSS (sin necesidad de Tailwind)
-   ======================================== */
-
-/* Botones base */
-.btn-pbn {
-  padding: 16px 32px;
-  border: none;
-  border-radius: var(--radius);
-  font-weight: 600;
-  font-size: 15px;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  background: linear-gradient(135deg, rgba(236, 72, 153, 0.9), rgba(244, 114, 182, 0.9));
-  color: white;
-  filter: drop-shadow(var(--shadow-pbn));
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-width: fit-content;
-  min-height: 44px;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.btn-pbn:hover {
-  transform: translateY(-3px);
-  filter: drop-shadow(var(--shadow-pbn-hover));
-  background: linear-gradient(135deg, rgba(236, 72, 153, 1), rgba(244, 114, 182, 1));
-}
-
-.btn-pbn:active {
-  transform: translateY(-1px);
-  filter: drop-shadow(var(--shadow-pbn-sm));
-}
-
-/* Card con tema rosado */
-.card-pbn {
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: var(--shadow-soft);
-}
-
-/* Input con tema rosado */
-.input-pbn {
-  border: 2px solid rgba(236, 72, 153, 0.3);
-  border-radius: 12px;
-  padding: 12px 16px;
-  font-size: 14px;
-  transition: all 0.3s ease;
-  background: white;
-}
-
-.input-pbn:hover {
-  border-color: rgba(236, 72, 153, 0.6);
-}
-
-.input-pbn:focus {
-  outline: none;
-  border-color: rgba(236, 72, 153, 0.9);
-  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.15);
-}
-
-/* Progress bar rosado */
-.progress-pbn {
-  height: 10px;
-  border-radius: 10px;
-  background: rgba(236, 72, 153, 0.15);
-  overflow: hidden;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
-}
-
-.progress-pbn-fill {
-  background: linear-gradient(to right, rgba(236, 72, 153, 0.85), rgba(244, 114, 182, 0.85));
-  height: 100%;
-  transition: width 0.3s ease;
-}
-
-/* Animaciones */
-.animate-fade-in {
-  animation: fade-in 0.4s ease-out;
-}
-
-@keyframes fade-in {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 1; transform: translateY(0); }
-}
-
-.animate-scale-in {
-  animation: scale-in 0.3s ease-out;
-}
-
-@keyframes scale-in {
-  0% { transform: scale(0.95); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-.animate-slide-down {
-  animation: slide-down 0.3s ease-out;
-}
-
-@keyframes slide-down {
-  0% { opacity: 0; transform: translateY(-10px); }
-  100% { opacity: 1; transform: translateY(0); }
-}
-
-/* Loading shimmer */
-.shimmer {
-  background: linear-gradient(
-    90deg,
-    rgba(236, 72, 153, 0.1) 0%,
-    rgba(236, 72, 153, 0.3) 50%,
-    rgba(236, 72, 153, 0.1) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 2s linear infinite;
-}
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-
-/* Utilidades de layout */
-.flex-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.flex-between {
+.pbn-header{
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 0 18px;
+  background: rgba(0,0,0,0.35);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
-.grid-palette {
+.pbn-brand{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pbn-logo{
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
-  gap: 14px;
+  place-items: center;
+  background: rgba(255,255,255,0.18);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.pbn-title{
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #ffffff;
+}
+
+.pbn-subtitle{
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+.pbn-layout{
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 18px;
+  padding: 18px;
+  align-items: start;
+}
+
+.pbn-sidebar{min-width: 0;}
+.pbn-main{min-width: 0;}
+
+.pbn-card{
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.30);
+  margin-bottom: 14px;
+}
+
+.pbn-tabs{
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.pbn-tab{
+  flex: 1;
+  border-radius: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.05);
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.pbn-tab.is-active{
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.18);
+  border-color: rgba(236, 72, 153, 0.45);
+}
+
+.pbn-pane{display:none;}
+.pbn-pane.is-visible{display:block;}
+
+.pbn-dropzone{width:100%;}
+.pbn-dropzone-inner{
+  width: 100%;
+  border-radius: 16px;
+  border: 1px dashed rgba(255,255,255,0.20);
+  padding: 18px;
+  text-align: center;
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+}
+
+.pbn-drop-icon{font-size: 26px; margin-bottom: 10px;}
+.pbn-drop-title{font-weight: 900; font-size: 16px; color:#fff;}
+.pbn-drop-sub{opacity: 0.80; margin-top: 4px;}
+.pbn-drop-hint{opacity: 0.60; font-size: 12px; margin-top: 10px;}
+
+.pbn-hidden-file{
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.pbn-actions{
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+}
+
+.pbn-small-links{
+  margin-top: 12px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.pbn-small-note{
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.70;
+}
+
+.pbn-preview{
+  min-height: calc(100vh - 72px - 18px*2);
+}
+
+.pbn-preview-head{
+  font-weight: 900;
+  font-size: 16px;
+  margin-bottom: 12px;
+  color: #fff;
+}
+
+.pbn-status-row .status{
+  background: rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 10px;
+}
+
+/* Materialize tabs dentro del preview */
+#tabsOutput.tabs{
+  background: rgba(255,255,255,0.06) !important;
+  border-radius: 14px !important;
+  padding: 8px !important;
+  overflow: hidden !important;
+}
+
+#tabsOutput.tabs .tab a{
+  color: rgba(255,255,255,0.9) !important;
+  font-weight: 800 !important;
+}
+
+#tabsOutput.tabs .indicator{
+  background: rgba(236,72,153,0.9) !important;
 }
 
 /* Responsive */
-@media (max-width: 768px) {
-  .grid-palette {
-    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
-    gap: 10px;
+@media (max-width: 1024px){
+  .pbn-layout{
+    grid-template-columns: 1fr;
   }
-  
-  .btn-pbn {
-    padding: 14px 24px;
-    font-size: 14px;
+  .pbn-preview{
+    min-height: auto;
   }
 }
