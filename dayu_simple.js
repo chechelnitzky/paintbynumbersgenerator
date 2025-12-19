@@ -1,10 +1,10 @@
-/* dayu_enhanced.js - v22.2: COMPLETO con Fix de Visualización */
+/* dayu_enhanced.js - v22: UX/UI Mejorado + Color Picker Visual */
 
 (function() {
   'use strict';
   
-  const VERSION = 'v22.2';
-  console.log(`🎨 DAYU ${VERSION} - Enhanced UX/UI + Image Fix`);
+  const VERSION = 'v22';
+  console.log(`🎨 DAYU ${VERSION} - Enhanced UX/UI con Color Picker Visual`);
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -19,129 +19,15 @@
   let colorPickerInstance = null;
   
   // ======================
-  // FIX DE VISUALIZACIÓN DE IMÁGENES
+  // ESTILOS CSS INYECTADOS
   // ======================
   
-  function fixImageDisplay() {
-    console.log('🖼️ Aplicando fix de visualización de imágenes...');
-    
-    // Fix para imagen original
-    const images = document.querySelectorAll('img[src]');
-    images.forEach(img => {
-      let container = img.parentElement;
-      while (container && !container.classList.contains('col') && container !== document.body) {
-        container = container.parentElement;
-      }
-      
-      if (container && container !== document.body) {
-        container.style.height = 'auto';
-        container.style.maxHeight = 'none';
-        container.style.overflow = 'visible';
-      }
-      
-      img.style.maxWidth = '100%';
-      img.style.maxHeight = '70vh';
-      img.style.width = 'auto';
-      img.style.height = 'auto';
-      img.style.objectFit = 'contain';
-      img.style.display = 'block';
-      img.style.margin = '0 auto';
-    });
-    
-    // Fix para SVG
-    const svgContainer = document.getElementById('svgContainer');
-    if (svgContainer) {
-      svgContainer.style.height = 'auto';
-      svgContainer.style.maxHeight = 'none';
-      svgContainer.style.overflow = 'visible';
-      svgContainer.style.width = '100%';
-      
-      const svg = svgContainer.querySelector('svg');
-      if (svg) {
-        svg.style.maxWidth = '100%';
-        svg.style.maxHeight = '70vh';
-        svg.style.width = 'auto';
-        svg.style.height = 'auto';
-        svg.style.display = 'block';
-        svg.style.margin = '0 auto';
-        
-        console.log(`✅ SVG ajustado: ${svg.getAttribute('width')}x${svg.getAttribute('height')}`);
-      }
-    }
-    
-    // Fix para contenedor row
-    const rows = document.querySelectorAll('.row');
-    rows.forEach(row => {
-      row.style.overflow = 'visible';
-    });
-    
-    console.log('✅ Fix de visualización aplicado');
-  }
-  
-  function setupImageObserver() {
-    const imageObserver = new MutationObserver((mutations) => {
-      mutations.forEach(mutation => {
-        mutation.addedNodes.forEach(node => {
-          if (node.tagName === 'IMG' || node.tagName === 'SVG') {
-            console.log('🖼️ Nueva imagen detectada, aplicando fix...');
-            setTimeout(fixImageDisplay, 100);
-          }
-        });
-      });
-    });
-    
-    imageObserver.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-    
-    console.log('👁️ Observer de imágenes activo');
-  }
   function inyectarEstilos() {
     if (document.getElementById('dayuStyles')) return;
     
     const style = document.createElement('style');
     style.id = 'dayuStyles';
     style.textContent = `
-      /* FIX DE IMÁGENES - MÁXIMA PRIORIDAD */
-      img[src] {
-        max-width: 100% !important;
-        max-height: 70vh !important;
-        width: auto !important;
-        height: auto !important;
-        object-fit: contain !important;
-        display: block !important;
-        margin: 0 auto !important;
-      }
-      
-      svg {
-        max-width: 100% !important;
-        max-height: 70vh !important;
-        width: auto !important;
-        height: auto !important;
-        display: block !important;
-        margin: 0 auto !important;
-      }
-      
-      #svgContainer {
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-        width: 100% !important;
-      }
-      
-      .row:has(img), .row:has(svg) {
-        overflow: visible !important;
-        height: auto !important;
-      }
-      
-      div[class*="col"]:has(img),
-      div[class*="col"]:has(svg) {
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-      }
-      
       /* Layout principal responsive */
       .dayu-main-container {
         display: grid;
@@ -1428,13 +1314,6 @@
   function init() {
     inyectarEstilos();
     
-    // Aplicar fix de imágenes inmediatamente
-    setTimeout(fixImageDisplay, 500);
-    
-    // Setup observer de imágenes
-    setupImageObserver();
-    
-    // Inicializar interfaz DAYU
     let intentos = 0;
     const intervalo = setInterval(() => {
       if (crearInterfaz() || ++intentos > 30) {
@@ -1443,13 +1322,6 @@
         console.log(`✅ DAYU ${VERSION} inicializado`);
       }
     }, 500);
-    
-    // Re-aplicar fix periódicamente
-    setInterval(() => {
-      if (document.querySelector('svg') || document.querySelector('img[src]')) {
-        fixImageDisplay();
-      }
-    }, 3000);
   }
   
   if (document.readyState === 'loading') {
@@ -1481,8 +1353,6 @@
   };
   
   window.regenerarSVG = regenerarSVGDirecto;
-  
-  window.dayuFixImages = fixImageDisplay;
   
   console.log(`✅ DAYU ${VERSION} cargado`);
 })();
