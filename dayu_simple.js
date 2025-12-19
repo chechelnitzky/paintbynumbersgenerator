@@ -1,10 +1,10 @@
-/* dayu_simple.js - v21: Matching por familias HSL */
+/* dayu_enhanced.js - v22: UX/UI Mejorado + Color Picker Visual */
 
 (function() {
   'use strict';
   
-  const VERSION = 'v21';
-  console.log(`🎨 DAYU ${VERSION} - Matching inteligente por familias HSL`);
+  const VERSION = 'v22';
+  console.log(`🎨 DAYU ${VERSION} - Enhanced UX/UI con Color Picker Visual`);
   
   if (!window.DAYU_PALETTE) {
     console.error('❌ DAYU_PALETTE no encontrada');
@@ -16,6 +16,416 @@
   let svgObserver = null;
   let paletaObserver = null;
   let isUpdating = false;
+  let colorPickerInstance = null;
+  
+  // ======================
+  // ESTILOS CSS INYECTADOS
+  // ======================
+  
+  function inyectarEstilos() {
+    if (document.getElementById('dayuStyles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'dayuStyles';
+    style.textContent = `
+      /* Layout principal responsive */
+      .dayu-main-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        padding: 20px;
+        max-width: 100vw;
+        box-sizing: border-box;
+      }
+      
+      @media (max-width: 1200px) {
+        .dayu-main-container {
+          grid-template-columns: 1fr;
+        }
+      }
+      
+      /* Contenedor de imágenes */
+      .dayu-image-container {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 15px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      
+      .dayu-image-container h3 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #333;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      
+      .dayu-image-wrapper {
+        position: relative;
+        width: 100%;
+        background: white;
+        border-radius: 8px;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 300px;
+        max-height: 70vh;
+      }
+      
+      .dayu-image-wrapper img,
+      .dayu-image-wrapper svg {
+        max-width: 100%;
+        max-height: 70vh;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        display: block;
+      }
+      
+      /* Controles superiores */
+      .dayu-controls {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        margin-bottom: 20px;
+      }
+      
+      .dayu-controls-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      
+      .dayu-version-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 14px;
+        background: rgba(255,255,255,0.2);
+        color: white;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        backdrop-filter: blur(10px);
+      }
+      
+      /* Botones mejorados */
+      .dayu-btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      }
+      
+      .dayu-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      }
+      
+      .dayu-btn:active {
+        transform: translateY(0);
+      }
+      
+      .dayu-btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+      
+      .dayu-btn-secondary {
+        background: linear-gradient(135deg, #00BCD4 0%, #0097A7 100%);
+        color: white;
+      }
+      
+      .dayu-btn-danger {
+        background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+        color: white;
+      }
+      
+      /* Status mejorado */
+      .dayu-status {
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-top: 15px;
+        display: none;
+        animation: slideDown 0.3s ease;
+      }
+      
+      @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .dayu-status.info {
+        background: #e3f2fd;
+        border-left: 4px solid #2196F3;
+        color: #1565C0;
+      }
+      
+      .dayu-status.success {
+        background: #e8f5e9;
+        border-left: 4px solid #4CAF50;
+        color: #2E7D32;
+      }
+      
+      .dayu-status.warning {
+        background: #fff3e0;
+        border-left: 4px solid #FF9800;
+        color: #E65100;
+      }
+      
+      .dayu-status.error {
+        background: #ffebee;
+        border-left: 4px solid #f44336;
+        color: #C62828;
+      }
+      
+      /* Paleta de colores mejorada */
+      #palette {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+        gap: 10px;
+        padding: 15px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        margin-top: 20px;
+      }
+      
+      #palette > div {
+        aspect-ratio: 1;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        position: relative;
+      }
+      
+      #palette > div:hover {
+        transform: scale(1.1);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 10;
+      }
+      
+      #palette > div[data-editable="true"]::after {
+        content: "✏️";
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        font-size: 10px;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      
+      #palette > div[data-editable="true"]:hover::after {
+        opacity: 1;
+      }
+      
+      /* Color Picker Drawer */
+      .dayu-color-picker {
+        position: fixed;
+        top: 0;
+        right: -420px;
+        width: 400px;
+        height: 100vh;
+        background: white;
+        box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+        transition: right 0.3s ease;
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      
+      .dayu-color-picker.open {
+        right: 0;
+      }
+      
+      .dayu-picker-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      .dayu-picker-header h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      
+      .dayu-picker-close {
+        background: rgba(255,255,255,0.2);
+        border: none;
+        color: white;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+      }
+      
+      .dayu-picker-close:hover {
+        background: rgba(255,255,255,0.3);
+      }
+      
+      .dayu-picker-search {
+        padding: 15px;
+        border-bottom: 1px solid #eee;
+      }
+      
+      .dayu-picker-search input {
+        width: 100%;
+        padding: 10px 15px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        font-size: 14px;
+        transition: border-color 0.2s;
+      }
+      
+      .dayu-picker-search input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+      
+      .dayu-picker-info {
+        padding: 15px;
+        background: #f8f9fa;
+        border-bottom: 1px solid #eee;
+        font-size: 13px;
+        color: #666;
+      }
+      
+      .dayu-picker-grid {
+        flex: 1;
+        overflow-y: auto;
+        padding: 15px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        align-content: start;
+      }
+      
+      .dayu-picker-color {
+        aspect-ratio: 1;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 700;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        position: relative;
+      }
+      
+      .dayu-picker-color:hover {
+        transform: scale(1.05);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 10;
+      }
+      
+      .dayu-picker-color.used {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      
+      .dayu-picker-color.used::after {
+        content: "✓";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 24px;
+        color: rgba(0,0,0,0.5);
+      }
+      
+      /* Overlay para cerrar el drawer */
+      .dayu-picker-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 9999;
+        display: none;
+        animation: fadeIn 0.3s ease;
+      }
+      
+      .dayu-picker-overlay.active {
+        display: block;
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      
+      /* Scroll personalizado */
+      .dayu-picker-grid::-webkit-scrollbar {
+        width: 8px;
+      }
+      
+      .dayu-picker-grid::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+      }
+      
+      .dayu-picker-grid::-webkit-scrollbar-thumb {
+        background: #667eea;
+        border-radius: 4px;
+      }
+      
+      .dayu-picker-grid::-webkit-scrollbar-thumb:hover {
+        background: #764ba2;
+      }
+      
+      /* Responsivo */
+      @media (max-width: 768px) {
+        .dayu-color-picker {
+          width: 100vw;
+          right: -100vw;
+        }
+        
+        .dayu-picker-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+    `;
+    
+    document.head.appendChild(style);
+    console.log('✅ Estilos CSS inyectados');
+  }
   
   // ======================
   // UTILIDADES RGB/HSL
@@ -53,16 +463,10 @@
   function clasificarFamilia(hsl) {
     const {h, s, l} = hsl;
     
-    // Blancos
     if (l > 85 && s < 20) return 'BLANCO';
-    
-    // Negros
     if (l < 15) return 'NEGRO';
-    
-    // Grises (baja saturación)
     if (s < 15) return 'GRIS';
     
-    // Familias de color por tono (H)
     if (h >= 345 || h < 15) return 'ROJO';
     if (h >= 15 && h < 45) return 'NARANJA';
     if (h >= 45 && h < 75) return 'AMARILLO';
@@ -74,7 +478,6 @@
   }
   
   function distanciaHSL(hsl1, hsl2) {
-    // Distancia ponderada: L > S > H
     const dL = Math.abs(hsl1.l - hsl2.l);
     const dS = Math.abs(hsl1.s - hsl2.s);
     const dH = Math.min(Math.abs(hsl1.h - hsl2.h), 360 - Math.abs(hsl1.h - hsl2.h));
@@ -115,6 +518,11 @@
     return window.DAYU_PALETTE.find(d => d.code.toUpperCase() === codigo.toUpperCase());
   }
   
+  function getContrastColor(rgb) {
+    const brightness = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000;
+    return brightness > 128 ? '#000000' : '#FFFFFF';
+  }
+  
   // ======================
   // MATCHING INTELIGENTE
   // ======================
@@ -125,7 +533,6 @@
     
     console.log(`Color original: RGB(${rgbOriginal}) → HSL(${Math.round(hslOriginal.h)},${Math.round(hslOriginal.s)}%,${Math.round(hslOriginal.l)}%) → Familia: ${familiaOriginal}`);
     
-    // Clasificar colores DAYU por familia
     const dayuPorFamilia = {};
     dayuDisponibles.forEach(dayu => {
       const hslDayu = rgbToHsl(...dayu.rgb);
@@ -144,7 +551,6 @@
       });
     });
     
-    // 1. Buscar en la misma familia
     if (dayuPorFamilia[familiaOriginal] && dayuPorFamilia[familiaOriginal].length > 0) {
       const matches = dayuPorFamilia[familiaOriginal];
       matches.sort((a, b) => a.distHSL - b.distHSL);
@@ -152,7 +558,6 @@
       return matches[0];
     }
     
-    // 2. Si no hay en la familia, buscar GRISES muy cercanos (distancia RGB < 900)
     if (dayuPorFamilia['GRIS']) {
       const grisesCercanos = dayuPorFamilia['GRIS']
         .filter(g => g.distRGB < 900)
@@ -164,7 +569,6 @@
       }
     }
     
-    // 3. Buscar en familias adyacentes
     const familiasAdyacentes = {
       'ROJO': ['NARANJA', 'MORADO'],
       'NARANJA': ['ROJO', 'AMARILLO'],
@@ -185,7 +589,6 @@
       }
     }
     
-    // 4. Último recurso: el más cercano por distancia HSL global
     const todosLosColores = dayuDisponibles.map(dayu => ({
       ...dayu,
       hsl: rgbToHsl(...dayu.rgb),
@@ -198,11 +601,65 @@
   }
   
   // ======================
-  // REGENERAR SVG CON TOGGLE
+  // REGENERACIÓN SVG DIRECTA
   // ======================
   
+  function regenerarSVGDirecto() {
+    console.log('🔄 Regenerando SVG directamente...');
+    
+    // Estrategia 1: Buscar función global de render
+    if (window.generateSVG) {
+      console.log('✅ Encontrada función generateSVG()');
+      window.generateSVG();
+      setTimeout(() => actualizarSVG(), 300);
+      return true;
+    }
+    
+    if (window.updateSVG) {
+      console.log('✅ Encontrada función updateSVG()');
+      window.updateSVG();
+      setTimeout(() => actualizarSVG(), 300);
+      return true;
+    }
+    
+    if (window.renderSVG) {
+      console.log('✅ Encontrada función renderSVG()');
+      window.renderSVG();
+      setTimeout(() => actualizarSVG(), 300);
+      return true;
+    }
+    
+    // Estrategia 2: Disparar evento de cambio en elementos de control
+    const sliders = document.querySelectorAll('input[type="range"]');
+    if (sliders.length > 0) {
+      console.log('✅ Disparando evento en slider para forzar re-render');
+      const slider = sliders[0];
+      const valorOriginal = slider.value;
+      slider.value = parseFloat(valorOriginal) + 0.01;
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      slider.dispatchEvent(new Event('change', { bubbles: true }));
+      
+      setTimeout(() => {
+        slider.value = valorOriginal;
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        slider.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        setTimeout(() => {
+          const resultado = actualizarSVG();
+          mostrarStatus(`✅ SVG regenerado: ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
+        }, 300);
+      }, 100);
+      
+      return true;
+    }
+    
+    // Estrategia 3: Fallback al método del checkbox
+    console.log('⚠️ No se encontró método directo, usando fallback de checkbox');
+    return regenerarSVGConToggle();
+  }
+  
   function regenerarSVGConToggle() {
-    console.log('🔄 Regenerando SVG con toggle borders...');
+    console.log('🔄 Usando método de toggle checkbox...');
     
     const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
     
@@ -249,72 +706,226 @@
       return true;
     } else {
       console.log('❌ No se encontró ningún checkbox');
-      alert('No se pudo encontrar el control de borders. Intenta cambiar manualmente el tamaño del SVG.');
+      mostrarStatus('❌ No se pudo regenerar el SVG automáticamente', 'error');
       return false;
     }
   }
   
   // ======================
-  // UI - BOTONES
+  // COLOR PICKER VISUAL
   // ======================
   
-  function crearBotones() {
+  function crearColorPicker() {
+    if (document.getElementById('dayuColorPicker')) return;
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'dayu-picker-overlay';
+    overlay.id = 'dayuPickerOverlay';
+    
+    const picker = document.createElement('div');
+    picker.className = 'dayu-color-picker';
+    picker.id = 'dayuColorPicker';
+    
+    picker.innerHTML = `
+      <div class="dayu-picker-header">
+        <h3>🎨 Seleccionar Color DAYU</h3>
+        <button class="dayu-picker-close">×</button>
+      </div>
+      
+      <div class="dayu-picker-search">
+        <input type="text" placeholder="🔍 Buscar código DAYU..." id="dayuPickerSearch">
+      </div>
+      
+      <div class="dayu-picker-info" id="dayuPickerInfo">
+        Selecciona un color para reemplazar
+      </div>
+      
+      <div class="dayu-picker-grid" id="dayuPickerGrid">
+        <!-- Se llenará dinámicamente -->
+      </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    document.body.appendChild(picker);
+    
+    // Event listeners
+    overlay.addEventListener('click', cerrarColorPicker);
+    picker.querySelector('.dayu-picker-close').addEventListener('click', cerrarColorPicker);
+    
+    const searchInput = document.getElementById('dayuPickerSearch');
+    searchInput.addEventListener('input', (e) => filtrarColores(e.target.value));
+    
+    console.log('✅ Color Picker creado');
+  }
+  
+  function abrirColorPicker(cajaElement, numeroOriginal) {
+    crearColorPicker();
+    
+    const picker = document.getElementById('dayuColorPicker');
+    const overlay = document.getElementById('dayuPickerOverlay');
+    const info = document.getElementById('dayuPickerInfo');
+    const grid = document.getElementById('dayuPickerGrid');
+    const search = document.getElementById('dayuPickerSearch');
+    
+    // Guardar referencia
+    colorPickerInstance = {
+      cajaElement: cajaElement,
+      numeroOriginal: numeroOriginal
+    };
+    
+    // Actualizar info
+    info.textContent = `Selecciona un color para reemplazar el número ${numeroOriginal}`;
+    
+    // Limpiar búsqueda
+    search.value = '';
+    
+    // Obtener colores ya usados
+    const coloresUsados = new Set(
+      Object.values(window.dayuMapping).map(m => m.code.toUpperCase())
+    );
+    
+    // Renderizar grid
+    grid.innerHTML = '';
+    window.DAYU_PALETTE.forEach(dayu => {
+      const usado = coloresUsados.has(dayu.code.toUpperCase());
+      
+      const colorDiv = document.createElement('div');
+      colorDiv.className = `dayu-picker-color ${usado ? 'used' : ''}`;
+      colorDiv.style.backgroundColor = dayu.hex;
+      colorDiv.style.color = getContrastColor(dayu.rgb);
+      colorDiv.textContent = dayu.code;
+      colorDiv.dataset.code = dayu.code;
+      colorDiv.dataset.hex = dayu.hex;
+      colorDiv.title = usado ? `${dayu.code} (Ya usado)` : dayu.code;
+      
+      if (!usado) {
+        colorDiv.addEventListener('click', () => seleccionarColor(dayu));
+      }
+      
+      grid.appendChild(colorDiv);
+    });
+    
+    // Abrir drawer
+    overlay.classList.add('active');
+    setTimeout(() => picker.classList.add('open'), 10);
+    
+    console.log(`🎨 Color Picker abierto para número ${numeroOriginal}`);
+  }
+  
+  function cerrarColorPicker() {
+    const picker = document.getElementById('dayuColorPicker');
+    const overlay = document.getElementById('dayuPickerOverlay');
+    
+    if (picker && overlay) {
+      picker.classList.remove('open');
+      overlay.classList.remove('active');
+      colorPickerInstance = null;
+      console.log('✅ Color Picker cerrado');
+    }
+  }
+  
+  function filtrarColores(busqueda) {
+    const grid = document.getElementById('dayuPickerGrid');
+    const colores = grid.querySelectorAll('.dayu-picker-color');
+    
+    const termino = busqueda.toLowerCase().trim();
+    
+    colores.forEach(color => {
+      const codigo = color.dataset.code.toLowerCase();
+      if (codigo.includes(termino) || termino === '') {
+        color.style.display = 'flex';
+      } else {
+        color.style.display = 'none';
+      }
+    });
+  }
+  
+  function seleccionarColor(dayu) {
+    if (!colorPickerInstance) return;
+    
+    const { cajaElement, numeroOriginal } = colorPickerInstance;
+    
+    console.log(`✅ Color seleccionado: ${dayu.code} para número ${numeroOriginal}`);
+    
+    // Actualizar mapeo
+    window.dayuMapping[numeroOriginal] = {
+      code: dayu.code,
+      hex: dayu.hex,
+      rgb: dayu.rgb,
+      rgbOriginal: window.dayuMapping[numeroOriginal].rgbOriginal,
+      hexOriginal: window.dayuMapping[numeroOriginal].hexOriginal
+    };
+    
+    // Actualizar cajita
+    cajaElement.textContent = dayu.code;
+    cajaElement.style.backgroundColor = dayu.hex;
+    cajaElement.style.color = getContrastColor(dayu.rgb);
+    cajaElement.dataset.dayuCode = dayu.code;
+    
+    // Cerrar picker
+    cerrarColorPicker();
+    
+    // Mostrar mensaje
+    mostrarStatus(`✏️ Color ${numeroOriginal} → ${dayu.code} | Presiona REGENERAR SVG para aplicar`, 'warning');
+  }
+  
+  // ======================
+  // UI - BOTONES Y LAYOUT
+  // ======================
+  
+  function crearInterfaz() {
     const p = document.getElementById('palette');
     if (!p) return false;
     
-    if (!document.getElementById('dayuVersion')) {
-      const versionDiv = document.createElement('div');
-      versionDiv.id = 'dayuVersion';
-      versionDiv.textContent = `DAYU ${VERSION}`;
-      versionDiv.style.cssText = 'display:inline-block;margin:0 10px 5px 0;padding:4px 10px;background:#9C27B0;color:white;border-radius:3px;font-size:11px;font-weight:bold;letter-spacing:0.5px;';
-      p.parentNode.insertBefore(versionDiv, p);
-    }
-    
-    if (!document.getElementById('btnDayu')) {
-      const btn = document.createElement('button');
-      btn.id = 'btnDayu';
-      btn.textContent = '🎨 MAPEAR A DAYU';
-      btn.className = 'waves-effect waves-light btn';
-      btn.style.cssText = 'margin:10px 5px 10px 0;background:linear-gradient(135deg,#667eea,#764ba2);font-weight:bold;';
-      btn.onclick = iniciarMapeo;
-      p.parentNode.insertBefore(btn, p);
-    }
-    
-    if (!document.getElementById('btnRegenerar')) {
-      const btnRegen = document.createElement('button');
-      btnRegen.id = 'btnRegenerar';
-      btnRegen.textContent = '🔄 REGENERAR SVG';
-      btnRegen.className = 'waves-effect waves-light btn';
-      btnRegen.style.cssText = 'margin:10px 5px;background:#00BCD4;font-weight:bold;display:none;';
-      btnRegen.onclick = () => {
+    // Crear contenedor de controles
+    if (!document.getElementById('dayuControls')) {
+      const controls = document.createElement('div');
+      controls.id = 'dayuControls';
+      controls.className = 'dayu-controls';
+      
+      controls.innerHTML = `
+        <div class="dayu-controls-row">
+          <span class="dayu-version-badge">✨ DAYU ${VERSION}</span>
+          
+          <button id="btnDayu" class="dayu-btn dayu-btn-primary">
+            🎨 MAPEAR A DAYU
+          </button>
+          
+          <button id="btnRegenerar" class="dayu-btn dayu-btn-secondary" style="display:none;">
+            🔄 REGENERAR SVG
+          </button>
+          
+          <button id="btnLimpiar" class="dayu-btn dayu-btn-danger" style="display:none;">
+            🗑️ LIMPIAR
+          </button>
+        </div>
+      `;
+      
+      p.parentNode.insertBefore(controls, p);
+      
+      // Event listeners
+      document.getElementById('btnDayu').onclick = iniciarMapeo;
+      document.getElementById('btnRegenerar').onclick = () => {
         console.log('🔄 Usuario presionó REGENERAR SVG');
         mostrarStatus('🔄 Regenerando SVG...', 'info');
-        regenerarSVGConToggle();
+        regenerarSVGDirecto();
       };
-      p.parentNode.insertBefore(btnRegen, p);
-    }
-    
-    if (!document.getElementById('btnLimpiar')) {
-      const btn2 = document.createElement('button');
-      btn2.id = 'btnLimpiar';
-      btn2.textContent = '🗑️ LIMPIAR';
-      btn2.className = 'waves-effect waves-light btn red';
-      btn2.style.cssText = 'margin:10px 5px;font-weight:bold;display:none;';
-      btn2.onclick = () => {
+      document.getElementById('btnLimpiar').onclick = () => {
         if (confirm('¿Limpiar el mapeo DAYU?')) {
           window.dayuMapping = {};
           detenerObservers();
           location.reload();
         }
       };
-      p.parentNode.insertBefore(btn2, p);
     }
     
+    // Crear status
     if (!document.getElementById('dayuStatus')) {
       const status = document.createElement('div');
       status.id = 'dayuStatus';
-      status.style.cssText = 'margin:10px 0;padding:10px;background:#e3f2fd;border-left:4px solid #2196F3;border-radius:4px;font-size:13px;display:none;font-weight:600;';
-      p.parentNode.insertBefore(status, p);
+      status.className = 'dayu-status';
+      const controls = document.getElementById('dayuControls');
+      controls.parentNode.insertBefore(status, controls.nextSibling);
     }
     
     return true;
@@ -324,26 +935,69 @@
     const status = document.getElementById('dayuStatus');
     if (!status) return;
     
-    const colores = {
-      info: {bg: '#e3f2fd', border: '#2196F3'},
-      success: {bg: '#e8f5e9', border: '#4CAF50'},
-      warning: {bg: '#fff3e0', border: '#FF9800'},
-      error: {bg: '#ffebee', border: '#f44336'}
-    };
-    
-    const c = colores[tipo];
+    status.className = `dayu-status ${tipo}`;
     status.style.display = 'block';
-    status.style.background = c.bg;
-    status.style.borderColor = c.border;
     status.textContent = mensaje;
+    
+    // Auto-ocultar después de 5 segundos para mensajes de éxito
+    if (tipo === 'success') {
+      setTimeout(() => {
+        status.style.display = 'none';
+      }, 5000);
+    }
   }
   
   function mostrarBotonesActivos() {
     const btnRegenerar = document.getElementById('btnRegenerar');
     const btnLimpiar = document.getElementById('btnLimpiar');
     
-    if (btnRegenerar) btnRegenerar.style.display = 'inline-block';
-    if (btnLimpiar) btnLimpiar.style.display = 'inline-block';
+    if (btnRegenerar) btnRegenerar.style.display = 'inline-flex';
+    if (btnLimpiar) btnLimpiar.style.display = 'inline-flex';
+  }
+  
+  function mejorarLayoutResponsive() {
+    // Mejorar contenedor de imágenes
+    const imgContainer = document.querySelector('img')?.parentElement;
+    if (imgContainer && !imgContainer.classList.contains('dayu-image-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'dayu-image-container';
+      
+      const title = document.createElement('h3');
+      title.textContent = '🖼️ Imagen Original';
+      
+      const imageWrapper = document.createElement('div');
+      imageWrapper.className = 'dayu-image-wrapper';
+      
+      imgContainer.parentNode.insertBefore(wrapper, imgContainer);
+      wrapper.appendChild(title);
+      wrapper.appendChild(imageWrapper);
+      imageWrapper.appendChild(imgContainer);
+    }
+    
+    // Mejorar contenedor SVG
+    const svgContainer = document.getElementById('svgContainer');
+    if (svgContainer && !svgContainer.parentElement.classList.contains('dayu-image-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'dayu-image-container';
+      
+      const title = document.createElement('h3');
+      title.textContent = '🎨 Paint by Numbers';
+      
+      const imageWrapper = document.createElement('div');
+      imageWrapper.className = 'dayu-image-wrapper';
+      
+      svgContainer.parentNode.insertBefore(wrapper, svgContainer);
+      wrapper.appendChild(title);
+      wrapper.appendChild(imageWrapper);
+      imageWrapper.appendChild(svgContainer);
+      
+      // Eliminar scrollbars
+      svgContainer.style.overflow = 'visible';
+      svgContainer.style.width = 'auto';
+      svgContainer.style.height = 'auto';
+    }
+    
+    console.log('✅ Layout responsive mejorado');
   }
   
   // ======================
@@ -352,10 +1006,11 @@
   
   function iniciarMapeo() {
     console.log('🎨 Iniciando mapeo inteligente por HSL...');
+    mostrarStatus('🎨 Analizando colores y mapeando a DAYU...', 'info');
     
     const cajitas = obtenerCajitas();
     if (!cajitas.length) {
-      alert('❌ No se encontraron colores en la paleta');
+      mostrarStatus('❌ No se encontraron colores en la paleta', 'error');
       return;
     }
     
@@ -372,13 +1027,12 @@
     }).filter(c => c.rgb);
     
     if (!coloresOriginales.length) {
-      alert('❌ No se pudieron extraer los colores');
+      mostrarStatus('❌ No se pudieron extraer los colores', 'error');
       return;
     }
     
     console.log(`📊 ${coloresOriginales.length} colores originales detectados`);
     
-    // Preparar paleta DAYU con índices
     const dayuConIndices = window.DAYU_PALETTE.map((dayu, idx) => ({
       ...dayu,
       dayuIdx: idx
@@ -387,11 +1041,9 @@
     const dayuUsados = new Set();
     window.dayuMapping = {};
     
-    // Mapear cada color original
     coloresOriginales.forEach(orig => {
       console.log(`\n🎨 Mapeando color ${orig.numero}...`);
       
-      // Filtrar DAYU disponibles
       const dayuDisponibles = dayuConIndices.filter(d => !dayuUsados.has(d.dayuIdx));
       
       if (dayuDisponibles.length === 0) {
@@ -399,13 +1051,10 @@
         return;
       }
       
-      // Encontrar mejor match
       const mejorMatch = encontrarMejorMatch(orig.rgb, dayuDisponibles);
       
-      // Marcar como usado
       dayuUsados.add(mejorMatch.dayuIdx);
       
-      // Guardar mapeo
       window.dayuMapping[orig.numero] = {
         code: mejorMatch.code,
         hex: mejorMatch.hex,
@@ -424,7 +1073,7 @@
     iniciarObservers();
     mostrarBotonesActivos();
     
-    mostrarStatus(`✅ Mapeo HSL completado: ${Object.keys(window.dayuMapping).length} colores | ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
+    mostrarStatus(`✅ Mapeo completado: ${Object.keys(window.dayuMapping).length} colores | ${resultado.textos} textos | ${resultado.colores} áreas`, 'success');
     
     console.log('🎉 Mapeo HSL completado');
   }
@@ -456,6 +1105,7 @@
         const dayu = window.dayuMapping[numActual];
         
         caja.style.backgroundColor = dayu.hex;
+        caja.style.color = getContrastColor(dayu.rgb);
         caja.textContent = dayu.code;
         caja.dataset.numOriginal = numActual;
         caja.dataset.dayuCode = dayu.code;
@@ -474,71 +1124,12 @@
     caja.parentNode.replaceChild(nueva, caja);
     
     nueva.style.cursor = 'pointer';
-    nueva.title = 'Clic para editar → Usa REGENERAR SVG después';
+    nueva.title = 'Clic para seleccionar otro color';
     
     nueva.addEventListener('click', function(e) {
       e.stopPropagation();
-      editarCajita(this);
-    });
-  }
-  
-  function editarCajita(caja) {
-    const numOriginal = caja.dataset.numOriginal;
-    const codigoActual = caja.textContent.trim();
-    
-    console.log(`✏️ Editando color ${numOriginal} (actual: ${codigoActual})`);
-    
-    const inp = document.createElement('input');
-    inp.value = codigoActual;
-    inp.style.cssText = 'width:100%;height:100%;border:3px solid #FF5722;text-align:center;font:inherit;box-sizing:border-box;background:white;color:black;font-weight:bold;';
-    
-    caja.textContent = '';
-    caja.appendChild(inp);
-    inp.focus();
-    inp.select();
-    
-    const aplicarCambio = () => {
-      const nuevoCodigo = inp.value.trim().toUpperCase();
-      
-      if (!nuevoCodigo) {
-        caja.textContent = codigoActual;
-        return;
-      }
-      
-      const dayu = encontrarDayuPorCodigo(nuevoCodigo);
-      
-      if (!dayu) {
-        alert(`❌ "${nuevoCodigo}" no existe en la paleta DAYU`);
-        caja.textContent = codigoActual;
-        return;
-      }
-      
-      window.dayuMapping[numOriginal] = {
-        code: dayu.code,
-        hex: dayu.hex,
-        rgb: dayu.rgb,
-        rgbOriginal: window.dayuMapping[numOriginal].rgbOriginal,
-        hexOriginal: window.dayuMapping[numOriginal].hexOriginal
-      };
-      
-      caja.textContent = dayu.code;
-      caja.style.backgroundColor = dayu.hex;
-      caja.dataset.dayuCode = dayu.code;
-      
-      console.log(`✅ Color ${numOriginal} cambiado a ${dayu.code}`);
-      
-      mostrarStatus(`✏️ Color ${numOriginal} → ${dayu.code} | Presiona REGENERAR SVG para aplicar`, 'warning');
-    };
-    
-    inp.addEventListener('blur', aplicarCambio);
-    inp.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        aplicarCambio();
-      }
-      if (e.key === 'Escape') {
-        caja.textContent = codigoActual;
-      }
+      const numeroOriginal = this.dataset.numOriginal;
+      abrirColorPicker(this, numeroOriginal);
     });
   }
   
@@ -721,10 +1312,13 @@
   // ======================
   
   function init() {
+    inyectarEstilos();
+    
     let intentos = 0;
     const intervalo = setInterval(() => {
-      if (crearBotones() || ++intentos > 30) {
+      if (crearInterfaz() || ++intentos > 30) {
         clearInterval(intervalo);
+        mejorarLayoutResponsive();
         console.log(`✅ DAYU ${VERSION} inicializado`);
       }
     }, 500);
@@ -758,7 +1352,7 @@
     return VERSION;
   };
   
-  window.regenerarSVG = regenerarSVGConToggle;
+  window.regenerarSVG = regenerarSVGDirecto;
   
   console.log(`✅ DAYU ${VERSION} cargado`);
 })();
