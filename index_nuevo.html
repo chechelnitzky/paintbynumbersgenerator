@@ -1,885 +1,956 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Paint by Numbers Generator</title>
-    
-    <!-- CSS originales -->
-    <link rel="stylesheet" href="styles/lib/materialize.min.css">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <link rel='stylesheet' href='styles/main.css' />
-    
-    <!-- UI MODERNO - Nuevo diseño encima -->
-    <style>
-        /* Reset para el nuevo diseño */
-        body {
-            background: #0f0f0f !important;
-            color: #ffffff !important;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif !important;
-        }
-        
-        /* Ocultar el contenedor viejo de materialize */
-        body > .container {
-            display: none;
-        }
-        
-        /* ====================================
-           NUEVO HEADER MODERNO
-           ==================================== */
-        .modern-header {
-            background: #1a1a1a;
-            border-bottom: 1px solid #2a2a2a;
-            padding: 16px 24px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .modern-logo {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-        
-        .modern-logo-icon {
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(135deg, #EC4899, #F472B6);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-        }
-        
-        .modern-title {
-            font-size: 20px;
-            font-weight: 700;
-            margin: 0;
-            color: white;
-        }
-        
-        .modern-subtitle {
-            font-size: 14px;
-            color: #a0a0a0;
-            margin: 0;
-        }
-        
-        /* ====================================
-           LAYOUT PRINCIPAL
-           ==================================== */
-        .modern-layout {
-            display: flex;
-            height: calc(100vh - 73px);
-            overflow: hidden;
-        }
-        
-        /* ====================================
-           SIDEBAR MODERNO
-           ==================================== */
-        .modern-sidebar {
-            width: 450px;
-            background: #1a1a1a;
-            border-right: 1px solid #2a2a2a;
-            overflow-y: auto;
-            padding: 24px;
-        }
-        
-        .modern-sidebar::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        .modern-sidebar::-webkit-scrollbar-track {
-            background: #1a1a1a;
-        }
-        
-        .modern-sidebar::-webkit-scrollbar-thumb {
-            background: #EC4899;
-            border-radius: 4px;
-        }
-        
-        /* ====================================
-           SECCIÓN DE UPLOAD
-           ==================================== */
-        .modern-upload {
-            background: #0f0f0f;
-            border: 2px dashed #2a2a2a;
-            border-radius: 16px;
-            padding: 32px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin-bottom: 24px;
-        }
-        
-        .modern-upload:hover {
-            border-color: #EC4899;
-            background: rgba(236, 72, 153, 0.05);
-        }
-        
-        .modern-upload-icon {
-            font-size: 48px;
-            margin-bottom: 12px;
-        }
-        
-        .modern-upload-text {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: white;
-        }
-        
-        .modern-upload-hint {
-            font-size: 14px;
-            color: #a0a0a0;
-        }
-        
-        /* ====================================
-           GRUPOS DE CONTROLES
-           ==================================== */
-        .modern-control-group {
-            background: #0f0f0f;
-            border: 1px solid #2a2a2a;
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 16px;
-        }
-        
-        .modern-control-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            color: #EC4899;
-            margin-bottom: 16px;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-        }
-        
-        .modern-control {
-            margin-bottom: 16px;
-        }
-        
-        .modern-control:last-child {
-            margin-bottom: 0;
-        }
-        
-        .modern-label {
-            display: block;
-            font-size: 14px;
-            color: #a0a0a0;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-        
-        /* Inputs modernos */
-        .modern-sidebar input[type="number"],
-        .modern-sidebar input[type="text"],
-        .modern-sidebar select {
-            width: 100%;
-            background: #1a1a1a !important;
-            border: 1px solid #2a2a2a !important;
-            border-radius: 8px !important;
-            padding: 10px 12px !important;
-            color: white !important;
-            font-size: 14px !important;
-            box-sizing: border-box !important;
-            height: auto !important;
-        }
-        
-        .modern-sidebar input[type="number"]:hover,
-        .modern-sidebar input[type="text"]:hover,
-        .modern-sidebar select:hover {
-            border-color: #EC4899 !important;
-        }
-        
-        .modern-sidebar input[type="number"]:focus,
-        .modern-sidebar input[type="text"]:focus,
-        .modern-sidebar select:focus {
-            outline: none !important;
-            border-color: #EC4899 !important;
-            box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1) !important;
-        }
-        
-        /* Checkboxes y radios modernos */
-        .modern-sidebar input[type="checkbox"],
-        .modern-sidebar input[type="radio"] {
-            accent-color: #EC4899;
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-        }
-        
-        .modern-sidebar label {
-            color: #a0a0a0 !important;
-            font-size: 14px !important;
-        }
-        
-        /* ====================================
-           BOTÓN PROCESAR MODERNO
-           ==================================== */
-        .modern-process-btn {
-            width: 100%;
-            background: linear-gradient(135deg, #EC4899, #F472B6) !important;
-            border: none !important;
-            border-radius: 12px !important;
-            padding: 16px !important;
-            color: white !important;
-            font-size: 16px !important;
-            font-weight: 600 !important;
-            cursor: pointer !important;
-            transition: all 0.3s !important;
-            filter: drop-shadow(0 4px 8px rgba(236, 72, 153, 0.5)) !important;
-            margin: 24px 0 !important;
-            text-transform: none !important;
-            box-shadow: none !important;
-            height: auto !important;
-        }
-        
-        .modern-process-btn:hover {
-            transform: translateY(-2px) !important;
-            filter: drop-shadow(0 8px 16px rgba(236, 72, 153, 0.5)) !important;
-        }
-        
-        /* ====================================
-           ÁREA DE PREVIEW
-           ==================================== */
-        .modern-preview {
-            flex: 1;
-            background: #0f0f0f;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        .modern-preview-header {
-            padding: 16px 24px;
-            border-bottom: 1px solid #2a2a2a;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .modern-preview-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: white;
-            margin: 0;
-        }
-        
-        .modern-tabs {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .modern-tab {
-            background: transparent;
-            border: 1px solid #2a2a2a;
-            border-radius: 8px;
-            padding: 8px 16px;
-            color: #a0a0a0;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 13px;
-            font-weight: 500;
-        }
-        
-        .modern-tab:hover {
-            border-color: #EC4899;
-            color: #EC4899;
-            background: rgba(236, 72, 153, 0.05);
-        }
-        
-        .modern-tab.active {
-            background: linear-gradient(135deg, #EC4899, #F472B6);
-            border-color: transparent;
-            color: white;
-        }
-        
-        .modern-preview-content {
-            flex: 1;
-            overflow: auto;
-            padding: 24px;
-            background-image: repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,.03) 10px, rgba(255,255,255,.03) 20px);
-        }
-        
-        .modern-preview-content::-webkit-scrollbar {
-            width: 12px;
-            height: 12px;
-        }
-        
-        .modern-preview-content::-webkit-scrollbar-track {
-            background: #0f0f0f;
-        }
-        
-        .modern-preview-content::-webkit-scrollbar-thumb {
-            background: #EC4899;
-            border-radius: 6px;
-        }
-        
-        /* Canvas y SVG en preview */
-        .modern-preview-content canvas {
-            max-width: 100%;
-            height: auto !important;
-            display: block;
-            margin: 0 auto;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(236, 72, 153, 0.2);
-        }
-        
-        #svgContainer {
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        
-        #svgContainer svg {
-            width: 100% !important;
-            height: auto !important;
-            max-width: 100% !important;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(236, 72, 153, 0.2);
-        }
-        
-        /* ====================================
-           PROGRESS BARS MODERNOS
-           ==================================== */
-        .status {
-            background: #1a1a1a;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 8px;
-            color: #a0a0a0;
-            font-size: 12px;
-        }
-        
-        .status .progress {
-            background: #0f0f0f;
-            height: 6px;
-            border-radius: 3px;
-            margin-top: 8px;
-            overflow: hidden;
-        }
-        
-        .status .progress .determinate {
-            background: linear-gradient(to right, #EC4899, #F472B6);
-            height: 100%;
-        }
-        
-        /* ====================================
-           PALETA DE COLORES MODERNA
-           ==================================== */
-        #palette {
-            display: grid !important;
-            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)) !important;
-            gap: 12px !important;
-            margin: 24px 0 !important;
-            padding: 0 !important;
-        }
-        
-        #palette > div {
-            aspect-ratio: 1 !important;
-            border-radius: 8px !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            font-weight: 700 !important;
-            font-size: 14px !important;
-            cursor: pointer !important;
-            transition: all 0.2s !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
-            border: 2px solid transparent !important;
-        }
-        
-        #palette > div:hover {
-            transform: scale(1.05) translateY(-2px) !important;
-            border-color: #EC4899 !important;
-            box-shadow: 0 4px 16px rgba(236, 72, 153, 0.3) !important;
-        }
-        
-        /* ====================================
-           BOTONES DE DESCARGA
-           ==================================== */
-        .download-section {
-            display: flex;
-            gap: 12px;
-            margin-top: 24px;
-            flex-wrap: wrap;
-        }
-        
-        .download-btn {
-            flex: 1;
-            min-width: 150px;
-            background: linear-gradient(135deg, #EC4899, #F472B6) !important;
-            border: none !important;
-            border-radius: 10px !important;
-            padding: 12px 24px !important;
-            color: white !important;
-            font-size: 14px !important;
-            font-weight: 600 !important;
-            cursor: pointer !important;
-            transition: all 0.3s !important;
-            filter: drop-shadow(0 2px 6px rgba(236, 72, 153, 0.4)) !important;
-            text-transform: none !important;
-            height: auto !important;
-            box-shadow: none !important;
-        }
-        
-        .download-btn:hover {
-            transform: translateY(-2px) !important;
-            filter: drop-shadow(0 4px 12px rgba(236, 72, 153, 0.5)) !important;
-        }
-        
-        /* ====================================
-           RESPONSIVE
-           ==================================== */
-        @media (max-width: 1024px) {
-            .modern-sidebar {
-                width: 350px;
-            }
-        }
-        
-        @media (max-width: 768px) {
-            .modern-layout {
-                flex-direction: column;
-                height: auto;
-            }
-            
-            .modern-sidebar {
-                width: 100%;
-                max-height: none;
-            }
-            
-            .modern-preview {
-                min-height: 60vh;
-            }
-        }
-        
-        /* ====================================
-           OCULTAR TABS VIEJOS DE MATERIALIZE
-           ==================================== */
-        .tabs {
-            display: none !important;
-        }
-        
-        /* Mostrar contenido siempre */
-        #input-pane,
-        #options-pane,
-        #kmeans-pane,
-        #reduction-pane,
-        #borderpath-pane,
-        #bordersegmentation-pane,
-        #labelplacement-pane,
-        #output-pane,
-        #log-pane {
-            display: block !important;
-        }
-        
-        /* ====================================
-           TEXTAREA MODERNO
-           ==================================== */
-        .modern-sidebar textarea {
-            width: 100%;
-            background: #1a1a1a !important;
-            border: 1px solid #2a2a2a !important;
-            border-radius: 8px !important;
-            padding: 12px !important;
-            color: white !important;
-            font-size: 13px !important;
-            font-family: monospace !important;
-            resize: vertical !important;
-            min-height: 80px !important;
-        }
-        
-        .modern-sidebar textarea:focus {
-            outline: none !important;
-            border-color: #EC4899 !important;
-            box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1) !important;
-        }
-        
-        /* ====================================
-           TOOLTIPS
-           ==================================== */
-        .material-icons.tooltipped {
-            font-size: 16px;
-            color: #EC4899;
-            cursor: help;
-            vertical-align: middle;
-        }
-        
-        /* ====================================
-           RENDERIZADO SVG OPTIONS
-           ==================================== */
-        .svg-options {
-            background: #1a1a1a;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 24px;
-        }
-        
-        .svg-options-title {
-            color: #EC4899;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            margin-bottom: 16px;
-        }
-        
-        .svg-options-row {
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        
-        .svg-option-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        /* Estado vacío */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #666;
-        }
-        
-        .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 16px;
-            opacity: 0.3;
-        }
-        
-        .empty-state-text {
-            font-size: 16px;
-            color: #a0a0a0;
-        }
-    </style>
+  <title>Paint by number generator</title>
+
+  <link rel="stylesheet" href="styles/lib/materialize.min.css">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="styles/main.css" />
+  <link rel="stylesheet" href="css/pbn-theme.css">
+
+  <style>
+/* ========================================
+   DAYU v5: ROSADO + SVG COMPLETO + Drop Shadow
+   (tu CSS inline original - lo dejo tal cual)
+   ======================================== */
+
+/* ==================== 
+   1. FIX DEFINITIVO - SVG COMPLETO CON FIT-CONTENT
+   ==================== */
+
+/* Contenedores - Se ajustan al contenido del SVG */
+#svgContainer,
+div[id*="svg"],
+div[class*="svg"],
+.svg-container,
+div:has(> svg) {
+  width: 100% !important;
+  height: fit-content !important;
+  max-height: fit-content !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  display: block !important;
+  padding: 0 !important;
+  margin: 20px auto !important;
+}
+
+/* Rows y cols con SVG - fit-content */
+.row:has(svg),
+.col:has(svg),
+div[class*="col"]:has(svg),
+.container:has(svg) {
+  height: fit-content !important;
+  max-height: fit-content !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+}
+
+/* SVG - Aspect ratio automático del viewBox */
+svg:not([width="20"]):not([height="20"]) {
+  width: 100% !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: none !important;
+  display: block !important;
+  margin: 0 auto !important;
+  aspect-ratio: auto !important;
+  overflow: visible !important;
+}
+
+/* TODOS los contenedores generales */
+.row,
+.col,
+.col-s12,
+.col-m12,
+.col-l12,
+div[class*="col-"],
+.container,
+section,
+main {
+  overflow: visible !important;
+}
+
+/* Imagen INPUT - controlada */
+img[src]:not([src*="icon"]):not([width="20"]):not([class*="btn"]) {
+  max-width: 100% !important;
+  max-height: 55vh !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+/* ==================== 
+   2. BOTONES ROSADOS - Drop Shadow 50%
+   ==================== */
+
+.btn, 
+button:not(.dayu-picker-close),
+input[type="button"],
+input[type="submit"],
+a.btn,
+a.btn-large,
+a.btn-small {
+  padding: 16px 32px !important;
+  border: none !important;
+  border-radius: 14px !important;
+  font-weight: 600 !important;
+  font-size: 15px !important;
+  line-height: 1.2 !important;
+  cursor: pointer !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  background: linear-gradient(135deg, 
+    rgba(236, 72, 153, 0.9), 
+    rgba(244, 114, 182, 0.9)) !important;
+  backdrop-filter: blur(10px) !important;
+  color: white !important;
+  text-align: center !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  filter: drop-shadow(0 4px 8px rgba(236, 72, 153, 0.5)) !important;
+  min-width: fit-content !important;
+  min-height: 44px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+}
+
+.btn:hover, 
+button:hover,
+input[type="button"]:hover,
+input[type="submit"]:hover {
+  transform: translateY(-3px) !important;
+  filter: drop-shadow(0 8px 16px rgba(236, 72, 153, 0.5)) !important;
+  background: linear-gradient(135deg, 
+    rgba(236, 72, 153, 1), 
+    rgba(244, 114, 182, 1)) !important;
+}
+
+.btn:active, 
+button:active {
+  transform: translateY(-1px) !important;
+  filter: drop-shadow(0 2px 4px rgba(236, 72, 153, 0.5)) !important;
+}
+
+.btn-primary,
+button[type="submit"] {
+  background: linear-gradient(135deg, 
+    rgba(219, 39, 119, 0.9), 
+    rgba(236, 72, 153, 0.9)) !important;
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, 
+    rgba(244, 114, 182, 0.9), 
+    rgba(251, 182, 206, 0.9)) !important;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, 
+    rgba(244, 67, 54, 0.9), 
+    rgba(239, 83, 80, 0.9)) !important;
+  filter: drop-shadow(0 4px 8px rgba(244, 67, 54, 0.5)) !important;
+}
+
+/* ==================== 
+   3. INPUTS ROSADOS
+   ==================== */
+
+input[type="file"],
+input[type="number"],
+input[type="text"],
+select {
+  border: 2px solid rgba(236, 72, 153, 0.3) !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  font-size: 14px !important;
+  transition: all 0.3s ease !important;
+  background: white !important;
+}
+
+input[type="file"]:hover,
+input[type="number"]:hover,
+input[type="text"]:hover,
+select:hover {
+  border-color: rgba(236, 72, 153, 0.6) !important;
+}
+
+input[type="file"]:focus,
+input[type="number"]:focus,
+input[type="text"]:focus,
+select:focus {
+  outline: none !important;
+  border-color: rgba(236, 72, 153, 0.9) !important;
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.15) !important;
+}
+
+/* ==================== 
+   4. RANGE SLIDER ROSADO
+   ==================== */
+
+input[type="range"] {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  height: 8px !important;
+  border-radius: 8px !important;
+  background: linear-gradient(to right, 
+    rgba(236, 72, 153, 0.5), 
+    rgba(244, 114, 182, 0.5)) !important;
+  border: none !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(236, 72, 153, 0.4);
+  cursor: pointer;
+  border: 3px solid rgba(236, 72, 153, 0.9);
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.6);
+  border-color: rgba(219, 39, 119, 1);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 2px 8px rgba(236, 72, 153, 0.4);
+  cursor: pointer;
+  border: 3px solid rgba(236, 72, 153, 0.9);
+  transition: all 0.2s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.6);
+  border-color: rgba(219, 39, 119, 1);
+}
+
+/* ==================== 
+   5. CHECKBOXES ROSADOS
+   ==================== */
+
+input[type="checkbox"] {
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  accent-color: rgba(236, 72, 153, 0.9) !important;
+}
+
+/* ==================== 
+   6. LABELS 
+   ==================== */
+
+label {
+  font-weight: 500 !important;
+  color: #333 !important;
+  font-size: 14px !important;
+  margin-bottom: 8px !important;
+  display: inline-block !important;
+}
+
+/* ==================== 
+   7. TÍTULOS ROSADOS
+   ==================== */
+
+h1 {
+  text-align: center !important;
+  font-weight: 800 !important;
+  font-size: 36px !important;
+  margin: 30px 0 !important;
+  background: linear-gradient(135deg, 
+    rgba(219, 39, 119, 1), 
+    rgba(236, 72, 153, 1)) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+}
+
+h2, h3, h4 {
+  font-weight: 700 !important;
+  color: rgba(236, 72, 153, 0.9) !important;
+  margin-bottom: 16px !important;
+}
+
+/* ==================== 
+   8. PALETA DE COLORES 
+   ==================== */
+
+#palette {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)) !important;
+  gap: 14px !important;
+  padding: 20px !important;
+  background: white !important;
+  border-radius: 16px !important;
+  box-shadow: 0 4px 20px rgba(236, 72, 153, 0.15) !important;
+  margin-top: 20px !important;
+}
+
+#palette > div {
+  aspect-ratio: 1 !important;
+  border-radius: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.12) !important;
+  position: relative !important;
+  border: 2px solid transparent !important;
+}
+
+#palette > div:hover {
+  transform: scale(1.1) translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(236, 72, 153, 0.25) !important;
+  z-index: 10 !important;
+  border-color: rgba(236, 72, 153, 0.6) !important;
+}
+
+#palette > div[data-editable="true"]::after {
+  content: "✏️";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  background: rgba(255,255,255,0.95);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+}
+
+#palette > div[data-editable="true"]:hover::after {
+  opacity: 1;
+}
+
+/* ==================== 
+   9. PROGRESS BARS ROSADOS
+   ==================== */
+
+.progress {
+  height: 10px !important;
+  border-radius: 10px !important;
+  background: rgba(236, 72, 153, 0.15) !important;
+  overflow: hidden !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+
+.progress .determinate,
+.progress .indeterminate {
+  background: linear-gradient(to right, 
+    rgba(236, 72, 153, 0.85), 
+    rgba(244, 114, 182, 0.85)) !important;
+  height: 100% !important;
+}
+
+/* ==================== 
+   10. CONTENEDORES 
+   ==================== */
+
+.section, 
+.card {
+  background: white !important;
+  border-radius: 16px !important;
+  padding: 24px !important;
+  margin: 20px 0 !important;
+  box-shadow: 0 4px 20px rgba(236, 72, 153, 0.1) !important;
+}
+
+/* ==================== 
+   11. CONTROLES DAYU - ROSADOS
+   ==================== */
+
+.dayu-controls {
+  background: linear-gradient(135deg, 
+    rgba(236, 72, 153, 0.9), 
+    rgba(244, 114, 182, 0.9)) !important;
+  backdrop-filter: blur(15px) !important;
+  padding: 24px !important;
+  border-radius: 16px !important;
+  filter: drop-shadow(0 6px 20px rgba(236, 72, 153, 0.35)) !important;
+  margin: 20px 0 !important;
+  border: 2px solid rgba(255,255,255,0.3) !important;
+}
+
+.dayu-controls-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 14px !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.dayu-version-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 8px 18px !important;
+  background: rgba(255,255,255,0.3) !important;
+  color: white !important;
+  border-radius: 24px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  border: 1px solid rgba(255,255,255,0.4) !important;
+  backdrop-filter: blur(10px) !important;
+}
+
+.dayu-status {
+  padding: 16px 20px !important;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  margin-top: 20px !important;
+  border-left: 4px solid !important;
+  animation: slideDown 0.3s ease !important;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dayu-status.info {
+  background: rgba(236, 72, 153, 0.1) !important;
+  border-color: rgba(236, 72, 153, 0.9) !important;
+  color: #BE185D !important;
+}
+
+.dayu-status.success {
+  background: #f0fdf4 !important;
+  border-color: #4CAF50 !important;
+  color: #2E7D32 !important;
+}
+
+.dayu-status.warning {
+  background: #fffbeb !important;
+  border-color: #F59E0B !important;
+  color: #D97706 !important;
+}
+
+.dayu-status.error {
+  background: #fef2f2 !important;
+  border-color: #f43f5e !important;
+  color: #BE123C !important;
+}
+
+/* ==================== 
+   12. SCROLLBAR ROSADO
+   ==================== */
+
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: rgba(236, 72, 153, 0.1); border-radius: 10px; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.6), rgba(244, 114, 182, 0.6));
+  border-radius: 10px;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.8), rgba(244, 114, 182, 0.8));
+}
+
+/* ==================== 
+   13. RESPONSIVE 
+   ==================== */
+
+@media (max-width: 1024px) {
+  .pbn-layout { grid-template-columns: 1fr !important; }
+  .pbn-main { order: 2; }
+  .pbn-sidebar { order: 1; }
+}
+
+@media (max-width: 768px) {
+  img[src]:not([src*="icon"]) { max-height: 50vh !important; }
+  svg:not([width="20"]) { width: 100% !important; max-width: 95% !important; }
+  #palette { grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)) !important; gap: 10px !important; padding: 15px !important; }
+  .btn, button { padding: 14px 24px !important; font-size: 14px !important; }
+  h1 { font-size: 28px !important; }
+  .dayu-controls { padding: 16px !important; }
+}
+
+/* ==================== 
+   14. ANIMACIONES 
+   ==================== */
+
+* { transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important; }
+button, .btn, input, select { transition-duration: 0.3s !important; }
+
+/* ==================== 
+   15. FONDO ROSADO SUAVE
+   ==================== */
+
+body {
+  background: linear-gradient(to bottom right, rgba(252, 231, 243, 0.6), rgba(251, 207, 232, 0.4)) !important;
+}
+
+/* ==================== 
+   16. FIX TEXTOS EN BOTONES
+   ==================== */
+
+.btn, .btn *, button, button *, input[type="button"], input[type="submit"], a.btn, a.btn * {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
+button[onclick*="download"],
+button[onclick*="Download"],
+.download-btn {
+  min-width: 180px !important;
+  padding: 16px 36px !important;
+}
+
+button[onclick*="dayu"],
+button[onclick*="DAYU"],
+.dayu-btn {
+  padding: 16px 32px !important;
+  min-width: 160px !important;
+  text-align: center !important;
+}
+
+.btn i, button i, .btn svg, button svg {
+  margin: 0 4px !important;
+  vertical-align: middle !important;
+}
+  </style>
 </head>
 
 <body>
-    <!-- NUEVO HEADER MODERNO -->
-    <header class="modern-header">
-        <div class="modern-logo">
-            <div class="modern-logo-icon">🎨</div>
-            <div>
-                <h1 class="modern-title">Paint by Numbers Generator</h1>
-                <p class="modern-subtitle">Generador profesional de plantillas</p>
-            </div>
+  <!-- APP SHELL (Lovable-like) -->
+  <div class="pbn-app">
+
+    <!-- HEADER -->
+    <header class="pbn-header">
+      <div class="pbn-brand">
+        <div class="pbn-logo">🎨</div>
+        <div>
+          <div class="pbn-title">Paint by Numbers</div>
+          <div class="pbn-subtitle">Generador de plantillas</div>
         </div>
+      </div>
+      <div class="pbn-header-actions">
+        <a href="#" class="pbn-ghost"> </a>
+      </div>
     </header>
 
-    <!-- NUEVO LAYOUT MODERNO -->
-    <div class="modern-layout">
-        <!-- SIDEBAR IZQUIERDO -->
-        <aside class="modern-sidebar">
-            <!-- UPLOAD -->
-            <div class="modern-upload" onclick="document.getElementById('file').click()">
-                <div class="modern-upload-icon">📤</div>
-                <p class="modern-upload-text">Sube una imagen</p>
-                <p class="modern-upload-hint">Click aquí o Ctrl+V para pegar</p>
-            </div>
-            
-            <input id="file" type="file" accept="image/x-png,image/gif,image/jpeg" style="display: none;">
-            
-            <!-- Imágenes de ejemplo -->
-            <div style="text-align: center; margin-bottom: 24px; font-size: 13px; color: #a0a0a0;">
-                <span>Ejemplos: </span>
-                <a id="lnkTrivial" href="#" style="color: #EC4899;">trivial</a> · 
-                <a id="lnkSmall" href="#" style="color: #EC4899;">small</a> · 
-                <a id="lnkMedium" href="#" style="color: #EC4899;">medium</a>
-            </div>
+    <!-- LAYOUT -->
+    <div class="pbn-layout">
 
-            <!-- GRUPO: RESIZE -->
-            <div class="modern-control-group">
-                <div class="modern-control-header">
-                    📐 TAMAÑO DE IMAGEN
-                </div>
-                <div class="modern-control">
+      <!-- SIDEBAR -->
+      <aside class="pbn-sidebar">
+
+        <div class="pbn-tabs">
+          <button class="pbn-tab is-active" data-pane="pbn-pane-input">Entrada</button>
+          <button class="pbn-tab" data-pane="pbn-pane-options">Opciones</button>
+        </div>
+
+        <!-- Card: Upload -->
+        <div class="pbn-card">
+          <div class="pbn-dropzone">
+            <label class="pbn-dropzone-inner" for="file">
+              <div class="pbn-drop-icon">⬆️</div>
+              <div class="pbn-drop-title">Arrastra tu imagen aquí</div>
+              <div class="pbn-drop-sub">o haz click para seleccionar</div>
+              <div class="pbn-drop-hint">PNG, JPG hasta 10MB</div>
+            </label>
+            <!-- ID CRÍTICO: file -->
+            <input id="file" type="file" accept="image/x-png,image/gif,image/jpeg" class="pbn-hidden-file" />
+          </div>
+
+          <div class="pbn-actions">
+            <!-- ID CRÍTICO: btnProcess -->
+            <a class="waves-effect waves-light btn" id="btnProcess">Generar Paint by Numbers</a>
+          </div>
+
+          <div class="pbn-small-links">
+            Example images:
+            <a id="lnkTrivial" href="#">trivial</a> -
+            <a id="lnkSmall" href="#">small</a> -
+            <a id="lnkMedium" href="#">medium</a>
+          </div>
+          <div class="pbn-small-note">
+            Tip: pega desde portapapeles (Ctrl+V) para cambiar la imagen.
+          </div>
+        </div>
+
+        <!-- PANES -->
+        <div class="pbn-card pbn-pane is-visible" id="pbn-pane-input">
+          <!-- IDs CRÍTICOS: canvas + imgTrivial/imgSmall/imgMedium -->
+          <canvas id="canvas"></canvas>
+          <img id="imgTrivial" crossorigin="anonymous" src="https://i.imgur.com/o5CqO57.png" style="display:none" />
+          <img id="imgSmall" crossorigin="anonymous" src="https://i.imgur.com/YgYLDGP.png" style="display:none" />
+          <img id="imgMedium" crossorigin="anonymous" src="https://i.imgur.com/nLeNgYbr.jpg" style="display:none" />
+        </div>
+
+        <div class="pbn-card pbn-pane" id="pbn-pane-options">
+          <!-- TU OPTIONS-PANE ORIGINAL (IDs intactos) -->
+          <div id="options-pane" class="col s12" style="display:block;">
+            <ul class="collection">
+              <li class="collection-item">
+                <div class="row">
+                  <div class="col s12" style="margin-top: 10px;">
                     <label>
-                        <input id="chkResizeImage" type="checkbox" checked="checked" />
-                        <span>Redimensionar si es mayor que:</span>
+                      <input id="chkResizeImage" type="checkbox" checked="checked" />
+                      <span>Resize image larger than
+                        <i class="material-icons tooltipped"
+                           data-tooltip="If checked and the input image is larger than the given dimensions then it will be resized to fit but will maintain its ratio.">info</i>
+                      </span>
                     </label>
+                  </div>
+                  <div class="col s6">
+                    <label for="txtResizeWidth">width</label>
+                    <input id="txtResizeWidth" type="number" value="1024" min="1" class="validate">
+                  </div>
+                  <div class="col s6">
+                    <label for="txtResizeHeight">height</label>
+                    <input id="txtResizeHeight" type="number" value="1024" min="1" class="validate">
+                  </div>
                 </div>
-                <div style="display: flex; gap: 12px;">
-                    <div style="flex: 1;">
-                        <label class="modern-label">Ancho</label>
-                        <input id="txtResizeWidth" type="number" value="1024" min="1">
-                    </div>
-                    <div style="flex: 1;">
-                        <label class="modern-label">Alto</label>
-                        <input id="txtResizeHeight" type="number" value="1024" min="1">
-                    </div>
-                </div>
-            </div>
+              </li>
 
-            <!-- GRUPO: CLUSTERING -->
-            <div class="modern-control-group">
-                <div class="modern-control-header">
-                    🎨 CUANTIZACIÓN DE COLORES
-                </div>
-                <div class="modern-control">
-                    <label class="modern-label">Número de colores</label>
-                    <input id="txtNrOfClusters" type="number" value="16" min="1">
-                </div>
-                <div class="modern-control">
-                    <label class="modern-label">Precisión de clustering</label>
-                    <input id="txtClusterPrecision" type="number" value="1" min="1" step="0.05">
-                </div>
-                <div class="modern-control">
-                    <label class="modern-label">Semilla aleatoria</label>
-                    <input id="txtRandomSeed" type="number" value="0" min="0" step="1">
-                </div>
-            </div>
+              <li class="collection-item">
+                <div class="row">
+                  <div class="input-field col s12">
+                    <input id="txtNrOfClusters" type="number" value="16" min="1" class="validate">
+                    <label for="txtNrOfClusters">Number of colors
+                      <i class="material-icons tooltipped"
+                         data-tooltip="The number of colors to quantize the image to">info</i>
+                    </label>
+                  </div>
 
-            <!-- GRUPO: COLOR SPACE -->
-            <div class="modern-control-group">
-                <div class="modern-control-header">
-                    🌈 ESPACIO DE COLOR
+                  <div class="input-field col s12">
+                    <input id="txtClusterPrecision" type="number" value="1" min="1" step="0.05" class="validate">
+                    <label for="txtClusterPrecision">Cluster precision
+                      <i class="material-icons tooltipped"
+                         data-tooltip="The threshold delta distance of the k-means clustering to reach before stopping. Having a bigger value will speed up the clustering but may yield suboptimal clusters.">info</i>
+                    </label>
+                  </div>
+
+                  <div class="input-field col s12">
+                    <input id="txtRandomSeed" type="number" value="0" min="0" step="1" class="validate">
+                    <label for="txtRandomSeed">Random seed
+                      <i class="material-icons tooltipped"
+                         data-tooltip="The seed to use for the random number generator to choose the initial centroids for k-means clusering. Using the same seed ensures you will get the same result every time.">info</i>
+                    </label>
+                  </div>
                 </div>
-                <div class="modern-control">
+              </li>
+
+              <li class="collection-item">
+                <div class="row">
+                  <div class="col s12">
+                    <label>Clustering color space
+                      <i class="material-icons tooltipped"
+                         data-tooltip="The color space to apply clustering in">info</i>
+                    </label>
+                  </div>
+                  <div class="col s4">
                     <label>
-                        <input id="optColorSpaceRGB" name="colorspace" type="radio" checked />
-                        <span>RGB</span>
+                      <input id="optColorSpaceRGB" name="colorspace" type="radio" checked />
+                      <span>RGB</span>
                     </label>
-                </div>
-                <div class="modern-control">
+                  </div>
+                  <div class="col s4">
                     <label>
-                        <input id="optColorSpaceHSL" name="colorspace" type="radio" />
-                        <span>HSL</span>
+                      <input id="optColorSpaceHSL" name="colorspace" type="radio" />
+                      <span>HSL</span>
                     </label>
-                </div>
-                <div class="modern-control">
+                  </div>
+                  <div class="col s4">
                     <label>
-                        <input id="optColorSpaceLAB" name="colorspace" type="radio" />
-                        <span>Lab</span>
+                      <input id="optColorSpaceLAB" name="colorspace" type="radio" />
+                      <span>Lab</span>
                     </label>
-                </div>
-            </div>
+                  </div>
 
-            <!-- GRUPO: FACETS -->
-            <div class="modern-control-group">
-                <div class="modern-control-header">
-                    🔲 FACETAS
-                </div>
-                <div class="modern-control">
-                    <label class="modern-label">Limpiezas de píxeles estrechos</label>
-                    <input id="txtNarrowPixelStripCleanupRuns" type="number" value="3" min="0">
-                </div>
-                <div class="modern-control">
-                    <label class="modern-label">Eliminar facetas menores a (px)</label>
-                    <input id="txtRemoveFacetsSmallerThan" type="number" value="20" min="1">
-                </div>
-                <div class="modern-control">
-                    <label class="modern-label">Número máximo de facetas</label>
-                    <input id="txtMaximumNumberOfFacets" type="number" value="100000" min="1">
-                </div>
-            </div>
-
-            <!-- BOTÓN PROCESAR -->
-            <a class="waves-effect waves-light btn modern-process-btn" id="btnProcess">
-                🎨 Procesar Imagen
-            </a>
-
-            <!-- PROGRESS BARS -->
-            <div style="margin-top: 24px;">
-                <div class="status kMeans">
-                    K-means clustering
-                    <div class="progress">
-                        <div id="statusKMeans" class="determinate" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="status facetBuilding">
-                    Construyendo facetas
-                    <div class="progress">
-                        <div id="statusFacetBuilding" class="determinate" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="status facetReduction">
-                    Reduciendo facetas pequeñas
-                    <div class="progress">
-                        <div id="statusFacetReduction" class="determinate" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="status facetBorderPath">
-                    Detección de bordes
-                    <div class="progress">
-                        <div id="statusFacetBorderPath" class="determinate" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="status facetBorderSegmentation">
-                    Segmentación de bordes
-                    <div class="progress">
-                        <div id="statusFacetBorderSegmentation" class="determinate" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="status facetLabelPlacement">
-                    Colocación de etiquetas
-                    <div class="progress">
-                        <div id="statusFacetLabelPlacement" class="determinate" style="width: 0%"></div>
-                    </div>
-                </div>
-                <div class="status SVGGenerate">
-                    Generación de SVG
-                    <div class="progress">
-                        <div id="statusSVGGenerate" class="determinate" style="width: 0%"></div>
-                    </div>
-                </div>
-            </div>
-        </aside>
-
-        <!-- ÁREA DE PREVIEW -->
-        <main class="modern-preview">
-            <div class="modern-preview-header">
-                <h2 class="modern-preview-title">Vista previa</h2>
-                <div class="modern-tabs" id="modernTabs">
-                    <button class="modern-tab active" data-target="input-pane">Input</button>
-                    <button class="modern-tab" data-target="kmeans-pane">Cuantizado</button>
-                    <button class="modern-tab" data-target="reduction-pane">Reducción</button>
-                    <button class="modern-tab" data-target="borderpath-pane">Bordes</button>
-                    <button class="modern-tab" data-target="output-pane">Output</button>
-                </div>
-            </div>
-            
-            <div class="modern-preview-content">
-                <!-- Input Canvas -->
-                <div id="input-pane" class="preview-pane active">
-                    <canvas id="canvas"></canvas>
-                    <img id="imgTrivial" crossorigin="anonymous" src="https://i.imgur.com/o5CqO57.png" style="display:none" />
-                    <img id="imgSmall" crossorigin="anonymous" src="https://i.imgur.com/YgYLDGP.png" style="display:none" />
-                    <img id="imgMedium" crossorigin="anonymous" src="https://i.imgur.com/nLeNgYbr.jpg" style="display:none" />
-                </div>
-
-                <!-- KMeans -->
-                <div id="kmeans-pane" class="preview-pane" style="display: none;">
-                    <canvas id="cKMeans"></canvas>
-                </div>
-
-                <!-- Reduction -->
-                <div id="reduction-pane" class="preview-pane" style="display: none;">
-                    <canvas id="cReduction"></canvas>
-                </div>
-
-                <!-- Border Path -->
-                <div id="borderpath-pane" class="preview-pane" style="display: none;">
-                    <canvas id="cBorderPath"></canvas>
-                </div>
-
-                <!-- Output -->
-                <div id="output-pane" class="preview-pane" style="display: none;">
-                    <!-- SVG Options -->
-                    <div class="svg-options">
-                        <div class="svg-options-title">Opciones de renderizado</div>
-                        <div class="svg-options-row">
-                            <div class="svg-option-item">
-                                <input id="chkShowLabels" type="checkbox" checked="checked" />
-                                <label for="chkShowLabels">Mostrar etiquetas</label>
-                            </div>
-                            <div class="svg-option-item">
-                                <input id="chkFillFacets" type="checkbox" checked="checked" />
-                                <label for="chkFillFacets">Rellenar facetas</label>
-                            </div>
-                            <div class="svg-option-item">
-                                <input id="chkShowBorders" type="checkbox" checked="checked" />
-                                <label for="chkShowBorders">Mostrar bordes</label>
-                            </div>
-                        </div>
-                        <div style="display: flex; gap: 12px; margin-top: 16px;">
-                            <div style="flex: 1;">
-                                <label class="modern-label">Multiplicador de tamaño</label>
-                                <input placeholder="SVG Size multiplier" id="txtSizeMultiplier" type="number" value="3" min="1">
-                            </div>
-                            <div style="flex: 1;">
-                                <label class="modern-label">Tamaño fuente etiqueta</label>
-                                <input placeholder="Label font size" id="txtLabelFontSize" type="number" value="50" min="1" max="100">
-                            </div>
-                            <div style="flex: 1;">
-                                <label class="modern-label">Color fuente</label>
-                                <input placeholder="Label font color" id="txtLabelFontColor" type="text" value="#000">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Paleta -->
-                    <div id="palette" class="palette"></div>
-
-                    <!-- SVG Container -->
-                    <div id="svgContainer"></div>
-
-                    <!-- Botones de descarga -->
-                    <div class="download-section">
-                        <a class="waves-effect waves-light btn download-btn" id="btnDownloadSVG">📥 Descargar SVG</a>
-                        <a class="waves-effect waves-light btn download-btn" id="btnDownloadPNG">📥 Descargar PNG</a>
-                        <a class="waves-effect waves-light btn download-btn" id="btnDownloadPalettePNG">🎨 Descargar Paleta</a>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- Hidden elementos originales -->
-    <div style="display: none;">
-        <canvas id="cBorderSegmentation"></canvas>
-        <canvas id="cLabelPlacement"></canvas>
-        <div id="log"></div>
-        <textarea id="txtKMeansColorRestrictions">
+                  <div class="col s12">
+                    <label for="txtKMeansColorRestrictions">Restrict clustering colors
+                      <i class="material-icons tooltipped"
+                         data-tooltip="Specify which colors should be used, one per line in 'r,g,b' format. Use // as comment. If no colors are specified no restrictions are applied. Useful if you only have a few colors of paint on hand.">info</i>
+                    </label>
+                    <textarea id="txtKMeansColorRestrictions" class="materialize-textarea validate">
 //0,0,0
 //255,255,255
 </textarea>
-        <input id="txtNrOfTimesToHalveBorderSegments" type="number" value="2" min="0">
-        <input id="optFacetRemovalLargestToSmallest" name="smallfacetremovalorder" type="radio" checked />
-        <input id="optFacetRemovalSmallestToLargest" name="smallfacetremovalorder" type="radio" />
+                  </div>
+                </div>
+              </li>
+
+              <li class="collection-item">
+                <div class="row">
+                  <div class="input-field col s12">
+                    <input id="txtNarrowPixelStripCleanupRuns" type="number" value="3" min="0" class="validate">
+                    <label for="txtNarrowPixelStripCleanupRuns">Number of runs for narrow pixel cleanup
+                      <i class="material-icons tooltipped"
+                         data-tooltip="Narrow pixel cleanup removes strips of single pixel rows, which would make some facets have some borders segments that are way too narrow to be useful. The small facet removal can introduce new narrow pixel strips, so this is repeated in a few iterative runs.">info</i>
+                    </label>
+                  </div>
+
+                  <div class="input-field col s12">
+                    <input id="txtRemoveFacetsSmallerThan" type="number" value="20" min="1" class="validate">
+                    <label for="txtRemoveFacetsSmallerThan">Remove small facets smaller than (pixels)
+                      <i class="material-icons tooltipped"
+                         data-tooltip="Removes any facets that are smaller than the given amount of pixels. Lowering the value will create more detailed results but might be much harder to actually paint due to their size.">info</i>
+                    </label>
+                  </div>
+
+                  <div class="input-field col s12">
+                    <input id="txtMaximumNumberOfFacets" type="number" value="100000" min="1" class="validate">
+                    <label for="txtMaximumNumberOfFacets">Maximum number of facets
+                      <i class="material-icons tooltipped"
+                         data-tooltip="If there are more facets than the given maximum number, keep removing the smallest facets until the limit is reached">info</i>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="row">
+                  <div class="col s12">
+                    <label>Small facet removal order
+                      <i class="material-icons tooltipped"
+                         data-tooltip="Largest to smallest will prevent boundaries from warping the shapes because the smaller facets act as border anchorpoints but can be considerably slower">info</i>
+                    </label>
+                  </div>
+                  <div class="col s6">
+                    <label>
+                      <input id="optFacetRemovalLargestToSmallest" name="smallfacetremovalorder" type="radio" checked />
+                      <span>Largest to smallest</span>
+                    </label>
+                  </div>
+                  <div class="col s6">
+                    <label>
+                      <input id="optFacetRemovalSmallestToLargest" name="smallfacetremovalorder" type="radio" />
+                      <span>Smallest to largest</span>
+                    </label>
+                  </div>
+                </div>
+              </li>
+
+              <li class="collection-item">
+                <div class="row">
+                  <div class="input-field col s12">
+                    <input id="txtNrOfTimesToHalveBorderSegments" type="number" value="2" min="0" class="validate">
+                    <label for="txtNrOfTimesToHalveBorderSegments">Amount of times to halve border segment complexity)
+                      <i class="material-icons tooltipped"
+                         data-tooltip="Reducing the amount of points in a border segment (using haar wavelet reduction) will smooth out the quadratic curve more but at a loss of detail. <br/>A segment (shared border with a facet) will always retain its start and end point.">info</i>
+                    </label>
+                  </div>
+                </div>
+              </li>
+
+            </ul>
+          </div>
+        </div>
+
+        <!-- STATUS BARS (las dejo en sidebar, tipo Lovable) -->
+        <div class="pbn-card">
+          <div class="row pbn-status-row">
+            <div class="col s12">
+              <div class="status kMeans">
+                K-means clustering
+                <div class="progress"><div id="statusKMeans" class="determinate" style="width: 0%"></div></div>
+              </div>
+            </div>
+            <div class="col s12">
+              <div class="status facetBuilding">
+                Facet building
+                <div class="progress"><div id="statusFacetBuilding" class="determinate" style="width: 0%"></div></div>
+              </div>
+            </div>
+            <div class="col s12">
+              <div class="status facetReduction">
+                Small facet pruning
+                <div class="progress"><div id="statusFacetReduction" class="determinate" style="width: 0%"></div></div>
+              </div>
+            </div>
+            <div class="col s12">
+              <div class="status facetBorderPath">
+                Border detection
+                <div class="progress"><div id="statusFacetBorderPath" class="determinate" style="width: 0%"></div></div>
+              </div>
+            </div>
+            <div class="col s12">
+              <div class="status facetBorderSegmentation">
+                Border segmentation
+                <div class="progress"><div id="statusFacetBorderSegmentation" class="determinate" style="width: 0%"></div></div>
+              </div>
+            </div>
+            <div class="col s12">
+              <div class="status facetLabelPlacement">
+                Label placement
+                <div class="progress"><div id="statusFacetLabelPlacement" class="determinate" style="width: 0%"></div></div>
+              </div>
+            </div>
+            <div class="col s12">
+              <div class="status SVGGenerate">
+                SVG generation
+                <div class="progress"><div id="statusSVGGenerate" class="determinate" style="width: 0%"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </aside>
+
+      <!-- MAIN / PREVIEW -->
+      <main class="pbn-main">
+        <div class="pbn-card pbn-preview">
+          <div class="pbn-preview-head">Vista previa</div>
+
+          <!-- Output tabs + canvases + output-pane (IDs intactos) -->
+          <div class="row" style="margin-bottom:0;">
+            <div class="col s12">
+              <ul id="tabsOutput" class="tabs">
+                <li class="tab col s2"><a href="#kmeans-pane">Quantized image</a></li>
+                <li class="tab col s2"><a href="#reduction-pane">Facet reduction</a></li>
+                <li class="tab col s2"><a href="#borderpath-pane">Border tracing</a></li>
+                <li class="tab col s2"><a href="#bordersegmentation-pane">Border segmentation</a></li>
+                <li class="tab col s2"><a href="#labelplacement-pane">Label placement</a></li>
+                <li class="tab col s2"><a href="#output-pane">Output</a></li>
+                <li class="tab col s2"><a href="#log-pane">Log</a></li>
+              </ul>
+            </div>
+
+            <div id="kmeans-pane" class="col s12"><canvas id="cKMeans"></canvas></div>
+            <div id="reduction-pane" class="col s12"><canvas id="cReduction"></canvas></div>
+            <div id="borderpath-pane" class="col s12"><canvas id="cBorderPath"></canvas></div>
+            <div id="bordersegmentation-pane" class="col s12"><canvas id="cBorderSegmentation"></canvas></div>
+            <div id="labelplacement-pane" class="col s12"><canvas id="cLabelPlacement"></canvas></div>
+
+            <div id="output-pane" class="col s12">
+              <div class="row">
+                <div class="col s2"><label>SVG Render options</label></div>
+                <div class="col s2">
+                  <label><input id="chkShowLabels" type="checkbox" checked="checked" /><span>Show labels</span></label>
+                </div>
+                <div class="col s2">
+                  <label><input id="chkFillFacets" type="checkbox" checked="checked" /><span>Fill facets</span></label>
+                </div>
+                <div class="col s2">
+                  <label><input id="chkShowBorders" type="checkbox" checked="checked" /><span>Show borders</span></label>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="col s3">
+                  <div class="input-field">
+                    <input placeholder="SVG Size multiplier" id="txtSizeMultiplier" type="number" value="3" min="1" class="validate">
+                    <label for="txtSizeMultiplier">SVG size multiplier
+                      <i class="material-icons tooltipped" data-tooltip="Increases the SVG size compared to the original image, useful when the labels don't fit inside the tiny segments">info</i>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col s3">
+                  <div class="input-field">
+                    <input placeholder="Label font size" id="txtLabelFontSize" type="number" value="50" min="1" max="100">
+                    <label for="txtLabelFontSize">Label font size
+                      <i class="material-icons tooltipped" data-tooltip="Font size of the color number labels in each facet, in percentage relative to the largest circle found inside a facet.">info</i>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="col s3">
+                  <div class="input-field">
+                    <input placeholder="Label font color" id="txtLabelFontColor" type="text" value="#000">
+                    <label for="txtLabelFontColor">Label font color
+                      <i class="material-icons tooltipped" data-tooltip="Font color of the color number labels in each facet">info</i>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="row">
+                <div id="palette" class="palette"></div>
+              </div>
+
+              <div class="row">
+                <div class="col s12">
+                  <div id="svgContainer"></div>
+                </div>
+              </div>
+
+              <div class="row">
+                <div class="col s4"><a class="waves-effect waves-light btn" id="btnDownloadSVG">Download SVG</a></div>
+                <div class="col s4"><a class="waves-effect waves-light btn" id="btnDownloadPNG">Download PNG</a></div>
+                <div class="col s4"><a class="waves-effect waves-light btn" id="btnDownloadPalettePNG">Download palette</a></div>
+              </div>
+            </div>
+
+            <div id="log-pane" class="col s12">
+              <div class="row">
+                <div class="col s12">
+                  <div id="log"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </main>
+
     </div>
+  </div>
 
-    <!-- Scripts originales -->
-    <script src="scripts/lib/saveSvgAsPng.js"></script>
-    <script src="scripts/lib/require.js"></script>
-    <script src="scripts/lib/jquery-1.11.0.min.js"></script>
-    <script src="scripts/lib/materialize.min.js"></script>
-    <script src='scripts/main.js'></script>
-    <script>
-        requirejs(['main'], function (MyApp) {});
-    </script>
+  <!-- Scripts originales -->
+  <script src="scripts/lib/saveSvgAsPng.js"></script>
+  <script src="scripts/lib/require.js"></script>
+  <script src="scripts/lib/jquery-1.11.0.min.js"></script>
+  <script src="scripts/lib/materialize.min.js"></script>
+  <script src="scripts/main.js"></script>
+  <script>
+    requirejs(['main'], function (MyApp) {});
+  </script>
 
-    <!-- Sistema DAYU -->
-    <script src="dayu_palette.js"></script>
-    <script src="dayu_simple.js"></script>
-    <script src="./dayu_textsize_patch.js"></script>
+  <!-- Sistema DAYU Simple -->
+  <script src="dayu_palette.js"></script>
+  <script src="dayu_simple.js"></script>
+  <script src="./dayu_textsize_patch.js"></script>
 
-    <!-- Script para tabs modernos -->
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Tabs modernos
-            const tabs = document.querySelectorAll('.modern-tab');
-            const panes = document.querySelectorAll('.preview-pane');
-            
-            tabs.forEach(tab => {
-                tab.addEventListener('click', function() {
-                    // Remover active de todos
-                    tabs.forEach(t => t.classList.remove('active'));
-                    panes.forEach(p => p.style.display = 'none');
-                    
-                    // Activar el clickeado
-                    this.classList.add('active');
-                    const targetId = this.getAttribute('data-target');
-                    document.getElementById(targetId).style.display = 'block';
-                });
-            });
+  <!-- Tabs Entrada/Opciones (no toca IDs del sistema) -->
+  <script>
+    (function () {
+      const tabs = document.querySelectorAll('.pbn-tab');
+      const panes = document.querySelectorAll('.pbn-pane');
 
-            // Inicializar tooltips de Materialize
-            if (typeof M !== 'undefined') {
-                var elems = document.querySelectorAll('.tooltipped');
-                M.Tooltip.init(elems);
-            }
+      tabs.forEach(btn => {
+        btn.addEventListener('click', () => {
+          tabs.forEach(t => t.classList.remove('is-active'));
+          btn.classList.add('is-active');
+
+          panes.forEach(p => p.classList.remove('is-visible'));
+          const target = document.getElementById(btn.dataset.pane);
+          if (target) target.classList.add('is-visible');
         });
-    </script>
+      });
+    })();
+  </script>
+
 </body>
 </html>
