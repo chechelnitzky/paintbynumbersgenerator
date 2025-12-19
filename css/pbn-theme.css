@@ -1,0 +1,233 @@
+/* ========================================
+   VARIABLES CSS GLOBALES - TEMA ROSADO
+   Compatible con y sin Tailwind
+   ======================================== */
+
+:root {
+  /* Colores base del sistema */
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  
+  /* Rosado principal */
+  --primary: 330 81% 60%; /* #EC4899 */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 330 77% 69%; /* #F472B6 */
+  --secondary-foreground: 0 0% 100%;
+  
+  /* Acentos */
+  --accent: 326 78% 92%; /* #FBCFE8 */
+  --accent-foreground: 330 85% 48%;
+  
+  /* Mutado */
+  --muted: 326 100% 96%; /* #FCE7F3 */
+  --muted-foreground: 330 85% 41%;
+  
+  /* Destructivo */
+  --destructive: 350 89% 60%;
+  --destructive-foreground: 0 0% 100%;
+  
+  /* Bordes y inputs */
+  --border: 330 30% 90%;
+  --input: 330 30% 85%;
+  --ring: 330 81% 60%;
+  
+  /* Cards y Popovers */
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  
+  /* Border radius */
+  --radius: 14px;
+  
+  /* Sombras personalizadas */
+  --shadow-pbn: 0 4px 8px rgba(236, 72, 153, 0.5);
+  --shadow-pbn-hover: 0 8px 16px rgba(236, 72, 153, 0.5);
+  --shadow-pbn-sm: 0 2px 4px rgba(236, 72, 153, 0.5);
+  --shadow-soft: 0 4px 20px rgba(236, 72, 153, 0.15);
+}
+
+/* Modo oscuro (opcional) */
+.dark {
+  --background: 222.2 84% 4.9%;
+  --foreground: 0 0% 98%;
+  
+  --primary: 330 81% 60%;
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 330 77% 69%;
+  --secondary-foreground: 0 0% 100%;
+  
+  --accent: 330 30% 15%;
+  --accent-foreground: 330 77% 69%;
+  
+  --muted: 330 30% 15%;
+  --muted-foreground: 330 30% 70%;
+  
+  --border: 330 30% 20%;
+  --input: 330 30% 20%;
+  --ring: 330 81% 60%;
+  
+  --card: 222.2 84% 10%;
+  --card-foreground: 0 0% 98%;
+  --popover: 222.2 84% 10%;
+  --popover-foreground: 0 0% 98%;
+}
+
+/* ========================================
+   UTILIDADES CSS (sin necesidad de Tailwind)
+   ======================================== */
+
+/* Botones base */
+.btn-pbn {
+  padding: 16px 32px;
+  border: none;
+  border-radius: var(--radius);
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.9), rgba(244, 114, 182, 0.9));
+  color: white;
+  filter: drop-shadow(var(--shadow-pbn));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: fit-content;
+  min-height: 44px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.btn-pbn:hover {
+  transform: translateY(-3px);
+  filter: drop-shadow(var(--shadow-pbn-hover));
+  background: linear-gradient(135deg, rgba(236, 72, 153, 1), rgba(244, 114, 182, 1));
+}
+
+.btn-pbn:active {
+  transform: translateY(-1px);
+  filter: drop-shadow(var(--shadow-pbn-sm));
+}
+
+/* Card con tema rosado */
+.card-pbn {
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--shadow-soft);
+}
+
+/* Input con tema rosado */
+.input-pbn {
+  border: 2px solid rgba(236, 72, 153, 0.3);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  background: white;
+}
+
+.input-pbn:hover {
+  border-color: rgba(236, 72, 153, 0.6);
+}
+
+.input-pbn:focus {
+  outline: none;
+  border-color: rgba(236, 72, 153, 0.9);
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.15);
+}
+
+/* Progress bar rosado */
+.progress-pbn {
+  height: 10px;
+  border-radius: 10px;
+  background: rgba(236, 72, 153, 0.15);
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.progress-pbn-fill {
+  background: linear-gradient(to right, rgba(236, 72, 153, 0.85), rgba(244, 114, 182, 0.85));
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+/* Animaciones */
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out;
+}
+
+@keyframes fade-in {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out;
+}
+
+@keyframes scale-in {
+  0% { transform: scale(0.95); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-slide-down {
+  animation: slide-down 0.3s ease-out;
+}
+
+@keyframes slide-down {
+  0% { opacity: 0; transform: translateY(-10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Loading shimmer */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(236, 72, 153, 0.1) 0%,
+    rgba(236, 72, 153, 0.3) 50%,
+    rgba(236, 72, 153, 0.1) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Utilidades de layout */
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.grid-palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  gap: 14px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .grid-palette {
+    grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+    gap: 10px;
+  }
+  
+  .btn-pbn {
+    padding: 14px 24px;
+    font-size: 14px;
+  }
+}
