@@ -1,17 +1,22 @@
 :root{
   --bg:#0b0f14;
-  --panel:#101822;
-  --panel2:#0f1620;
-  --card:#0f1722;
-  --line:rgba(255,255,255,.08);
+  --panel:#0f1722;
+  --panel2:#0b1220;
+  --line:rgba(255,255,255,.10);
 
-  --text:#000; /* pedido: textos en negro */
-  --muted:#1a1a1a;
+  --text:#f3f6ff;      /* texto general claro */
+  --text2:#cfd7e6;     /* secundario */
+  --darkText:#0b0f14;  /* para botones claros */
+
+  --tabBg: rgba(255,255,255,.06);
+  --tabActive: rgba(56,189,248,.18);
+  --tabText: #dbe7ff;
+  --tabTextActive: #ffffff;
 
   --btn:#c7ced8;
   --btnText:#0b0f14;
-  --glow:rgba(56,189,248,.45); /* celeste difuminado */
-  --glow2:rgba(56,189,248,.25);
+  --glow:rgba(56,189,248,.45);
+  --glow2:rgba(56,189,248,.22);
 
   --radius:16px;
   --radius2:12px;
@@ -19,21 +24,32 @@
   --accent:#38bdf8;
 }
 
-/* NO SCROLL GLOBAL */
+/* ====== NO SCROLL GLOBAL DEL BODY (layout full height) ====== */
 html,body{height:100%; overflow:hidden;}
 body{
   margin:0;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  background: radial-gradient(1200px 600px at 30% 0%, rgba(56,189,248,.18), transparent 60%),
-              radial-gradient(900px 500px at 80% 20%, rgba(99,102,241,.14), transparent 55%),
-              var(--bg);
+  background:
+    radial-gradient(1200px 600px at 30% 0%, rgba(56,189,248,.16), transparent 60%),
+    radial-gradient(900px 500px at 80% 20%, rgba(99,102,241,.12), transparent 55%),
+    var(--bg);
+  color: var(--text);
 }
 
-/* Materialize: fuerza textos negros */
-*{ color: var(--text) !important; }
-label span, label, .tabs .tab a{ color: var(--text) !important; }
+/* ====== Deja Materialize vivo, pero NO forces todo a negro ====== */
+*{ box-sizing:border-box; }
+a, span, div, p, label, li, h1,h2,h3,h4,h5{
+  color: var(--text) !important;
+}
 
-/* Shell */
+/* Inputs y labels legibles */
+label, label span{ color: var(--text) !important; }
+.input-field label.active{ color: var(--text2) !important; }
+input[type="text"], input[type="number"], textarea{
+  color: #0b0f14 !important;
+}
+
+/* ====== App shell ====== */
 .app-shell{height:100vh; display:flex; flex-direction:column;}
 .topbar{
   height:64px;
@@ -41,20 +57,20 @@ label span, label, .tabs .tab a{ color: var(--text) !important; }
   align-items:center;
   justify-content:space-between;
   padding:0 18px;
-  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
   border-bottom:1px solid var(--line);
 }
 .brand{display:flex; align-items:center; gap:12px;}
 .brand-icon{
   width:38px;height:38px;border-radius:12px;
   display:flex;align-items:center;justify-content:center;
-  background:rgba(255,255,255,.08);
-  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  background:rgba(255,255,255,.10);
+  box-shadow: 0 12px 30px rgba(0,0,0,.40);
 }
-.brand-title{font-weight:800; letter-spacing:.2px;}
-.brand-subtitle{font-size:12px; opacity:.75;}
+.brand-title{font-weight:900; letter-spacing:.2px; color: var(--tabTextActive) !important;}
+.brand-subtitle{font-size:12px; opacity:.75; color: var(--text2) !important;}
 .tech-chip{
-  background:rgba(255,255,255,.08) !important;
+  background:rgba(255,255,255,.10) !important;
   border:1px solid var(--line);
   border-radius:999px !important;
   padding:8px 12px !important;
@@ -63,7 +79,7 @@ label span, label, .tabs .tab a{ color: var(--text) !important; }
   align-items:center;
 }
 
-/* Main grid */
+/* ====== Layout columns ====== */
 .main-grid{
   flex:1;
   min-height:0;
@@ -72,90 +88,107 @@ label span, label, .tabs .tab a{ color: var(--text) !important; }
   gap:14px;
   padding:14px;
 }
+@media (max-width: 1100px){
+  .main-grid{grid-template-columns: 380px 1fr;}
+}
 
-/* Panels */
+/* ====== Panels ====== */
 .panel{
-  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
   border:1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: 0 16px 50px rgba(0,0,0,.35);
+  box-shadow: 0 18px 55px rgba(0,0,0,.40);
   overflow:hidden;
 }
-.sidebar{min-height:0;}
-.content{min-height:0;}
+.sidebar, .content{min-height:0;}
 
-/* Tabs */
+/* ====== Tabs: AHORA SI LEGIBLES ====== */
 .tabs{
-  background: transparent !important;
+  background: rgba(0,0,0,.10) !important;
   border-bottom:1px solid var(--line);
 }
+.tabs .tab{ line-height: 48px !important; height: 48px !important; }
 .tabs .tab a{
-  font-weight:700 !important;
+  color: var(--tabText) !important;
+  font-weight: 900 !important;
   text-transform:none !important;
-  border-radius:12px;
+  border-radius: 12px;
+  margin: 6px 6px 6px 6px;
+  background: var(--tabBg) !important;
+  border: 1px solid rgba(255,255,255,.10);
+}
+.tabs .tab a:hover{
+  background: rgba(255,255,255,.10) !important;
 }
 .tabs .tab a.active{
-  background: rgba(255,255,255,.10) !important;
+  color: var(--tabTextActive) !important;
+  background: var(--tabActive) !important;
+  border: 1px solid rgba(56,189,248,.40);
+  box-shadow: 0 10px 26px rgba(56,189,248,.20);
 }
 .tabs .indicator{
   background: var(--accent) !important;
-  height:3px !important;
+  height: 3px !important;
+  opacity: 0; /* no necesitamos la barrita, se ve mejor con active pill */
 }
 
-/* Tab panes */
-.tab-pane{
-  padding:14px;
+/* ====== Sidebar panes ====== */
+.panel-tabs{
+  height:100%;
+  display:flex;
+  flex-direction:column;
   min-height:0;
 }
-.panel-tabs{display:flex; flex-direction:column; min-height:0;}
-#input-pane, #options-pane{min-height:0;}
 
-/* Sidebar scroll solo en options */
-.panel-body-scroll{
-  height: calc(100vh - 64px - 14px - 14px - 52px); /* aprox, suficiente */
-  overflow:auto;
+/* IMPORTANTE: QUITAR el scroll interno del panel options/input.
+   Querías que se vea todo hacia abajo.
+   => el scroll vive en la COLUMNA completa, no dentro del panel-body */
+#input-pane, #options-pane{
+  padding:14px;
+}
+.tab-pane{ min-height:0; }
+
+/* Esta es LA CLAVE: la sidebar ahora scrollea completa */
+.sidebar{
+  overflow:auto; /* scroll vertical aquí */
   padding-right:6px;
 }
 
-/* Drop area */
-.drop-card{
-  background: rgba(255,255,255,.65);
-  border:1px solid rgba(0,0,0,.08);
-  border-radius: var(--radius);
-  padding:14px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.12);
+/* Desactiva el contenedor con scroll interno si existía */
+.panel-body-scroll{
+  height:auto !important;
+  overflow:visible !important;
+  padding-right:0 !important;
 }
-.drop-title{font-weight:900;}
-.drop-sub{font-size:12px; opacity:.75; margin-top:2px;}
-.file-row{margin-top:10px;}
-.examples-row{
-  margin-top:10px;
-  display:flex;
-  gap:10px;
-  align-items:center;
-  font-size:12px;
-}
-.examples-row a{ text-decoration: underline; }
 
-/* Canvas */
+/* ====== Cards claras dentro del sidebar ====== */
+.drop-card, .collection-item, .status-card{
+  background: rgba(255,255,255,.92) !important;
+  border:1px solid rgba(255,255,255,.16) !important;
+  border-radius: var(--radius);
+  box-shadow: 0 14px 30px rgba(0,0,0,.25);
+}
+.drop-title{color:#0b0f14 !important; font-weight:900;}
+.drop-sub{color:rgba(0,0,0,.70) !important; font-size:12px;}
+.examples-row span{color:rgba(0,0,0,.65) !important;}
+.examples-row a{color:#0b0f14 !important; text-decoration: underline !important;}
+
+.file-row input[type="file"]{
+  color:#0b0f14 !important;
+}
+
+/* Canvas preview */
 .canvas-wrap{
   margin-top:12px;
   border-radius: 14px;
   border:1px solid rgba(0,0,0,.10);
-  background: rgba(255,255,255,.55);
+  background: rgba(240,245,255,.95);
   overflow:hidden;
   min-height: 220px;
 }
-#canvas{
-  width:100% !important;
-  height:auto !important;
-  display:block !important;
-}
+#canvas{width:100% !important; height:auto !important; display:block !important;}
 
-/* Actions */
-.action-row{margin-top:12px;}
-
-/* Status */
+/* Status grid */
 .status-grid{
   margin-top:14px;
   display:grid;
@@ -163,13 +196,10 @@ label span, label, .tabs .tab a{ color: var(--text) !important; }
   gap:10px;
 }
 .status-card{
-  background: rgba(255,255,255,.62);
-  border:1px solid rgba(0,0,0,.08);
-  border-radius: 14px;
   padding:10px;
+  border-radius: 14px !important;
 }
-.status-card.wide{grid-column:1 / -1;}
-.status-title{font-weight:800; font-size:12px; margin-bottom:6px;}
+.status-title{color:#0b0f14 !important; font-weight:900; font-size:12px; margin-bottom:6px;}
 .progress{
   background: rgba(0,0,0,.10) !important;
   border-radius:999px !important;
@@ -177,24 +207,35 @@ label span, label, .tabs .tab a{ color: var(--text) !important; }
   height:10px !important;
 }
 .progress .determinate{
-  background: linear-gradient(90deg, rgba(56,189,248,.9), rgba(99,102,241,.9)) !important;
+  background: linear-gradient(90deg, rgba(56,189,248,.95), rgba(99,102,241,.95)) !important;
 }
 
 /* Options list */
 .tech-collection{border:none !important;}
-.collection-item{
-  border:1px solid rgba(0,0,0,.08) !important;
-  background: rgba(255,255,255,.62) !important;
-  border-radius: 14px !important;
-  margin-bottom:10px !important;
+.collection-item label,
+.collection-item label span,
+.collection-item .active{
+  color:#0b0f14 !important;
+}
+.collection-item textarea,
+.collection-item input{
+  background: rgba(255,255,255,.98) !important;
+  border:1px solid rgba(0,0,0,.18) !important;
+  border-radius: 12px !important;
+  padding:10px 12px !important;
 }
 
-/* Content panel */
+/* ====== Content side ====== */
 .panel-content{
   height: 100%;
   display:flex;
   flex-direction:column;
   min-height:0;
+}
+
+/* Scroll SOLO en el lado derecho (contenido), no en toda la página */
+.content{
+  overflow:hidden;
 }
 .content-panes{
   flex:1;
@@ -203,14 +244,18 @@ label span, label, .tabs .tab a{ color: var(--text) !important; }
   padding:14px;
 }
 
-/* Output subpanels */
+/* Sub-panels en content */
 .panel-sub{
-  background: rgba(255,255,255,.72);
-  border:1px solid rgba(0,0,0,.08);
+  background: rgba(255,255,255,.92);
+  border:1px solid rgba(255,255,255,.18);
   border-radius: var(--radius);
   padding:12px;
   margin-bottom:12px;
+  box-shadow: 0 16px 34px rgba(0,0,0,.22);
 }
+.panel-sub *{ color:#0b0f14 !important; } /* panel blanco => texto negro */
+
+/* Subgrid */
 .subgrid{
   display:grid;
   grid-template-columns: 1.2fr 1fr 1fr 1fr;
@@ -218,25 +263,7 @@ label span, label, .tabs .tab a{ color: var(--text) !important; }
   align-items:end;
 }
 @media (max-width: 1100px){
-  .main-grid{grid-template-columns: 380px 1fr;}
   .subgrid{grid-template-columns: 1fr 1fr;}
-}
-
-/* Checks row */
-.check-row{
-  display:flex;
-  flex-wrap:wrap;
-  gap:14px;
-  margin-top:6px;
-}
-
-/* Inputs */
-input[type="text"], input[type="number"], textarea{
-  background: rgba(255,255,255,.90) !important;
-  border:1px solid rgba(0,0,0,.18) !important;
-  border-radius: 12px !important;
-  padding:10px 12px !important;
-  box-sizing:border-box;
 }
 
 /* Palette */
@@ -254,18 +281,19 @@ input[type="text"], input[type="number"], textarea{
   align-items:center !important;
   justify-content:center !important;
   font-weight:900 !important;
-  box-shadow: 0 10px 20px rgba(0,0,0,.12) !important;
+  box-shadow: 0 12px 22px rgba(0,0,0,.18) !important;
   border:1px solid rgba(0,0,0,.10) !important;
+  color:#0b0f14 !important;
 }
 
-/* Buttons: gris + glow celeste */
+/* ====== Buttons gris + glow celeste ====== */
 .btn, a.btn, button, input[type="button"], input[type="submit"]{
   background: var(--btn) !important;
   color: var(--btnText) !important;
   border-radius: 14px !important;
   font-weight: 900 !important;
   text-transform:none !important;
-  box-shadow: 0 10px 26px var(--glow2) !important;
+  box-shadow: 0 14px 30px var(--glow2) !important;
   display:inline-flex !important;
   align-items:center !important;
   justify-content:center !important;
@@ -277,18 +305,14 @@ input[type="text"], input[type="number"], textarea{
 }
 .btn i.material-icons{color: var(--btnText) !important;}
 .btn:hover{
-  box-shadow: 0 14px 34px var(--glow) !important;
+  box-shadow: 0 18px 38px var(--glow) !important;
   transform: translateY(-1px);
 }
 
-/* Downloads row */
-.downloads-row{
-  display:flex;
-  gap:12px;
-  flex-wrap:wrap;
-}
+/* Download row */
+.downloads-row{display:flex; gap:12px; flex-wrap:wrap;}
 
-/* Viewport header */
+/* ====== Output viewport: QUITAR “marco” que corta ====== */
 .viewport-header{
   display:flex;
   align-items:center;
@@ -301,63 +325,77 @@ input[type="text"], input[type="number"], textarea{
   align-items:center;
   gap:8px;
   font-weight:900;
+  color:#0b0f14 !important;
 }
 
-/* Zoom bar */
+/* Zoombar */
 .zoombar{
   display:flex;
   align-items:center;
   gap:8px;
   padding:6px 8px;
-  background: rgba(255,255,255,.85);
+  background: rgba(240,245,255,.98);
   border:1px solid rgba(0,0,0,.10);
   border-radius: 14px;
-  box-shadow: 0 10px 24px rgba(0,0,0,.08);
+  box-shadow: 0 14px 28px rgba(0,0,0,.14);
 }
 .zbtn{
   width:34px;
   height:34px;
   border-radius: 10px;
   border:1px solid rgba(0,0,0,.14);
-  background: rgba(255,255,255,.95);
+  background: rgba(255,255,255,.98);
   cursor:pointer;
   display:flex;
   align-items:center;
   justify-content:center;
-  box-shadow: 0 8px 18px rgba(0,0,0,.08);
+  box-shadow: 0 10px 20px rgba(0,0,0,.10);
 }
-.zbtn i{font-size:18px;}
+.zbtn i{font-size:18px; color:#0b0f14 !important;}
 .zread{
   min-width:60px;
   text-align:center;
   font-weight:900;
+  color:#0b0f14 !important;
 }
 
-/* SVG viewport: marco FIJO, svg se escala adentro */
+/* Viewport: sin borde interno “pesado” y sin wrapper extra que recorta */
 .svg-viewport{
-  height: clamp(360px, 62vh, 720px);
+  height: clamp(420px, 66vh, 780px);
   border-radius: 14px;
-  border:1px solid rgba(0,0,0,.10);
-  background: rgba(255,255,255,.92);
-  overflow:auto; /* scroll interno si haces zoom in */
+  border: none !important;         /* <- quita el marco que “corta” */
+  background: transparent !important;/* <- deja que se vea limpio */
+  overflow: auto;                   /* scroll interno para zoom-in */
   position: relative;
+  padding: 0 !important;
 }
+
+/* Stage: escala aquí */
 .svg-stage{
   transform-origin: 0 0;
   will-change: transform;
-  width: max-content;  /* clave: el stage crece según el svg */
-  height: max-content; /* y el viewport NO cambia de tamaño */
-  padding: 10px;
+  width: max-content;
+  height: max-content;
+  padding: 0 !important; /* <- sin padding que parecía marco */
 }
+
+/* El SVG container no debe imponer max-width */
 #svgContainer{
   width: max-content !important;
   height: max-content !important;
   overflow: visible !important;
+  background: rgba(255,255,255,.92); /* “hoja” limpia */
+  border-radius: 14px;
+  box-shadow: 0 16px 34px rgba(0,0,0,.12);
+  padding: 10px;
 }
+
+/* IMPORTANTÍSIMO: evita que css global lo “encaje” y lo recorte */
 #svgContainer svg{
   display:block;
-  max-width:none !important; /* para que zoom no pelee con max-width:100% */
-  height:auto;
+  max-width:none !important;
+  height:auto !important;
+  overflow: visible !important;
 }
 
 /* Log */
@@ -368,8 +406,9 @@ input[type="text"], input[type="number"], textarea{
   word-break:break-word;
   max-height: 60vh;
   overflow:auto;
-  background: rgba(255,255,255,.85);
+  background: rgba(255,255,255,.92);
   border-radius: 12px;
   padding:12px;
   border:1px solid rgba(0,0,0,.10);
+  color:#0b0f14 !important;
 }
