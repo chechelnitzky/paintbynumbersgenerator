@@ -1,490 +1,186 @@
-/* ===========================
-   Tech UI (Dark, readable)
-   - No rompe IDs existentes
-   - Evita cortes (overflow)
-   - Layout tipo Lovable (2 columnas)
-   =========================== */
+/* ==========================================================
+       Tech UI Patch (modified)
 
-:root{
-  --bg: #0b0f14;
-  --bg2:#0f1620;
-  --panel:#121a24;
-  --panel2:#0f1722;
-  --stroke: rgba(255,255,255,.10);
-  --stroke2: rgba(255,255,255,.14);
-  --text: #eaf0f7;
-  --muted: rgba(234,240,247,.70);
+       This is a customised version of the upstream
+       scripts/tech_ui_patch.js.  The original script provided zoom
+       controls for the generated SVG and required the user to click the
+       “Fit” button to make the image fit the available viewport.  To
+       satisfy the requirement that the output image auto‑fits regardless
+       of screen size or SVG dimensions, this version invokes the
+       `zoomFit` routine automatically on load and whenever the SVG is
+       replaced.  This way the image always appears at its full size
+       within the viewport without manual intervention.
+       ========================================================== */
 
-  --btn: rgba(255,255,255,.10);
-  --btn2: rgba(255,255,255,.14);
-  --btnText: #eaf0f7;
+(function () {
+  const state = {
+    scale: 1,
+    minScale: 0.1,
+    maxScale: 6,
+    step: 0.1,
+  };
 
-  --cyanShadow: rgba(80, 200, 255, .35);
-  --cyanShadow2: rgba(80, 200, 255, .22);
-}
+  function clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
 
-/* Materialize tiende a meter overflow/line-height raros */
-*{ box-sizing: border-box; }
-html, body{
-  height: 100%;
-  margin: 0;
-  background: radial-gradient(1200px 600px at 30% 0%, rgba(80,200,255,.10), transparent 55%),
-              radial-gradient(900px 500px at 90% 10%, rgba(120,120,255,.08), transparent 55%),
-              linear-gradient(180deg, var(--bg), var(--bg2));
-  color: var(--text);
-  overflow: hidden; /* NO scroll de página */
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-}
+  function pct() {
+    return Math.round(state.scale * 100) + "%";
+  }
 
-/* Evitar que Materialize corte cosas */
-.container, .row, .col{
-  width: auto !important;
-  max-width: none !important;
-  overflow: visible !important;
-}
+  function getViewport() {
+    return document.getElementById("outputViewport");
+  }
 
-/* HEADER */
-.app-header{
-  height: 64px;
-  padding: 0 18px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  border-bottom: 1px solid var(--stroke);
-  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
-}
+  function getSvg() {
+    const c = document.getElementById("svgContainer");
+    if (!c) return null;
+    return c.querySelector("svg");
+  }
 
-.brand{
-  display:flex;
-  align-items:center;
-  gap: 12px;
-}
+  function applyScale() {
+    const svg = getSvg();
+    const pctEl = document.getElementById("zoomPct");
+    if (pctEl) pctEl.textContent = pct();
 
-.brand-badge{
-  width: 36px;
-  height: 36px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius: 12px;
-  background: rgba(255,255,255,.10);
-  border: 1px solid var(--stroke);
-}
+    if (!svg) return;
 
-.brand-title{
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.1;
-}
-.brand-subtitle{
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 2px;
-}
+    // Escalamos el SVG, no el contenedor
+    svg.style.transformOrigin = "0 0";
+    svg.style.transform = `scale(${state.scale})`;
 
-.tech-pill{
-  display:inline-flex;
-  align-items:center;
-  gap: 8px;
-  border-radius: 999px;
-  padding: 8px 12px;
-  background: rgba(255,255,255,.08);
-  border: 1px solid var(--stroke);
-  color: var(--text);
-  cursor:pointer;
-}
-.tech-pill i{ font-size:18px; }
+    // Asegurar que el SVG no quede con max-width 100% que arruina el zoom
+    svg.style.maxWidth = "none";
+  }
 
-/* SHELL */
-.app-shell{
-  height: calc(100vh - 64px);
-  display:grid;
-  grid-template-columns: 360px 1fr;
-  gap: 14px;
-  padding: 14px;
-  overflow: hidden;
-}
+  function zoomIn() {
+    state.scale = clamp(state.scale + state.step, state.minScale, state.maxScale);
+    applyScale();
+  }
 
-/* SIDEBAR */
-.sidebar{
-  display:flex;
-  flex-direction:column;
-  gap: 12px;
-  overflow: hidden; /* scroll interno en panel */
-}
+  function zoomOut() {
+    state.scale = clamp(state.scale - state.step, state.minScale, state.maxScale);
+    applyScale();
+  }
 
-/* MAIN */
-.main{
-  overflow: hidden;
-  display:flex;
-  flex-direction:column;
-}
+  function zoomReset() {
+    state.scale = 1;
+    applyScale();
+    // opcional: volver al tope-izq
+    const vp = getViewport();
+    if (vp) {
+      vp.scrollLeft = 0;
+      vp.scrollTop = 0;
+    }
+  }
 
-/* PANELS */
-.panel{
-  border-radius: 14px;
-  border: 1px solid var(--stroke);
-  background: rgba(255,255,255,.06);
-  box-shadow: 0 10px 30px rgba(0,0,0,.35);
-}
+  function zoomFit() {
+    const vp = getViewport();
+    const svg = getSvg();
+    if (!vp || !svg) return;
 
-.panel-soft{
-  background: rgba(18, 26, 36, .82);
-}
+    // Medimos bbox real del SVG
+    let vb = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : null;
+    let svgW = 0;
+    let svgH = 0;
 
-.panel-strong{
-  background: rgba(12, 18, 28, .88);
-  border-color: var(--stroke2);
-}
+    if (vb && vb.width && vb.height) {
+      svgW = vb.width;
+      svgH = vb.height;
+    } else {
+      try {
+        const bb = svg.getBBox();
+        svgW = bb.width;
+        svgH = bb.height;
+      } catch (e) {
+        // fallback
+        svgW = svg.clientWidth || 1000;
+        svgH = svg.clientHeight || 1000;
+      }
+    }
 
-.panel-accent{
-  background: linear-gradient(135deg, rgba(80,200,255,.18), rgba(120,120,255,.10));
-  border-color: rgba(80,200,255,.22);
-}
+    const pad = 24; // coincide con padding interno
+    const availW = Math.max(50, vp.clientWidth - pad);
+    const availH = Math.max(50, vp.clientHeight - pad);
 
-.panel-title{
-  display:flex;
-  align-items:center;
-  gap: 10px;
-  font-weight: 800;
-  padding: 12px 12px 8px;
-  color: var(--text);
-}
-.panel-title i{
-  font-size: 18px;
-  opacity: .9;
-}
-.panel-title.small{
-  font-size: 13px;
-  opacity: .95;
-}
+    const s = Math.min(availW / svgW, availH / svgH);
+    state.scale = clamp(s, state.minScale, state.maxScale);
+    applyScale();
 
-.divider-soft{
-  height: 1px;
-  background: rgba(255,255,255,.10);
-  margin: 12px;
-}
+    // al hacer fit, centramos un poco
+    vp.scrollLeft = 0;
+    vp.scrollTop = 0;
+  }
 
-.muted{ color: var(--muted); }
+  function hookButtons() {
+    const btnIn = document.getElementById("zoomIn");
+    const btnOut = document.getElementById("zoomOut");
+    const btnReset = document.getElementById("zoomReset");
+    const btnFit = document.getElementById("zoomFit");
 
-/* Upload section */
-.upload-hint{
-  padding: 0 12px 10px;
-}
-.upload-row{ margin-top: 8px; }
-.examples a{
-  color: rgba(80,200,255,.95);
-  text-decoration:none;
-}
-.examples a:hover{ text-decoration: underline; }
+    if (btnIn) btnIn.addEventListener("click", zoomIn);
+    if (btnOut) btnOut.addEventListener("click", zoomOut);
+    if (btnReset) btnReset.addEventListener("click", zoomReset);
+    if (btnFit) btnFit.addEventListener("click", zoomFit);
 
-/* Preview card */
-.preview-card{
-  margin: 10px 12px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.06);
-  padding: 10px;
-  overflow: hidden;
-}
+    // atajos básicos: Ctrl + rueda (opcional, sin romper)
+    const vp = getViewport();
+    if (vp) {
+      vp.addEventListener(
+        "wheel",
+        (e) => {
+          if (!e.ctrlKey) return;
+          e.preventDefault();
+          if (e.deltaY < 0) zoomIn();
+          else zoomOut();
+        },
+        { passive: false },
+      );
+    }
+  }
 
-/* IMPORTANT: el canvas NO puede colapsar a 0 */
-#canvas{
-  width: 100% !important;
-  height: auto !important;
-  display:block !important;
-  min-height: 160px; /* evita source width 0 por colapso visual */
-  border-radius: 10px;
-  background: rgba(0,0,0,.20);
-}
+  function observeSvgChanges() {
+    const container = document.getElementById("svgContainer");
+    if (!container) return;
 
-/* Sidebar scroll area (options) */
-.sidebar-scroll{
-  overflow: auto;
-  max-height: 40vh;
-  scrollbar-width: thin;
-}
-.sidebar-scroll::-webkit-scrollbar{ width: 10px; }
-.sidebar-scroll::-webkit-scrollbar-thumb{
-  background: rgba(255,255,255,.14);
-  border-radius: 10px;
-}
+    const obs = new MutationObserver(() => {
+      // cada vez que se inserta/reemplaza SVG:
+      // reaplicamos escala; usamos zoomFit para que siempre se ajuste al
+      // viewport automáticamente cuando el contenido cambia.
+      requestAnimationFrame(() => {
+        zoomFit();
+      });
+    });
 
-/* Materialize collection */
-.tech-collection{
-  border: none !important;
-  margin: 0 0 12px !important;
-}
-.tech-item{
-  background: transparent !important;
-  border-bottom: 1px solid rgba(255,255,255,.08) !important;
-}
-.tech-row{ margin-bottom: 0 !important; }
+    obs.observe(container, { childList: true, subtree: true });
+  }
 
-/* Inputs */
-.tech-input, .tech-textarea{
-  background: rgba(255,255,255,.08) !important;
-  border: 1px solid rgba(255,255,255,.14) !important;
-  border-radius: 12px !important;
-  padding: 10px 12px !important;
-  color: var(--text) !important;
-}
-.tech-textarea{
-  min-height: 90px !important;
-}
-input[type="file"]{
-  color: var(--text);
-}
+  function materializeInit() {
+    // Re-inicializar tabs cuando cambia el layout (seguro)
+    if (window.M && M.Tabs) {
+      const el = document.getElementById("tabsOutput");
+      if (el) M.Tabs.init(el, {});
+    }
+    // tooltips
+    if (window.M && M.Tooltip) {
+      const t = document.querySelectorAll(".tooltipped");
+      M.Tooltip.init(t, {});
+    }
+  }
 
-/* Checkbox + radio */
-.tech-check, .tech-radio{
-  display:inline-flex !important;
-  align-items:center !important;
-  gap: 10px !important;
-  margin-right: 14px !important;
-  color: var(--text) !important;
-}
-.tech-radio-row{
-  display:flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-.tech-check span, .tech-radio span{
-  color: var(--text) !important;
-  font-weight: 600;
-}
+  function boot() {
+    // Esperamos DOM listo
+    hookButtons();
+    observeSvgChanges();
+    materializeInit();
 
-/* Buttons (gris + sombra celeste difuminada) */
-.tech-btn, .btn.tech-btn, a.btn.tech-btn{
-  border-radius: 12px !important;
-  background: rgba(255,255,255,.12) !important;
-  border: 1px solid rgba(255,255,255,.16) !important;
-  color: var(--btnText) !important;
-  text-transform: none !important;
-  font-weight: 800 !important;
-  letter-spacing: .2px !important;
-  box-shadow: 0 10px 24px var(--cyanShadow2) !important;
-  height: auto !important;
-  line-height: 1 !important;
-  padding: 12px 14px !important;
-  display:inline-flex !important;
-  align-items:center !important;
-  justify-content:center !important;
-  gap: 10px !important;
-}
-.tech-btn:hover{
-  background: rgba(255,255,255,.16) !important;
-  box-shadow: 0 14px 32px var(--cyanShadow) !important;
-  transform: translateY(-1px);
-}
-.tech-btn i.left{ margin-right: 8px !important; }
+    // estado inicial: ajusta automáticamente el SVG al viewport
+    zoomFit();
+  }
 
-/* button row */
-.btn-row{ padding: 8px 12px 12px; }
-
-/* Progress grid */
-.progress-grid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 0 12px 14px;
-}
-.tech-status{
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.06);
-  font-weight: 800;
-  font-size: 12px;
-  color: var(--text);
-}
-.tech-status .progress{
-  background: rgba(255,255,255,.10) !important;
-  border-radius: 999px !important;
-  height: 9px !important;
-  margin-top: 8px;
-}
-.tech-status .progress .determinate{
-  background: linear-gradient(90deg, rgba(80,200,255,.85), rgba(160,160,255,.85)) !important;
-}
-
-/* MAIN tabs + body */
-.main-tabs{
-  height: 100%;
-  overflow: hidden;
-  display:flex;
-  flex-direction:column;
-}
-
-.tech-tabs{
-  background: rgba(255,255,255,.06) !important;
-  border-radius: 14px 14px 0 0;
-  overflow: hidden !important;
-  border-bottom: 1px solid rgba(255,255,255,.10);
-}
-.tech-tabs .tab a{
-  color: rgba(234,240,247,.88) !important;
-  font-weight: 800 !important;
-  letter-spacing: .2px;
-}
-.tech-tabs .tab a.active{
-  background: rgba(255,255,255,.12) !important;
-  color: #ffffff !important;
-}
-.tech-tabs .indicator{
-  background: rgba(80,200,255,.90) !important;
-  height: 3px !important;
-}
-
-.tab-body{
-  flex: 1;
-  overflow: auto; /* scroll interno solo a la derecha */
-  padding: 12px;
-}
-.tab-body::-webkit-scrollbar{ width: 10px; }
-.tab-body::-webkit-scrollbar-thumb{
-  background: rgba(255,255,255,.14);
-  border-radius: 10px;
-}
-
-/* Tab panes */
-.tab-pane{
-  padding: 0 !important;
-}
-
-/* Canvases en tabs */
-#cKMeans, #cReduction, #cBorderPath, #cBorderSegmentation, #cLabelPlacement{
-  width: 100% !important;
-  height: auto !important;
-  border-radius: 12px;
-  background: rgba(255,255,255,.04);
-  border: 1px solid rgba(255,255,255,.08);
-}
-
-/* Render options layout */
-.render-row{
-  display:flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding: 0 12px 12px;
-}
-.render-grid{
-  display:grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 12px;
-  padding: 0 12px 12px;
-}
-@media (max-width: 1100px){
-  .render-grid{ grid-template-columns: 1fr; }
-  .app-shell{ grid-template-columns: 340px 1fr; }
-}
-
-/* Palette */
-.palette{
-  display:grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)) !important;
-  gap: 10px !important;
-  padding: 12px !important;
-}
-#palette > div{
-  border-radius: 12px !important;
-  border: 1px solid rgba(255,255,255,.12);
-  box-shadow: 0 8px 18px rgba(0,0,0,.25);
-  font-weight: 900;
-}
-
-/* Output viewport FIX (no marco que corta) */
-.output-panel{
-  position: relative;
-}
-.output-viewport{
-  position: relative;
-  margin: 10px 12px 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(0,0,0,.25);
-  height: min(62vh, 620px); /* viewport estable */
-  overflow: auto; /* SCROLL interno cuando zoom > 100% */
-}
-
-/* IMPORTANTE: el contenedor NO se escala */
-#svgContainer{
-  width: 100% !important;
-  height: auto !important;
-  overflow: visible !important;
-  padding: 12px;
-}
-
-/* SVG NO debe ser forzado a 100% cuando aplicamos transform */
-#svgContainer svg{
-  display:block;
-  max-width: none !important; /* para que el zoom sea real */
-  height: auto;
-  overflow: visible;
-}
-
-/* Zoom toolbar */
-.zoom-toolbar{
-  position:absolute;
-  top: 54px;
-  right: 18px;
-  display:flex;
-  align-items:center;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 14px;
-  background: rgba(255,255,255,.10);
-  border: 1px solid rgba(255,255,255,.14);
-  box-shadow: 0 14px 32px rgba(0,0,0,.35);
-  z-index: 20;
-}
-.zoom-btn{
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(255,255,255,.12);
-  color: var(--text);
-  font-weight: 900;
-  cursor: pointer;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  box-shadow: 0 10px 22px var(--cyanShadow2);
-}
-.zoom-btn:hover{
-  background: rgba(255,255,255,.16);
-  box-shadow: 0 14px 30px var(--cyanShadow);
-}
-.zoom-pill{
-  min-width: 62px;
-  text-align:center;
-  font-weight: 900;
-  border-radius: 999px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255,255,255,.14);
-  background: rgba(0,0,0,.18);
-}
-
-/* Downloads row */
-.download-row{
-  display:flex;
-  gap: 10px;
-  padding: 0 12px 12px;
-  flex-wrap: wrap;
-}
-
-/* Log */
-.tech-log{
-  padding: 10px 12px;
-  background: rgba(0,0,0,.25);
-  border: 1px solid rgba(255,255,255,.10);
-  border-radius: 12px;
-  color: rgba(234,240,247,.90);
-  max-height: 55vh;
-  overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.35;
-}
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
+})();
