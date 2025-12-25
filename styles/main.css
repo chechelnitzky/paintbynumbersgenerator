@@ -1,3 +1,13 @@
+/* Customised CSS for paint-by-numbers generator
+   This file is a lightly modified copy of the upstream styles/main.css.  The
+   original file constrained the output SVG container to a fixed height of
+   500 px.  To ensure the generated paint‑by‑numbers image always fits the
+   available screen regardless of the window size or the intrinsic dimensions
+   of the SVG, we remove those fixed constraints and allow the container and
+   viewport to grow to fill the page.  Additional styling for the output
+   viewport is also provided to make it occupy the full viewport height.
+*/
+
 .status {
     background-color: white;
     padding: 10px;
@@ -40,7 +50,7 @@
 }
 
 .collection-item > .row {
-    margin-bottom:0px;
+    margin-bottom: 0px;
 }
 
 #input-pane {
@@ -49,8 +59,29 @@
     max-height: 500px;
 }
 
+/*
+ * Redefine the SVG container used to display the generated image.  By
+ * removing the fixed 500 px limit and setting both width and height to
+ * 100 %, the SVG will always scale to the dimensions of its parent.  We
+ * also remove any max‑size restrictions so large images are not clipped.
+ */
 #svgContainer {
     overflow: auto;
-    max-width: 100%;
-    max-height: 500px;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+}
+
+/*
+ * Ensure the output viewport itself stretches to fill the full browser
+ * viewport.  Without this rule the viewport would collapse to its
+ * contents and the user would need to scroll the page to see the whole
+ * image.  Setting height: 100vh guarantees that the output area always
+ * matches the height of the screen.
+ */
+#outputViewport {
+    width: 100%;
+    height: 100vh;
+    overflow: auto;
 }
