@@ -864,74 +864,135 @@
   }
 
   // ---------- Launcher (v8) ----------
-  function mountOrUpdateLauncher() {
+   // ---------- Launcher (SAFE, no MutationObserver) ----------
+
+  function findOutputSvgNearDownloadsLight() {
     const downloadsRow = findDownloadButtonsRow();
-    if (!downloadsRow) return; // aún no hay output section
+    if (!downloadsRow) return null;
+
+    const root = downloadsRow.parentElement || document;
+
+    // Busca SVGs SOLO dentro del bloque cercano a los downloads
+    const svgs = Array.from(root.querySelectorAll("svg"));
+    if (!svgs.length) return null;
+
+    let best = null;
+    let bestScore = 0;
+
+    for (const s of svgs) {
+      const box = s.getBoundingClientRect();
+      const score = box.width * box.height;
+
+      // threshold bajo pero razonable
+      if (box.width > 120 && box.height > 120 && score > bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    return best;
+  }
+
+  function addOrUpdateLauncher() {
+    const downloadsRow = findDownloadButtonsRow();
+    if (!downloadsRow) return;
 
     const host = ensureHostBelowDownloads();
     if (!host) return;
 
+    // Crea o reutiliza barra
     let bar = document.getElementById("recolor-launch-bar");
-    let btn = document.getElementById("btn-recolor-launch");
-    let hint = document.getElementById("recolor-launch-hint");
-
     if (!bar) {
       bar = document.createElement("div");
       bar.id = "recolor-launch-bar";
-      bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+      bar.style.cssText =
+        "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
       bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
       host.appendChild(bar);
+
+      const hint = document.createElement("div");
+      hint.id = "recolor-launch-hint";
+      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+      hint.textContent = "Genera el output y luego abre el recolor.";
+      host.appendChild(hint);
     }
 
+    // Botón (si no existe lo crea)
+    let btn = document.getElementById("btn-recolor-launch");
     if (!btn) {
       btn = document.createElement("button");
       btn.id = "btn-recolor-launch";
       btn.type = "button";
-      btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      btn.style.cssText =
+        "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      bar.appendChild(btn);
+
+      // Resolver SVG SOLO al click (más robusto)
       btn.addEventListener("click", () => {
-        // Resuelve EL SVG AL MOMENTO DEL CLICK
-        const svg = resolveOutputSvgNearDownloads();
+        const svg = findOutputSvgNearDownloadsLight();
         if (!svg) {
-          alert("Aún no detecto el SVG output. Genera y espera a que aparezca el preview, luego prueba de nuevo.");
+          alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera a que aparezca el output, y prueba de nuevo.");
           return;
         }
         openEditor(svg);
       });
-      bar.appendChild(btn);
     }
 
-    if (!hint) {
-      hint = document.createElement("div");
-      hint.id = "recolor-launch-hint";
-      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-      host.appendChild(hint);
-    }
+    // Actualiza estado del botón sin escanear todo el DOM
+    const svgNow = findOutputSvgNearDownloadsLight();
+    const hint = document.getElementById("recolor-launch-hint");
 
-    // Estado: si hay SVG ya disponible, habilita; si no, igual muestra botón pero con texto "no listo"
-    const svgNow = resolveOutputSvgNearDownloads();
     if (svgNow) {
       btn.textContent = "Abrir Recolorear";
       btn.disabled = false;
       btn.style.opacity = "1";
-      hint.textContent = "Listo. El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
+      if (hint) {
+        hint.textContent =
+          "Listo. El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
+      }
     } else {
       btn.textContent = "Recolor (esperando output…)";
       btn.disabled = false; // lo dejamos clickeable para reintentar
       btn.style.opacity = "0.95";
-      hint.textContent = "Genera el output (Process Image) y espera a ver el preview. El botón se activa cuando detecte el SVG.";
+      if (hint) {
+        hint.textContent =
+          "Aprieta PROCESS IMAGE y espera el output. El botón se activará cuando detecte el SVG.";
+      }
     }
   }
 
-  // Observa cambios del DOM (cuando regeneras output, cambia el layout)
-  const observer = new MutationObserver(() => {
-    try { mountOrUpdateLauncher(); } catch (_) {}
-  });
-  observer.observe(document.documentElement, { subtree: true, childList: true });
+  // Hook al botón PROCESS IMAGE (clave para small/medium/trivial)
+  function hookProcessImageButton() {
+    const candidates = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
+    const btn = candidates.find(el => /process\s*image/i.test((el.textContent || el.value || "").trim()));
+    if (!btn || btn.__recolorHooked) return;
+    btn.__recolorHooked = true;
 
-  // Primer intento en load + reintentos
+    btn.addEventListener("click", () => {
+      // Después de click, el output tarda: revisa varias veces
+      setTimeout(addOrUpdateLauncher, 200);
+      setTimeout(addOrUpdateLauncher, 800);
+      setTimeout(addOrUpdateLauncher, 1600);
+      setTimeout(addOrUpdateLauncher, 2600);
+    });
+  }
+
+  // Boot: polling liviano por 20s (no cuelga)
+  function bootLauncherSafe() {
+    // primer intento
+    addOrUpdateLauncher();
+    hookProcessImageButton();
+
+    let tries = 0;
+    const maxTries = 40; // 40 * 500ms = 20s
+    const t = setInterval(() => {
+      tries++;
+      hookProcessImageButton();
+      addOrUpdateLauncher();
+      if (tries >= maxTries) clearInterval(t);
+    }, 500);
+  }
+
   window.addEventListener("load", () => {
-    setTimeout(() => { try { mountOrUpdateLauncher(); } catch (_) {} }, 300);
-    setTimeout(() => { try { mountOrUpdateLauncher(); } catch (_) {} }, 1200);
-    setTimeout(() => { try { mountOrUpdateLauncher(); } catch (_) {} }, 2500);
+    setTimeout(bootLauncherSafe, 250);
   });
 })();
