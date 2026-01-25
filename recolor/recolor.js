@@ -1,14 +1,15 @@
-/* Recolor add-on (v3)
+/* Recolor add-on (v4)
    - Inserts UI UNDER the original download buttons
    - Shows full SVG preview (no cropping / no blank due to missing viewBox)
    - Detects colors via computed style + fill/style attributes (robust)
-   - Grid picker for replacement palette (PALETTE_168)
-   - Shows original tag (0,1,cg1,bg7,...) if it can detect them from the palette UI
+   - Grid picker using PALETTE_ITEMS: each tile shows tag (1,2,42,cg1,bg7,wg9,...)
+   - Shows original -> replacement with tag + hex
    - Adds download buttons for recolored SVG + PNG
 */
 
 (function () {
-  const PALETTE = window.PALETTE_168 || [];
+  const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
+  const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
@@ -22,7 +23,6 @@
   }
 
   function getElementFill(el) {
-    // 1) attribute fill
     const fAttr = el.getAttribute && el.getAttribute("fill");
     if (fAttr && fAttr !== "none" && fAttr !== "transparent") {
       const f = norm(fAttr);
@@ -30,9 +30,8 @@
       if (f.startsWith("#") && f.length === 7) return f;
     }
 
-    // 2) inline style fill
     const styleAttr = el.getAttribute && el.getAttribute("style");
-    if (styleAttr && styleAttr.includes("fill:")) {
+    if (styleAttr && /fill\s*:/i.test(styleAttr)) {
       const m = styleAttr.match(/fill:\s*([^;]+)/i);
       if (m && m[1]) {
         const v = norm(m[1]);
@@ -41,7 +40,6 @@
       }
     }
 
-    // 3) computed style fill (most robust)
     try {
       const cs = window.getComputedStyle(el);
       const f = cs && cs.fill ? norm(cs.fill) : "";
@@ -55,13 +53,10 @@
 
   function ensureViewBox(svg) {
     if (!svg || svg.tagName.toLowerCase() !== "svg") return;
-
     if (svg.getAttribute("viewBox")) return;
 
-    // If width/height attributes exist, create viewBox from them
     const wAttr = svg.getAttribute("width");
     const hAttr = svg.getAttribute("height");
-
     const w = parseFloat(wAttr);
     const h = parseFloat(hAttr);
 
@@ -70,7 +65,6 @@
       return;
     }
 
-    // Fallback: try getBBox (only works if in DOM)
     try {
       const bb = svg.getBBox();
       if (bb && bb.width > 0 && bb.height > 0) {
@@ -80,9 +74,7 @@
   }
 
   function makePreview(svg) {
-    // Keep intrinsic width/height if present, but force responsive rendering
     ensureViewBox(svg);
-
     svg.style.display = "block";
     svg.style.width = "100%";
     svg.style.height = "auto";
@@ -91,7 +83,6 @@
   }
 
   function findFinalOutputSvg() {
-    // Heuristics: pick largest visible SVG on page
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
 
@@ -109,89 +100,40 @@
   }
 
   function findDownloadButtonsRow() {
-    // Your UI shows buttons like "DOWNLOAD SVG / PNG / PALETTE"
-    // We'll look for a container that contains those texts.
     const btns = Array.from(document.querySelectorAll("button, a"));
     const hits = btns.filter((b) => {
       const t = norm(b.textContent);
       return t.includes("download svg") || t.includes("download png") || t.includes("download palette");
     });
-
     if (!hits.length) return null;
 
-    // Try nearest common parent that contains 2-3 of them
     for (const b of hits) {
       const p = b.parentElement;
       if (!p) continue;
       const txt = norm(p.textContent);
-      if (txt.includes("download svg") && (txt.includes("download png") || txt.includes("download palette"))) {
-        return p;
-      }
+      if (txt.includes("download svg") && (txt.includes("download png") || txt.includes("download palette"))) return p;
     }
-
-    // fallback: use parent of first hit
     return hits[0].parentElement || null;
   }
 
-  function detectOriginalTagsByColor() {
-    // We try to map original color -> tag from palette UI swatches (0,1,2,cg1,bg7,...)
-    // Strategy: look for elements with backgroundColor + readable text.
-    const map = new Map(); // hex -> tag
-
-    const candidates = Array.from(document.querySelectorAll("button, div, span, a"))
-      .filter((el) => (el.textContent || "").trim().length > 0);
-
-    for (const el of candidates) {
-      const tag = (el.textContent || "").trim();
-      if (!tag) continue;
-
-      // ignore long texts
-      if (tag.length > 8) continue;
-
-      // require it to look like a tag: digits or letters+digits (cg1, bg7, wg9)
-      if (!/^[a-zA-Z]{0,3}\d{1,3}$/.test(tag)) continue;
-
-      let bg = "";
-      try {
-        bg = norm(window.getComputedStyle(el).backgroundColor || "");
-      } catch (_) {}
-
-      if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") continue;
-
-      const hex = bg.startsWith("rgb") ? rgbToHex(bg) : null;
-      if (hex && isHex6(hex)) {
-        if (!map.has(hex)) map.set(hex, tag);
-      }
-    }
-
-    return map;
-  }
-
   function collectFillGroups(svg) {
-    // Map<originalHex, Element[]>
     const groups = new Map();
-
-    // collect likely paintable shapes
     const nodes = Array.from(svg.querySelectorAll("*"))
       .filter((el) => el instanceof SVGElement)
-      .filter((el) => {
-        const tn = el.tagName.toLowerCase();
-        return ["path", "polygon", "rect", "circle", "ellipse"].includes(tn);
-      });
+      .filter((el) => ["path","polygon","rect","circle","ellipse"].includes(el.tagName.toLowerCase()));
 
     for (const el of nodes) {
       const fill = getElementFill(el);
       if (!fill) continue;
-      if (fill === "#ffffff") continue; // optional: ignore pure white background
-      if (!groups.has(fill)) groups.set(fill, []);
-      groups.get(fill).push(el);
+      const f = norm(fill);
+      if (!isHex6(f)) continue;
+      if (!groups.has(f)) groups.set(f, []);
+      groups.get(f).push(el);
     }
-
     return groups;
   }
 
   function collectTextGroups(svg) {
-    // Map<initialText, SVGTextElement[]>
     const groups = new Map();
     svg.querySelectorAll("text").forEach((t) => {
       const s = (t.textContent || "").trim();
@@ -215,19 +157,15 @@
   }
 
   async function downloadSvgAsPng(svgEl, filename) {
-    // Serialize SVG
     const svgText = new XMLSerializer().serializeToString(svgEl);
-
-    // Make a blob url
     const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
 
     const img = new Image();
     img.decoding = "async";
 
-    // Compute size from viewBox
     const vb = svgEl.getAttribute("viewBox");
-    let w = 1200, h = 1200;
+    let w = 1600, h = 1600;
     if (vb) {
       const parts = vb.split(/\s+/).map(Number);
       if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
@@ -246,11 +184,8 @@
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
-
-    // White background
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, w, h);
-
     ctx.drawImage(img, 0, 0, w, h);
 
     URL.revokeObjectURL(url);
@@ -267,7 +202,6 @@
     }, "image/png", 1.0);
   }
 
-  // ---------- UI ----------
   function ensureHostBelowDownloads() {
     let host = document.getElementById("recolor-host");
     if (host) return host;
@@ -287,21 +221,18 @@
     if (downloadsRow && downloadsRow.parentElement) {
       downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
     } else {
-      // fallback
       document.body.appendChild(host);
     }
-
     return host;
   }
 
   function renderGridPicker(onPick) {
-    // Visual grid of replacement palette
     const grid = document.createElement("div");
     grid.style.cssText = `
       display:grid;
-      grid-template-columns: repeat(12, minmax(0, 1fr));
+      grid-template-columns: repeat(10, minmax(0, 1fr));
       gap: 6px;
-      max-height: 320px;
+      max-height: 340px;
       overflow:auto;
       padding: 6px;
       border: 1px solid rgba(0,0,0,.10);
@@ -309,18 +240,48 @@
       background: rgba(0,0,0,.02);
     `;
 
-    PALETTE.forEach((hex) => {
+    const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map(hex => ({tag: "", hex}));
+
+    items.forEach((it) => {
+      const hex = norm(it.hex);
+      const tag = (it.tag || "").toString().trim();
+
       const tile = document.createElement("button");
       tile.type = "button";
-      tile.title = hex;
+      tile.title = tag ? `${tag} — ${hex}` : hex;
       tile.style.cssText = `
-        height: 34px;
+        height: 40px;
         border-radius: 10px;
         border: 1px solid rgba(0,0,0,.16);
         background: ${hex};
         cursor: pointer;
+        position: relative;
+        overflow: hidden;
       `;
-      tile.addEventListener("click", () => onPick(hex));
+
+      if (tag) {
+        const badge = document.createElement("div");
+        badge.textContent = tag;
+        badge.style.cssText = `
+          position:absolute;
+          left:6px;
+          bottom:6px;
+          padding:2px 6px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 900;
+          background: rgba(255,255,255,.85);
+          border: 1px solid rgba(0,0,0,.12);
+          color: rgba(0,0,0,.85);
+          max-width: calc(100% - 12px);
+          white-space: nowrap;
+          overflow:hidden;
+          text-overflow: ellipsis;
+        `;
+        tile.appendChild(badge);
+      }
+
+      tile.addEventListener("click", () => onPick({hex, tag}));
       grid.appendChild(tile);
     });
 
@@ -329,28 +290,23 @@
 
   function openEditor(originalSvg) {
     const host = ensureHostBelowDownloads();
-
-    // reset UI
     host.innerHTML = "";
 
-    // Header
     const header = document.createElement("div");
     header.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
     header.innerHTML = `
       <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
       <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        1) Selecciona un color original → 2) elige el reemplazo en la grilla → 3) descarga el output
+        Selecciona color original → elige reemplazo (grilla) → descarga output recoloreado
       </div>
     `;
     host.appendChild(header);
 
-    // Clone SVGs
     const originalClone = originalSvg.cloneNode(true);
     const recolorSvg = originalSvg.cloneNode(true);
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    // Previews
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
 
@@ -384,28 +340,21 @@
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
-    // Build mapping: original color -> tag (from palette UI)
-    const tagByHex = detectOriginalTagsByColor();
-
-    // Fill groups
     const fillGroups = collectFillGroups(recolorSvg);
     const entries = Array.from(fillGroups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
-    // Controls layout
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
     host.appendChild(controls);
 
-    // Left: original colors list
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (tag → reemplazo)</div>`;
+    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (hex → reemplazo)</div>`;
     controls.appendChild(left);
 
-    // Right: grid picker
     const right = document.createElement("div");
     right.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    right.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Color picker (grilla visual)</div>`;
+    right.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Picker (grilla con tags del Excel)</div>`;
     controls.appendChild(right);
 
     const info = document.createElement("div");
@@ -415,35 +364,30 @@
 
     let selectedOldHex = null;
 
-    // Grid picker
-    const grid = renderGridPicker((newHex) => {
+    const grid = renderGridPicker(({hex:newHex, tag:newTag}) => {
       if (!selectedOldHex) {
         alert("Primero selecciona un color original (panel izquierdo).");
         return;
       }
       const nodes = fillGroups.get(selectedOldHex) || [];
       nodes.forEach((el) => {
-        // force fill attribute so it wins over CSS
         el.setAttribute("fill", newHex);
-        // also remove inline style fill if any
         if (el.hasAttribute("style")) {
           el.setAttribute("style", el.getAttribute("style").replace(/fill:\s*[^;]+;?/gi, ""));
         }
       });
 
-      // update row UI
       const row = left.querySelector(`[data-oldhex="${selectedOldHex}"]`);
       if (row) {
         const swNew = row.querySelector(".sw-new");
         const txt = row.querySelector(".row-text");
         swNew.style.background = newHex;
         swNew.style.borderStyle = "solid";
-        txt.textContent = `Reemplazo: ${newHex}`;
+        txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
       }
     });
     right.appendChild(grid);
 
-    // Original colors list
     const list = document.createElement("div");
     list.style.cssText = "display:grid; gap:10px; max-height: 360px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
@@ -452,20 +396,17 @@
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
       empty.textContent =
-        "No detecté fills en el SVG. Esto pasa si el output no es SVG o si los colores vienen solo por CSS. " +
-        "Puedo adaptarlo si me dices cómo se construye el SVG final (o me pegas un fragmento del SVG).";
+        "No detecté fills en el SVG. Si el SVG usa CSS en vez de fill directo, dime y lo adapto.";
       list.appendChild(empty);
     } else {
       entries.forEach(([oldHex]) => {
-        const tag = tagByHex.get(oldHex) || oldHex;
-
         const row = document.createElement("button");
         row.type = "button";
         row.setAttribute("data-oldhex", oldHex);
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 110px 1fr;
+          grid-template-columns: 84px 1fr;
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -496,10 +437,6 @@
         const stack = document.createElement("div");
         stack.style.cssText = "display:grid; gap:4px;";
 
-        const title = document.createElement("div");
-        title.style.cssText = "font-weight:900;";
-        title.textContent = `Tag: ${tag}`;
-
         const meta = document.createElement("div");
         meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
         meta.textContent = `Original: ${oldHex}`;
@@ -509,7 +446,6 @@
         repl.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
         repl.textContent = "Reemplazo: —";
 
-        stack.appendChild(title);
         stack.appendChild(meta);
         stack.appendChild(repl);
 
@@ -518,7 +454,6 @@
 
         row.addEventListener("click", () => {
           selectedOldHex = oldHex;
-          // highlight selection
           Array.from(list.querySelectorAll("button")).forEach((b) => {
             b.style.outline = "none";
             b.style.boxShadow = "none";
@@ -531,7 +466,6 @@
       });
     }
 
-    // Labels/tags rename (stable)
     const labelPanel = document.createElement("div");
     labelPanel.style.cssText = `
       border: 1px solid rgba(0,0,0,.12);
@@ -579,7 +513,6 @@
       }
     }
 
-    // NEW DOWNLOAD BUTTONS BELOW recolor block
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -601,7 +534,7 @@
       try {
         await downloadSvgAsPng(recolorSvg, "paintbynumber_recolored.png");
       } catch (e) {
-        alert("No pude exportar PNG. Si pasa, dime qué navegador usas y lo ajusto.");
+        alert("No pude exportar PNG. Dime qué navegador usas y lo ajusto.");
       }
     });
 
@@ -609,19 +542,16 @@
     dl.appendChild(btnPng);
   }
 
-  function addMainButtonOnceReady() {
+  function addLaunchButtonOnceReady() {
     const svg = findFinalOutputSvg();
     if (!svg) return;
 
-    // place a small button under downloads (not inside editor)
     const host = ensureHostBelowDownloads();
     if (document.getElementById("btn-recolor-launch")) return;
 
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-    bar.innerHTML = `
-      <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
-    `;
+    bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
 
     const btn = document.createElement("button");
     btn.id = "btn-recolor-launch";
@@ -635,13 +565,11 @@
 
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    hint.textContent = "Se abre debajo de los botones de descarga. Selecciona color original → elige reemplazo en la grilla → descarga output recoloreado.";
+    hint.textContent = "La grilla usa los tags del Excel (ej: 1,2,42,WG9). Selecciona color original → pick → descarga.";
     host.appendChild(hint);
   }
 
-  // Observe DOM changes (output SVG appears after generation)
-  const observer = new MutationObserver(() => addMainButtonOnceReady());
+  const observer = new MutationObserver(() => addLaunchButtonOnceReady());
   observer.observe(document.documentElement, { subtree: true, childList: true });
-
-  window.addEventListener("load", () => setTimeout(addMainButtonOnceReady, 300));
+  window.addEventListener("load", () => setTimeout(addLaunchButtonOnceReady, 300));
 })();
