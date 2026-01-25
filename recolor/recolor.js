@@ -333,15 +333,22 @@
       `;
   }
 
-  function setColorFills(svg, on) {
-    const style = ensureSvgStyle(svg, "recolor-fills-style");
-    style.textContent = on
-      ? ""
-      : `
-        path, polygon, rect, circle, ellipse { fill: none !important; }
-        text { fill: #000 !important; }
-      `;
-  }
+function setColorFills(svg, on) {
+  const style = ensureSvgStyle(svg, "recolor-fills-style");
+  style.textContent = on
+    ? ""
+    : `
+      /* hide paint area fills (leave outlines + labels as-is) */
+      path, polygon, rect, circle, ellipse {
+        fill: none !important;
+      }
+
+      /* IMPORTANT:
+         Do NOT override <text> fill here.
+         Keep whatever the generator set (e.g. #c4c4c4). */
+    `;
+}
+
 
   // ---------- UI components ----------
   function makeBadgeCorner(text) {
