@@ -1,8 +1,9 @@
-/* Recolor add-on (v5)
-   - Original color squares show TAG badge (from Excel palette)
-   - Toggle to show/hide "facets" (strokes/lines) without losing edits
-   - Grid picker uses PALETTE_ITEMS (tag+hex)
-   - Downloads recolored SVG + PNG
+/* Recolor add-on (v6)
+   Fixes:
+   1) Original color squares show TAG badge ON TOP reliably (CSS-proof)
+   2) Toggles are buttons (not checkbox) so they never get hidden
+   3) Adds "Colores ON/OFF" toggle: OFF => outlines + numbers only (no fills)
+   4) Adds "Bordes ON/OFF" toggle: hide/show facet strokes (optional)
 */
 
 (function () {
@@ -230,27 +231,97 @@
     return host;
   }
 
-  function makeBadge(text) {
-    const b = document.createElement("div");
+  // ---------- SVG style toggles (do NOT lose edits) ----------
+  function ensureSvgStyle(svg, id) {
+    let style = svg.querySelector(`#${id}`);
+    if (style) return style;
+    style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.setAttribute("id", id);
+    svg.insertBefore(style, svg.firstChild);
+    return style;
+  }
+
+  // Toggle borders/facets (strokes)
+  function setBorders(svg, on) {
+    const style = ensureSvgStyle(svg, "recolor-borders-style");
+    style.textContent = on
+      ? ""
+      : `
+        [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] {
+          stroke-opacity: 0 !important;
+        }
+        [stroke][fill="transparent"], path[stroke][fill="transparent"] {
+          stroke-opacity: 0 !important;
+        }
+      `;
+  }
+
+  // Toggle COLOR FILLS (this is what you asked now)
+  // OFF => remove fills for shapes but KEEP text (numbers) and borders.
+  function setColorFills(svg, on) {
+    const style = ensureSvgStyle(svg, "recolor-fills-style");
+    style.textContent = on
+      ? ""
+      : `
+        /* hide fills for paint areas */
+        path, polygon, rect, circle, ellipse {
+          fill: none !important;
+        }
+        /* keep text/numbers visible */
+        text {
+          fill: #000 !important;
+        }
+      `;
+  }
+
+  // ---------- UI bits ----------
+  function makeBadge(text, corner = "tl") {
+    const b = document.createElement("span");
     b.textContent = text;
-    b.style.cssText = `
-      position:absolute;
-      left:4px;
-      top:4px;
-      padding:2px 6px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 900;
-      background: rgba(255,255,255,.90);
-      border: 1px solid rgba(0,0,0,.12);
-      color: rgba(0,0,0,.85);
-      max-width: calc(100% - 8px);
-      white-space: nowrap;
-      overflow:hidden;
-      text-overflow: ellipsis;
-      pointer-events:none;
-    `;
+    const pos = corner === "br"
+      ? "right:4px !important; bottom:4px !important;"
+      : "left:4px !important; top:4px !important;";
+
+    b.setAttribute(
+      "style",
+      `
+        position:absolute !important;
+        ${pos}
+        padding:2px 6px !important;
+        border-radius:999px !important;
+        font-size:11px !important;
+        font-weight:900 !important;
+        background: rgba(255,255,255,.90) !important;
+        border: 1px solid rgba(0,0,0,.12) !important;
+        color: rgba(0,0,0,.85) !important;
+        max-width: calc(100% - 8px) !important;
+        white-space: nowrap !important;
+        overflow:hidden !important;
+        text-overflow: ellipsis !important;
+        pointer-events:none !important;
+        line-height: 1 !important;
+      `.trim()
+    );
     return b;
+  }
+
+  function makeSwatch(hex, tag) {
+    const box = document.createElement("div");
+    box.setAttribute(
+      "style",
+      `
+        width:56px !important;
+        height:44px !important;
+        border-radius:12px !important;
+        border:1px solid rgba(0,0,0,.15) !important;
+        background:${hex} !important;
+        position:relative !important;
+        overflow:hidden !important;
+        flex: 0 0 auto !important;
+      `.trim()
+    );
+    if (tag) box.appendChild(makeBadge(tag));
+    return box;
   }
 
   function renderGridPicker(onPick) {
@@ -287,41 +358,42 @@
       `;
 
       if (tag) tile.appendChild(makeBadge(tag));
-
       tile.addEventListener("click", () => onPick({hex, tag}));
+
       grid.appendChild(tile);
     });
 
     return grid;
   }
 
-  // ---- FACETS TOGGLE (stroke/lines) ----
-  function ensureFacetsStyle(svg) {
-    let style = svg.querySelector("#recolor-facets-style");
-    if (style) return style;
-    style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-    style.setAttribute("id", "recolor-facets-style");
-    svg.insertBefore(style, svg.firstChild);
-    return style;
-  }
+  function makeToggleButton(label, initialOn, onChange) {
+    let on = !!initialOn;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("aria-pressed", String(on));
 
-  function setFacets(svg, on) {
-    const style = ensureFacetsStyle(svg);
-    if (on) {
-      style.textContent = ""; // show facets (default)
-      return;
-    }
-    // Hide “facets”: usually elements with no fill but stroke, or thin stroked outlines.
-    style.textContent = `
-      /* hide facets/strokes without changing fills */
-      [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] {
-        stroke-opacity: 0 !important;
-      }
-      /* some generators use stroke + transparent fill for facets */
-      [stroke][fill="transparent"], path[stroke][fill="transparent"] {
-        stroke-opacity: 0 !important;
-      }
-    `;
+    const paint = () => {
+      btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
+      btn.style.cssText = `
+        padding:10px 14px;
+        border-radius:12px;
+        border:1px solid rgba(0,0,0,.22);
+        background:${on ? "white" : "rgba(0,0,0,.06)"};
+        cursor:pointer;
+        font-weight:900;
+      `;
+      btn.setAttribute("aria-pressed", String(on));
+    };
+
+    paint();
+
+    btn.addEventListener("click", () => {
+      on = !on;
+      paint();
+      onChange(on);
+    });
+
+    return btn;
   }
 
   function openEditor(originalSvg) {
@@ -333,7 +405,7 @@
     header.innerHTML = `
       <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
       <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        Selecciona color original → elige reemplazo (grilla) → descarga output recoloreado
+        Selecciona color original → elige reemplazo → toggles (colores/bordes) → descarga
       </div>
     `;
     host.appendChild(header);
@@ -343,9 +415,11 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    // Facets default ON
-    let facetsOn = true;
-    setFacets(recolorSvg, facetsOn);
+    // defaults
+    let colorsOn = true;
+    let bordersOn = true;
+    setColorFills(recolorSvg, colorsOn);
+    setBorders(recolorSvg, bordersOn);
 
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
@@ -399,7 +473,7 @@
 
     const info = document.createElement("div");
     info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
-    info.textContent = "Haz click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
+    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
     right.appendChild(info);
 
     let selectedOldHex = null;
@@ -420,15 +494,19 @@
       const row = left.querySelector(`[data-oldhex="${selectedOldHex}"]`);
       if (row) {
         const swNew = row.querySelector(".sw-new");
-        const swNewBadgeHost = row.querySelector(".sw-new-badgehost");
         const txt = row.querySelector(".row-text");
+
         swNew.style.background = newHex;
         swNew.style.borderStyle = "solid";
-        txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
 
-        // Update replacement badge on the new swatch
-        swNewBadgeHost.innerHTML = "";
-        if (newTag) swNewBadgeHost.appendChild(makeBadge(newTag));
+        // set badge on new swatch
+        const badgeHost = row.querySelector(".new-badge-host");
+        if (badgeHost) {
+          badgeHost.innerHTML = "";
+          if (newTag) badgeHost.appendChild(makeBadge(newTag));
+        }
+
+        txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
       }
     });
     right.appendChild(grid);
@@ -444,7 +522,8 @@
       list.appendChild(empty);
     } else {
       entries.forEach(([oldHex]) => {
-        const tag = getTagForHex(oldHex) || ""; // FIX #1: show tag badge on original square
+        // ✅ FIX #1: badge must show ON the original swatch (CSS-proof)
+        const tag = getTagForHex(oldHex);
 
         const row = document.createElement("button");
         row.type = "button";
@@ -452,7 +531,7 @@
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 120px 1fr;
+          grid-template-columns: 140px 1fr;
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -465,37 +544,31 @@
         const swWrap = document.createElement("div");
         swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
 
-        // OLD swatch with badge
-        const swOld = document.createElement("div");
-        swOld.style.cssText = `
-          width:54px; height:44px;
-          border-radius:12px;
-          border:1px solid rgba(0,0,0,.15);
-          background:${oldHex};
-          position: relative;
-          overflow:hidden;
-        `;
-        if (tag) swOld.appendChild(makeBadge(tag));
+        const swOld = makeSwatch(oldHex, tag);
 
         const arrow = document.createElement("div");
         arrow.textContent = "→";
         arrow.style.cssText = "font-weight:900; color: rgba(0,0,0,.55);";
 
-        // NEW swatch (badge updated after pick)
         const swNew = document.createElement("div");
         swNew.className = "sw-new";
-        swNew.style.cssText = `
-          width:54px; height:44px;
-          border-radius:12px;
-          border:1px dashed rgba(0,0,0,.25);
-          background:transparent;
-          position: relative;
-          overflow:hidden;
-        `;
-        const swNewBadgeHost = document.createElement("div");
-        swNewBadgeHost.className = "sw-new-badgehost";
-        swNewBadgeHost.style.cssText = "position:absolute; inset:0;";
-        swNew.appendChild(swNewBadgeHost);
+        swNew.setAttribute(
+          "style",
+          `
+            width:56px !important;
+            height:44px !important;
+            border-radius:12px !important;
+            border:1px dashed rgba(0,0,0,.25) !important;
+            background:transparent !important;
+            position:relative !important;
+            overflow:hidden !important;
+          `.trim()
+        );
+
+        const newBadgeHost = document.createElement("div");
+        newBadgeHost.className = "new-badge-host";
+        newBadgeHost.setAttribute("style", "position:absolute !important; inset:0 !important;");
+        swNew.appendChild(newBadgeHost);
 
         swWrap.appendChild(swOld);
         swWrap.appendChild(arrow);
@@ -581,9 +654,9 @@
       }
     }
 
-    // ---- FIX #2: Facets toggle just above download buttons ----
-    const facetsRow = document.createElement("div");
-    facetsRow.style.cssText = `
+    // ✅ FIX #2: Real actionable toggles (buttons) just above downloads
+    const togglesRow = document.createElement("div");
+    togglesRow.style.cssText = `
       margin-top: 12px;
       display:flex;
       align-items:center;
@@ -596,33 +669,29 @@
       background: rgba(0,0,0,.02);
     `;
 
-    const facetsLeft = document.createElement("div");
-    facetsLeft.style.cssText = "display:flex; align-items:center; gap:10px;";
+    const togglesLeft = document.createElement("div");
+    togglesLeft.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
 
-    const chk = document.createElement("input");
-    chk.type = "checkbox";
-    chk.checked = facetsOn;
-    chk.style.cssText = "transform: scale(1.2);";
-
-    const lbl = document.createElement("div");
-    lbl.style.cssText = "font-weight:900;";
-    lbl.textContent = "Facets (bordes)";
-
-    const desc = document.createElement("div");
-    desc.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-    desc.textContent = "Apagar/prender bordes sin perder colores/tags/textos editados.";
-
-    facetsLeft.appendChild(chk);
-    facetsLeft.appendChild(lbl);
-
-    facetsRow.appendChild(facetsLeft);
-    facetsRow.appendChild(desc);
-    host.appendChild(facetsRow);
-
-    chk.addEventListener("change", () => {
-      facetsOn = chk.checked;
-      setFacets(recolorSvg, facetsOn);
+    const btnColors = makeToggleButton("Colores", true, (on) => {
+      colorsOn = on;
+      setColorFills(recolorSvg, colorsOn);
     });
+
+    const btnBorders = makeToggleButton("Bordes", true, (on) => {
+      bordersOn = on;
+      setBorders(recolorSvg, bordersOn);
+    });
+
+    const hint = document.createElement("div");
+    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
+    hint.textContent = "Colores OFF = descarga solo bordes + números. No se pierden tus ediciones.";
+
+    togglesLeft.appendChild(btnColors);
+    togglesLeft.appendChild(btnBorders);
+
+    togglesRow.appendChild(togglesLeft);
+    togglesRow.appendChild(hint);
+    host.appendChild(togglesRow);
 
     // Downloads recolored
     const dl = document.createElement("div");
@@ -677,7 +746,7 @@
 
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    hint.textContent = "Los tags vienen del Excel (PALETTE_ITEMS).";
+    hint.textContent = "Tags del Excel + toggles para descargar con color o solo bordes/números.";
     host.appendChild(hint);
   }
 
