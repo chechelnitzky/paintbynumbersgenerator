@@ -1,21 +1,30 @@
-/* Recolor add-on (v8)
-   Launcher robusto (trivial / small / medium):
-   - El launcher se monta cuando aparecen los botones DOWNLOAD (ancla estable)
-   - El SVG se resuelve "en el click" (no queda pegado a un SVG viejo)
-   - Si el output no está listo aún, el botón queda pero avisa.
-   - Mantiene: recolor, tags originales centrados en swatch original, picker excel, toggles, downloads.
+/* Recolor add-on (v9) — PRO FIX
+   - Launcher SIEMPRE funciona (trivial/small/medium) aunque el output se renderice en canvas/img
+   - Fuente del SVG:
+      (1) <svg> en DOM cerca de downloads (si existe)
+      (2) Captura del SVG desde DOWNLOAD SVG:
+          - lee href blob/data
+          - intercepta URL.createObjectURL() cuando el generador crea un Blob SVG
+   - Mantiene:
+      - swatches originales con TAG original centrado
+      - picker con tags del Excel
+      - toggles (Colores/Bordes) sin perder ediciones
+      - downloads recolored SVG/PNG
 */
 
 (function () {
-  // Guard para evitar doble carga (por hot reload / inyecciones)
-  if (window.__RECOLOR_ADDON_LOADED__) return;
-  window.__RECOLOR_ADDON_LOADED__ = true;
+  if (window.__RECOLOR_ADDON_V9__) return;
+  window.__RECOLOR_ADDON_V9__ = true;
 
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
+
+  // ---- INTERNAL CACHE (last svg text captured)
+  window.__LAST_OUTPUT_SVG_TEXT__ = window.__LAST_OUTPUT_SVG_TEXT__ || "";
+  let __parsedSvgCacheEl = null; // detached SVG element built from captured text
 
   // ---------- Color helpers ----------
   function rgbToHex(rgb) {
@@ -97,17 +106,15 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
-  // ---------- Locate download row and mount host ----------
+  // ---------- DOWNLOAD ROW & HOST ----------
   function findDownloadButtonsRow() {
-    // Robusto: algunos templates usan uppercase, otros buttons, otros a-links
     const btns = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
     const hits = btns.filter((b) => {
       const t = norm(b.textContent || b.value || "");
-      return /download\s*svg/i.test(t) || /download\s*png/i.test(t) || /download\s*palette/i.test(t);
+      return t.includes("download svg") || t.includes("download png") || t.includes("download palette");
     });
     if (!hits.length) return null;
 
-    // Busca contenedor que incluya al menos 2 de 3
     for (const b of hits) {
       const p = b.parentElement;
       if (!p) continue;
@@ -117,12 +124,10 @@
       const hasPal = txt.includes("download palette");
       if ((hasSvg && hasPng) || (hasSvg && hasPal) || (hasPng && hasPal)) return p;
     }
-
     return hits[0].parentElement || null;
   }
 
   function ensureHostBelowDownloads() {
-    // Si ya existe pero fue “desconectado” del DOM por rerender, lo recreamos
     let host = document.getElementById("recolor-host");
     const downloadsRow = findDownloadButtonsRow();
 
@@ -145,72 +150,149 @@
       `;
     }
 
-    // Reubica siempre debajo del downloadsRow (si existe)
     if (downloadsRow && downloadsRow.parentElement) {
       if (downloadsRow.nextSibling !== host) {
         downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
       }
     } else {
-      // fallback: al final
       if (!document.body.contains(host)) document.body.appendChild(host);
     }
 
     return host;
   }
 
-  // ---------- Output SVG resolver (la clave del bug) ----------
+  // ---------- SVG CAPTURE (THE FIX) ----------
+  function parseSvgTextToElement(svgText) {
+    if (!svgText || typeof svgText !== "string") return null;
+    const cleaned = svgText.trim();
+    if (!cleaned.startsWith("<svg")) return null;
+
+    const doc = new DOMParser().parseFromString(cleaned, "image/svg+xml");
+    const svg = doc.querySelector("svg");
+    if (!svg) return null;
+
+    // import into current document
+    const imported = document.importNode(svg, true);
+    return imported;
+  }
+
+  async function fetchSvgTextFromUrl(url) {
+    if (!url) return "";
+    try {
+      const res = await fetch(url);
+      const text = await res.text();
+      return text;
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function findDownloadSvgControl() {
+    const els = Array.from(document.querySelectorAll("a, button, input[type='button'], input[type='submit']"));
+    return els.find(el => {
+      const t = norm(el.textContent || el.value || "");
+      return t.includes("download svg");
+    }) || null;
+  }
+
+  async function tryCaptureSvgFromDownloadLink() {
+    const el = findDownloadSvgControl();
+    if (!el) return false;
+
+    // If it's an <a href="blob:..."> or data URL
+    const href = el.getAttribute && el.getAttribute("href");
+    if (href && (href.startsWith("blob:") || href.startsWith("data:image/svg+xml"))) {
+      const txt = await fetchSvgTextFromUrl(href);
+      const svgEl = parseSvgTextToElement(txt);
+      if (svgEl) {
+        window.__LAST_OUTPUT_SVG_TEXT__ = txt;
+        __parsedSvgCacheEl = svgEl;
+        return true;
+      }
+    }
+
+    // Some implementations store URL in dataset
+    const dataHref = el.dataset && (el.dataset.href || el.dataset.url);
+    if (dataHref && (dataHref.startsWith("blob:") || dataHref.startsWith("data:image/svg+xml"))) {
+      const txt = await fetchSvgTextFromUrl(dataHref);
+      const svgEl = parseSvgTextToElement(txt);
+      if (svgEl) {
+        window.__LAST_OUTPUT_SVG_TEXT__ = txt;
+        __parsedSvgCacheEl = svgEl;
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function installCreateObjectURLInterceptor() {
+    if (window.__RECOLOR_URL_HOOKED__) return;
+    window.__RECOLOR_URL_HOOKED__ = true;
+
+    const orig = URL.createObjectURL.bind(URL);
+    URL.createObjectURL = function (blob) {
+      try {
+        // Capture SVG blobs used for DOWNLOAD SVG
+        if (blob && blob.type && blob.type.includes("image/svg+xml")) {
+          blob.text().then((txt) => {
+            const svgEl = parseSvgTextToElement(txt);
+            if (svgEl) {
+              window.__LAST_OUTPUT_SVG_TEXT__ = txt;
+              __parsedSvgCacheEl = svgEl;
+              // update launcher state quickly
+              setTimeout(addOrUpdateLauncher, 0);
+            }
+          }).catch(() => {});
+        }
+      } catch (_) {}
+      return orig(blob);
+    };
+  }
+
+  // ---------- OUTPUT SVG RESOLVER ----------
   function isVisibleSvg(svg) {
     if (!svg || svg.tagName?.toLowerCase() !== "svg") return false;
     const box = svg.getBoundingClientRect();
-    // small/medium a veces tienen el SVG dentro de un container scrolleable; sigue teniendo dimensiones
-    return box.width > 80 && box.height > 80;
+    return box.width > 120 && box.height > 120;
   }
 
-  function resolveOutputSvgNearDownloads() {
+  function findDomSvgNearDownloads() {
     const downloadsRow = findDownloadButtonsRow();
     if (!downloadsRow) return null;
-
-    // 1) Busca en el bloque cercano al downloadsRow
     const root = downloadsRow.parentElement || document;
 
-    // A) Primero: el svg visible más grande dentro del root
-    const localSvgs = Array.from(root.querySelectorAll("svg")).filter(isVisibleSvg);
-    if (localSvgs.length) {
-      let best = localSvgs[0];
-      let bestScore = 0;
-      for (const s of localSvgs) {
-        const box = s.getBoundingClientRect();
-        const score = box.width * box.height;
-        if (score > bestScore) { bestScore = score; best = s; }
-      }
-      return best;
+    const svgs = Array.from(root.querySelectorAll("svg")).filter(isVisibleSvg);
+    if (!svgs.length) return null;
+
+    // choose biggest visible
+    let best = null, bestScore = 0;
+    for (const s of svgs) {
+      const b = s.getBoundingClientRect();
+      const score = b.width * b.height;
+      if (score > bestScore) { bestScore = score; best = s; }
+    }
+    return best;
+  }
+
+  async function resolveOutputSvgRobust() {
+    // 1) DOM SVG (if exists)
+    const domSvg = findDomSvgNearDownloads();
+    if (domSvg) return domSvg;
+
+    // 2) Cached parsed SVG from captured text
+    if (__parsedSvgCacheEl && __parsedSvgCacheEl.tagName?.toLowerCase() === "svg") {
+      return __parsedSvgCacheEl.cloneNode(true);
     }
 
-    // B) Caminar siblings hacia arriba desde downloadsRow (muy típico: output está justo antes)
-    let el = downloadsRow;
-    for (let i = 0; i < 80 && el; i++) {
-      const prev = el.previousElementSibling;
-      if (prev) {
-        const s = prev.querySelector && prev.querySelector("svg");
-        if (isVisibleSvg(s)) return s;
-        const svgs = prev.querySelectorAll ? Array.from(prev.querySelectorAll("svg")).filter(isVisibleSvg) : [];
-        if (svgs.length) return svgs[0];
-      }
-      el = prev || el.parentElement;
-    }
+    // 3) Try fetch from DOWNLOAD SVG link (if anchor already has blob/data)
+    const ok = await tryCaptureSvgFromDownloadLink();
+    if (ok && __parsedSvgCacheEl) return __parsedSvgCacheEl.cloneNode(true);
 
-    // 2) Fallback global: busca un svg que esté “cerca” del downloadsRow en Y
-    const all = Array.from(document.querySelectorAll("svg")).filter(isVisibleSvg);
-    if (all.length) {
-      const dbox = downloadsRow.getBoundingClientRect();
-      let best = null;
-      let bestDist = Infinity;
-      for (const s of all) {
-        const box = s.getBoundingClientRect();
-        const dist = Math.abs((box.top + box.bottom)/2 - (dbox.top + dbox.bottom)/2);
-        if (dist < bestDist) { bestDist = dist; best = s; }
-      }
-      return best;
+    // 4) Try parse from saved text
+    if (window.__LAST_OUTPUT_SVG_TEXT__) {
+      const el = parseSvgTextToElement(window.__LAST_OUTPUT_SVG_TEXT__);
+      if (el) return el;
     }
 
     return null;
@@ -304,7 +386,7 @@
     }, "image/png", 1.0);
   }
 
-  // ---------- SVG style injection (toggles without losing edits) ----------
+  // ---------- SVG style injection ----------
   function ensureSvgStyle(svg, id) {
     let style = svg.querySelector(`#${id}`);
     if (style) return style;
@@ -333,11 +415,9 @@
     style.textContent = on
       ? ""
       : `
-        /* hide paint area fills */
         path, polygon, rect, circle, ellipse {
           fill: none !important;
         }
-        /* keep numbers visible */
         text {
           fill: #000 !important;
         }
@@ -348,27 +428,24 @@
   function makeBadgeCorner(text) {
     const b = document.createElement("span");
     b.textContent = text;
-    b.setAttribute(
-      "style",
-      `
-        position:absolute !important;
-        left:4px !important;
-        top:4px !important;
-        padding:2px 6px !important;
-        border-radius:999px !important;
-        font-size:11px !important;
-        font-weight:900 !important;
-        background: rgba(255,255,255,.90) !important;
-        border: 1px solid rgba(0,0,0,.12) !important;
-        color: rgba(0,0,0,.85) !important;
-        max-width: calc(100% - 8px) !important;
-        white-space: nowrap !important;
-        overflow:hidden !important;
-        text-overflow: ellipsis !important;
-        pointer-events:none !important;
-        line-height: 1 !important;
-      `.trim()
-    );
+    b.setAttribute("style", `
+      position:absolute !important;
+      left:4px !important;
+      top:4px !important;
+      padding:2px 6px !important;
+      border-radius:999px !important;
+      font-size:11px !important;
+      font-weight:900 !important;
+      background: rgba(255,255,255,.90) !important;
+      border: 1px solid rgba(0,0,0,.12) !important;
+      color: rgba(0,0,0,.85) !important;
+      max-width: calc(100% - 8px) !important;
+      white-space: nowrap !important;
+      overflow:hidden !important;
+      text-overflow: ellipsis !important;
+      pointer-events:none !important;
+      line-height: 1 !important;
+    `);
     return b;
   }
 
@@ -393,19 +470,16 @@
 
   function makeSwatchBase(hex, dashed=false) {
     const box = document.createElement("div");
-    box.setAttribute(
-      "style",
-      `
-        width:56px !important;
-        height:44px !important;
-        border-radius:12px !important;
-        border:1px ${dashed ? "dashed" : "solid"} rgba(0,0,0,.20) !important;
-        background:${hex || "transparent"} !important;
-        position:relative !important;
-        overflow:hidden !important;
-        flex: 0 0 auto !important;
-      `.trim()
-    );
+    box.setAttribute("style", `
+      width:56px !important;
+      height:44px !important;
+      border-radius:12px !important;
+      border:1px ${dashed ? "dashed" : "solid"} rgba(0,0,0,.20) !important;
+      background:${hex || "transparent"} !important;
+      position:relative !important;
+      overflow:hidden !important;
+      flex: 0 0 auto !important;
+    `);
     return box;
   }
 
@@ -479,15 +553,13 @@
 
   // ---------- ORIGINAL tag mapping ----------
   function buildOriginalTagByHexFromTopSwatches() {
-    const map = {}; // hex -> tagOriginal
-
+    const map = {};
     const candidates = Array.from(document.querySelectorAll("button, div, span"))
       .filter(el => {
         if (!el || !el.textContent) return false;
-        if (el.closest && el.closest("#recolor-host")) return false; // exclude our UI
+        if (el.closest && el.closest("#recolor-host")) return false;
         const t = (el.textContent || "").trim();
         if (!t) return false;
-
         if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
 
         const r = el.getBoundingClientRect();
@@ -495,7 +567,6 @@
 
         const bg = getComputedStyle(el).backgroundColor;
         if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
-
         return true;
       });
 
@@ -542,7 +613,6 @@
         if (tag && /^[a-z0-9]{1,6}$/i.test(tag) && !map[hex]) map[hex] = tag;
       }
     }
-
     return map;
   }
 
@@ -671,7 +741,7 @@
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No detecté fills en el SVG (puede estar en CSS). Si te pasa con un caso real, lo adapto.";
+      empty.textContent = "No detecté fills en el SVG (podría estar en CSS).";
       list.appendChild(empty);
     } else {
       entries.forEach(([oldHex]) => {
@@ -749,6 +819,7 @@
       });
     }
 
+    // Rename SVG texts
     const labelPanel = document.createElement("div");
     labelPanel.style.cssText = `
       border: 1px solid rgba(0,0,0,.12);
@@ -796,6 +867,7 @@
       }
     }
 
+    // Toggles row
     const togglesRow = document.createElement("div");
     togglesRow.style.cssText = `
       margin-top: 12px;
@@ -834,6 +906,7 @@
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
+    // Download buttons (recolored)
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -863,35 +936,7 @@
     dl.appendChild(btnPng);
   }
 
-  // ---------- Launcher (v8) ----------
-   // ---------- Launcher (SAFE, no MutationObserver) ----------
-
-  function findOutputSvgNearDownloadsLight() {
-    const downloadsRow = findDownloadButtonsRow();
-    if (!downloadsRow) return null;
-
-    const root = downloadsRow.parentElement || document;
-
-    // Busca SVGs SOLO dentro del bloque cercano a los downloads
-    const svgs = Array.from(root.querySelectorAll("svg"));
-    if (!svgs.length) return null;
-
-    let best = null;
-    let bestScore = 0;
-
-    for (const s of svgs) {
-      const box = s.getBoundingClientRect();
-      const score = box.width * box.height;
-
-      // threshold bajo pero razonable
-      if (box.width > 120 && box.height > 120 && score > bestScore) {
-        bestScore = score;
-        best = s;
-      }
-    }
-    return best;
-  }
-
+  // ---------- LAUNCHER (SAFE + ROBUST) ----------
   function addOrUpdateLauncher() {
     const downloadsRow = findDownloadButtonsRow();
     if (!downloadsRow) return;
@@ -899,68 +944,74 @@
     const host = ensureHostBelowDownloads();
     if (!host) return;
 
-    // Crea o reutiliza barra
     let bar = document.getElementById("recolor-launch-bar");
+    let btn = document.getElementById("btn-recolor-launch");
+    let hint = document.getElementById("recolor-launch-hint");
+
     if (!bar) {
       bar = document.createElement("div");
       bar.id = "recolor-launch-bar";
-      bar.style.cssText =
-        "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+      bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
       bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
       host.appendChild(bar);
-
-      const hint = document.createElement("div");
-      hint.id = "recolor-launch-hint";
-      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-      hint.textContent = "Genera el output y luego abre el recolor.";
-      host.appendChild(hint);
     }
 
-    // Botón (si no existe lo crea)
-    let btn = document.getElementById("btn-recolor-launch");
     if (!btn) {
       btn = document.createElement("button");
       btn.id = "btn-recolor-launch";
       btn.type = "button";
-      btn.style.cssText =
-        "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
       bar.appendChild(btn);
 
-      // Resolver SVG SOLO al click (más robusto)
-      btn.addEventListener("click", () => {
-        const svg = findOutputSvgNearDownloadsLight();
+      btn.addEventListener("click", async () => {
+        // IMPORTANT: resolve robust from DOM or captured DOWNLOAD SVG
+        const svg = await resolveOutputSvgRobust();
         if (!svg) {
-          alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera a que aparezca el output, y prueba de nuevo.");
+          alert("Todavía no puedo acceder al SVG. Prueba apretar DOWNLOAD SVG una vez (solo para capturarlo) y luego Abrir Recolorear.");
           return;
         }
         openEditor(svg);
       });
     }
 
-    // Actualiza estado del botón sin escanear todo el DOM
-    const svgNow = findOutputSvgNearDownloadsLight();
-    const hint = document.getElementById("recolor-launch-hint");
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.id = "recolor-launch-hint";
+      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+      host.appendChild(hint);
+    }
 
-    if (svgNow) {
+    const domSvg = findDomSvgNearDownloads();
+    const hasCaptured = !!window.__LAST_OUTPUT_SVG_TEXT__;
+
+    if (domSvg || hasCaptured) {
       btn.textContent = "Abrir Recolorear";
-      btn.disabled = false;
-      btn.style.opacity = "1";
-      if (hint) {
-        hint.textContent =
-          "Listo. El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
-      }
+      hint.textContent = "Listo. Si no hay <svg> en DOM, usamos el SVG capturado desde DOWNLOAD SVG.";
     } else {
-      btn.textContent = "Recolor (esperando output…)";
-      btn.disabled = false; // lo dejamos clickeable para reintentar
-      btn.style.opacity = "0.95";
-      if (hint) {
-        hint.textContent =
-          "Aprieta PROCESS IMAGE y espera el output. El botón se activará cuando detecte el SVG.";
-      }
+      btn.textContent = "Abrir Recolorear (capturar desde DOWNLOAD SVG)";
+      hint.textContent = "Si no aparece el SVG, aprieta DOWNLOAD SVG una vez para capturarlo y luego abre el recolor.";
     }
   }
 
-  // Hook al botón PROCESS IMAGE (clave para small/medium/trivial)
+  function hookDownloadSvgForCapture() {
+    const el = findDownloadSvgControl();
+    if (!el || el.__recolorHooked) return;
+    el.__recolorHooked = true;
+
+    el.addEventListener("click", async () => {
+      // Espera a que el generador cree el blob/url y lo capturamos
+      setTimeout(async () => {
+        await tryCaptureSvgFromDownloadLink();
+        addOrUpdateLauncher();
+      }, 50);
+
+      setTimeout(async () => {
+        await tryCaptureSvgFromDownloadLink();
+        addOrUpdateLauncher();
+      }, 250);
+    }, { passive: true });
+  }
+
   function hookProcessImageButton() {
     const candidates = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
     const btn = candidates.find(el => /process\s*image/i.test((el.textContent || el.value || "").trim()));
@@ -968,31 +1019,31 @@
     btn.__recolorHooked = true;
 
     btn.addEventListener("click", () => {
-      // Después de click, el output tarda: revisa varias veces
-      setTimeout(addOrUpdateLauncher, 200);
+      setTimeout(addOrUpdateLauncher, 150);
+      setTimeout(hookDownloadSvgForCapture, 150);
       setTimeout(addOrUpdateLauncher, 800);
-      setTimeout(addOrUpdateLauncher, 1600);
-      setTimeout(addOrUpdateLauncher, 2600);
-    });
+      setTimeout(hookDownloadSvgForCapture, 800);
+      setTimeout(addOrUpdateLauncher, 2000);
+      setTimeout(hookDownloadSvgForCapture, 2000);
+    }, { passive: true });
   }
 
-  // Boot: polling liviano por 20s (no cuelga)
-  function bootLauncherSafe() {
-    // primer intento
+  function bootSafe() {
+    installCreateObjectURLInterceptor();
     addOrUpdateLauncher();
     hookProcessImageButton();
+    hookDownloadSvgForCapture();
 
+    // polling liviano para agarrar cuando aparezca la zona output
     let tries = 0;
-    const maxTries = 40; // 40 * 500ms = 20s
     const t = setInterval(() => {
       tries++;
       hookProcessImageButton();
+      hookDownloadSvgForCapture();
       addOrUpdateLauncher();
-      if (tries >= maxTries) clearInterval(t);
+      if (tries >= 50) clearInterval(t); // 25s
     }, 500);
   }
 
-  window.addEventListener("load", () => {
-    setTimeout(bootLauncherSafe, 250);
-  });
+  window.addEventListener("load", () => setTimeout(bootSafe, 250));
 })();
