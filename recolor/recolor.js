@@ -1,30 +1,19 @@
-/* Recolor add-on (v9) — PRO FIX
-   - Launcher SIEMPRE funciona (trivial/small/medium) aunque el output se renderice en canvas/img
-   - Fuente del SVG:
-      (1) <svg> en DOM cerca de downloads (si existe)
-      (2) Captura del SVG desde DOWNLOAD SVG:
-          - lee href blob/data
-          - intercepta URL.createObjectURL() cuando el generador crea un Blob SVG
-   - Mantiene:
-      - swatches originales con TAG original centrado
-      - picker con tags del Excel
-      - toggles (Colores/Bordes) sin perder ediciones
-      - downloads recolored SVG/PNG
+/* Recolor add-on (v10) — SIMPLE + ROBUST
+   - Always tries to grab the real SVG output.
+   - 1) Prefer: best <svg> in DOM (by element count), excluding our UI.
+   - 2) Fallback: capture SVG from DOWNLOAD SVG Blob via URL.createObjectURL hook.
+   - No heavy MutationObserver (prevents freezing).
 */
 
 (function () {
-  if (window.__RECOLOR_ADDON_V9__) return;
-  window.__RECOLOR_ADDON_V9__ = true;
+  if (window.__RECOLOR_ADDON_V10__) return;
+  window.__RECOLOR_ADDON_V10__ = true;
 
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
-
-  // ---- INTERNAL CACHE (last svg text captured)
-  window.__LAST_OUTPUT_SVG_TEXT__ = window.__LAST_OUTPUT_SVG_TEXT__ || "";
-  let __parsedSvgCacheEl = null; // detached SVG element built from captured text
 
   // ---------- Color helpers ----------
   function rgbToHex(rgb) {
@@ -74,6 +63,17 @@
     return null;
   }
 
+  // ---------- SVG parsing ----------
+  function parseSvgTextToElement(svgText) {
+    try {
+      const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+      const svg = doc.querySelector("svg");
+      return svg ? svg : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ---------- SVG sizing ----------
   function ensureViewBox(svg) {
     if (!svg || svg.tagName.toLowerCase() !== "svg") return;
@@ -106,11 +106,37 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
-  // ---------- DOWNLOAD ROW & HOST ----------
+  // ---------- Find main output SVG (ROBUST: by element count, not viewport size) ----------
+  function findBestOutputSvgInDom() {
+    const svgs = Array.from(document.querySelectorAll("svg"))
+      .filter(s => !s.closest("#recolor-host")); // exclude our UI
+
+    if (!svgs.length) return null;
+
+    let best = null;
+    let bestScore = -1;
+
+    for (const s of svgs) {
+      // score = number of drawable elements + text count
+      const shapes = s.querySelectorAll("path,polygon,rect,circle,ellipse").length;
+      const texts  = s.querySelectorAll("text").length;
+      const score = shapes * 2 + texts; // prioritize shapes
+      if (score > bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+
+    // sanity: require at least some shapes
+    if (best && best.querySelectorAll("path,polygon,rect,circle,ellipse").length < 5) return null;
+    return best;
+  }
+
+  // ---------- Locate DOWNLOAD buttons row ----------
   function findDownloadButtonsRow() {
-    const btns = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
+    const btns = Array.from(document.querySelectorAll("button, a"));
     const hits = btns.filter((b) => {
-      const t = norm(b.textContent || b.value || "");
+      const t = norm(b.textContent);
       return t.includes("download svg") || t.includes("download png") || t.includes("download palette");
     });
     if (!hits.length) return null;
@@ -118,187 +144,42 @@
     for (const b of hits) {
       const p = b.parentElement;
       if (!p) continue;
-      const txt = norm(p.textContent || "");
-      const hasSvg = txt.includes("download svg");
-      const hasPng = txt.includes("download png");
-      const hasPal = txt.includes("download palette");
-      if ((hasSvg && hasPng) || (hasSvg && hasPal) || (hasPng && hasPal)) return p;
+      const txt = norm(p.textContent);
+      if (txt.includes("download svg") && (txt.includes("download png") || txt.includes("download palette"))) return p;
     }
     return hits[0].parentElement || null;
   }
 
+  function findDownloadSvgControl() {
+    const els = Array.from(document.querySelectorAll("button,a"));
+    return els.find(el => norm(el.textContent).includes("download svg")) || null;
+  }
+
   function ensureHostBelowDownloads() {
     let host = document.getElementById("recolor-host");
+    if (host) return host;
+
+    host = document.createElement("div");
+    host.id = "recolor-host";
+    host.style.cssText = `
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid rgba(0,0,0,.12);
+      border-radius: 12px;
+      background: rgba(255,255,255,.96);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    `;
+
     const downloadsRow = findDownloadButtonsRow();
-
-    const needsRecreate = host && !document.body.contains(host);
-    if (needsRecreate) {
-      try { host.remove(); } catch(_) {}
-      host = null;
-    }
-
-    if (!host) {
-      host = document.createElement("div");
-      host.id = "recolor-host";
-      host.style.cssText = `
-        margin-top: 14px;
-        padding: 14px;
-        border: 1px solid rgba(0,0,0,.12);
-        border-radius: 12px;
-        background: rgba(255,255,255,.96);
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      `;
-    }
-
     if (downloadsRow && downloadsRow.parentElement) {
-      if (downloadsRow.nextSibling !== host) {
-        downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
-      }
+      downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
     } else {
-      if (!document.body.contains(host)) document.body.appendChild(host);
+      document.body.appendChild(host);
     }
-
     return host;
   }
 
-  // ---------- SVG CAPTURE (THE FIX) ----------
-  function parseSvgTextToElement(svgText) {
-    if (!svgText || typeof svgText !== "string") return null;
-    const cleaned = svgText.trim();
-    if (!cleaned.startsWith("<svg")) return null;
-
-    const doc = new DOMParser().parseFromString(cleaned, "image/svg+xml");
-    const svg = doc.querySelector("svg");
-    if (!svg) return null;
-
-    // import into current document
-    const imported = document.importNode(svg, true);
-    return imported;
-  }
-
-  async function fetchSvgTextFromUrl(url) {
-    if (!url) return "";
-    try {
-      const res = await fetch(url);
-      const text = await res.text();
-      return text;
-    } catch (_) {
-      return "";
-    }
-  }
-
-  function findDownloadSvgControl() {
-    const els = Array.from(document.querySelectorAll("a, button, input[type='button'], input[type='submit']"));
-    return els.find(el => {
-      const t = norm(el.textContent || el.value || "");
-      return t.includes("download svg");
-    }) || null;
-  }
-
-  async function tryCaptureSvgFromDownloadLink() {
-    const el = findDownloadSvgControl();
-    if (!el) return false;
-
-    // If it's an <a href="blob:..."> or data URL
-    const href = el.getAttribute && el.getAttribute("href");
-    if (href && (href.startsWith("blob:") || href.startsWith("data:image/svg+xml"))) {
-      const txt = await fetchSvgTextFromUrl(href);
-      const svgEl = parseSvgTextToElement(txt);
-      if (svgEl) {
-        window.__LAST_OUTPUT_SVG_TEXT__ = txt;
-        __parsedSvgCacheEl = svgEl;
-        return true;
-      }
-    }
-
-    // Some implementations store URL in dataset
-    const dataHref = el.dataset && (el.dataset.href || el.dataset.url);
-    if (dataHref && (dataHref.startsWith("blob:") || dataHref.startsWith("data:image/svg+xml"))) {
-      const txt = await fetchSvgTextFromUrl(dataHref);
-      const svgEl = parseSvgTextToElement(txt);
-      if (svgEl) {
-        window.__LAST_OUTPUT_SVG_TEXT__ = txt;
-        __parsedSvgCacheEl = svgEl;
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  function installCreateObjectURLInterceptor() {
-    if (window.__RECOLOR_URL_HOOKED__) return;
-    window.__RECOLOR_URL_HOOKED__ = true;
-
-    const orig = URL.createObjectURL.bind(URL);
-    URL.createObjectURL = function (blob) {
-      try {
-        // Capture SVG blobs used for DOWNLOAD SVG
-        if (blob && blob.type && blob.type.includes("image/svg+xml")) {
-          blob.text().then((txt) => {
-            const svgEl = parseSvgTextToElement(txt);
-            if (svgEl) {
-              window.__LAST_OUTPUT_SVG_TEXT__ = txt;
-              __parsedSvgCacheEl = svgEl;
-              // update launcher state quickly
-              setTimeout(addOrUpdateLauncher, 0);
-            }
-          }).catch(() => {});
-        }
-      } catch (_) {}
-      return orig(blob);
-    };
-  }
-
-  // ---------- OUTPUT SVG RESOLVER ----------
-  function isVisibleSvg(svg) {
-    if (!svg || svg.tagName?.toLowerCase() !== "svg") return false;
-    const box = svg.getBoundingClientRect();
-    return box.width > 120 && box.height > 120;
-  }
-
-  function findDomSvgNearDownloads() {
-    const downloadsRow = findDownloadButtonsRow();
-    if (!downloadsRow) return null;
-    const root = downloadsRow.parentElement || document;
-
-    const svgs = Array.from(root.querySelectorAll("svg")).filter(isVisibleSvg);
-    if (!svgs.length) return null;
-
-    // choose biggest visible
-    let best = null, bestScore = 0;
-    for (const s of svgs) {
-      const b = s.getBoundingClientRect();
-      const score = b.width * b.height;
-      if (score > bestScore) { bestScore = score; best = s; }
-    }
-    return best;
-  }
-
-  async function resolveOutputSvgRobust() {
-    // 1) DOM SVG (if exists)
-    const domSvg = findDomSvgNearDownloads();
-    if (domSvg) return domSvg;
-
-    // 2) Cached parsed SVG from captured text
-    if (__parsedSvgCacheEl && __parsedSvgCacheEl.tagName?.toLowerCase() === "svg") {
-      return __parsedSvgCacheEl.cloneNode(true);
-    }
-
-    // 3) Try fetch from DOWNLOAD SVG link (if anchor already has blob/data)
-    const ok = await tryCaptureSvgFromDownloadLink();
-    if (ok && __parsedSvgCacheEl) return __parsedSvgCacheEl.cloneNode(true);
-
-    // 4) Try parse from saved text
-    if (window.__LAST_OUTPUT_SVG_TEXT__) {
-      const el = parseSvgTextToElement(window.__LAST_OUTPUT_SVG_TEXT__);
-      if (el) return el;
-    }
-
-    return null;
-  }
-
-  // ---------- Group fills + texts ----------
+  // ---------- Fill/text grouping ----------
   function collectFillGroups(svg) {
     const groups = new Map();
     const nodes = Array.from(svg.querySelectorAll("*"))
@@ -337,7 +218,7 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
   async function downloadSvgAsPng(svgEl, filename) {
@@ -382,11 +263,11 @@
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
+      setTimeout(() => URL.revokeObjectURL(pngUrl), 1500);
     }, "image/png", 1.0);
   }
 
-  // ---------- SVG style injection ----------
+  // ---------- SVG style injection (toggles) ----------
   function ensureSvgStyle(svg, id) {
     let style = svg.querySelector(`#${id}`);
     if (style) return style;
@@ -398,54 +279,32 @@
 
   function setBorders(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-borders-style");
-    style.textContent = on
-      ? ""
-      : `
-        [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] {
-          stroke-opacity: 0 !important;
-        }
-        [stroke][fill="transparent"], path[stroke][fill="transparent"] {
-          stroke-opacity: 0 !important;
-        }
-      `;
+    style.textContent = on ? "" : `
+      [stroke] { stroke-opacity: 0 !important; }
+    `;
   }
 
   function setColorFills(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-fills-style");
-    style.textContent = on
-      ? ""
-      : `
-        path, polygon, rect, circle, ellipse {
-          fill: none !important;
-        }
-        text {
-          fill: #000 !important;
-        }
-      `;
+    style.textContent = on ? "" : `
+      path, polygon, rect, circle, ellipse { fill: none !important; }
+      text { fill: #000 !important; }
+    `;
   }
 
-  // ---------- UI components ----------
+  // ---------- UI bits ----------
   function makeBadgeCorner(text) {
     const b = document.createElement("span");
     b.textContent = text;
-    b.setAttribute("style", `
-      position:absolute !important;
-      left:4px !important;
-      top:4px !important;
-      padding:2px 6px !important;
-      border-radius:999px !important;
-      font-size:11px !important;
-      font-weight:900 !important;
-      background: rgba(255,255,255,.90) !important;
-      border: 1px solid rgba(0,0,0,.12) !important;
-      color: rgba(0,0,0,.85) !important;
-      max-width: calc(100% - 8px) !important;
-      white-space: nowrap !important;
-      overflow:hidden !important;
-      text-overflow: ellipsis !important;
-      pointer-events:none !important;
-      line-height: 1 !important;
-    `);
+    b.style.cssText = `
+      position:absolute; left:4px; top:4px;
+      padding:2px 6px; border-radius:999px;
+      font-size:11px; font-weight:900;
+      background: rgba(255,255,255,.90);
+      border: 1px solid rgba(0,0,0,.12);
+      color: rgba(0,0,0,.85);
+      pointer-events:none; line-height: 1;
+    `;
     return b;
   }
 
@@ -453,16 +312,11 @@
     const d = document.createElement("div");
     d.textContent = String(tag);
     d.style.cssText = `
-      position:absolute !important;
-      inset:0 !important;
-      display:flex !important;
-      align-items:center !important;
-      justify-content:center !important;
-      font-weight:900 !important;
-      font-size:20px !important;
-      line-height:1 !important;
-      color:${textColorForBg(bgHex)} !important;
-      pointer-events:none !important;
+      position:absolute; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      font-weight:900; font-size:20px; line-height:1;
+      color:${textColorForBg(bgHex)};
+      pointer-events:none;
       text-shadow: 0 1px 0 rgba(0,0,0,.15);
     `;
     return d;
@@ -470,16 +324,14 @@
 
   function makeSwatchBase(hex, dashed=false) {
     const box = document.createElement("div");
-    box.setAttribute("style", `
-      width:56px !important;
-      height:44px !important;
-      border-radius:12px !important;
-      border:1px ${dashed ? "dashed" : "solid"} rgba(0,0,0,.20) !important;
-      background:${hex || "transparent"} !important;
-      position:relative !important;
-      overflow:hidden !important;
-      flex: 0 0 auto !important;
-    `);
+    box.style.cssText = `
+      width:56px; height:44px;
+      border-radius:12px;
+      border:1px ${dashed ? "dashed" : "solid"} rgba(0,0,0,.20);
+      background:${hex || "transparent"};
+      position:relative; overflow:hidden;
+      flex: 0 0 auto;
+    `;
     return box;
   }
 
@@ -551,7 +403,7 @@
     return grid;
   }
 
-  // ---------- ORIGINAL tag mapping ----------
+  // ---------- ORIGINAL tag mapping (read from top swatches OR SVG legend when present) ----------
   function buildOriginalTagByHexFromTopSwatches() {
     const map = {};
     const candidates = Array.from(document.querySelectorAll("button, div, span"))
@@ -563,10 +415,11 @@
         if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
 
         const r = el.getBoundingClientRect();
-        if (r.width < 12 || r.height < 12 || r.width > 120 || r.height > 120) return false;
+        if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
 
         const bg = getComputedStyle(el).backgroundColor;
         if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
+
         return true;
       });
 
@@ -587,7 +440,7 @@
       .filter(r => {
         const w = parseFloat(r.getAttribute("width") || "0");
         const h = parseFloat(r.getAttribute("height") || "0");
-        return w > 6 && h > 6 && w <= 160 && h <= 160;
+        return w > 6 && h > 6 && w <= 140 && h <= 140;
       });
 
     for (const rect of rects) {
@@ -604,7 +457,7 @@
       const idx = kids.indexOf(rect);
       if (idx === -1) continue;
 
-      const near = kids.slice(idx + 1, idx + 8).find(n =>
+      const near = kids.slice(idx + 1, idx + 6).find(n =>
         n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
       );
 
@@ -613,7 +466,45 @@
         if (tag && /^[a-z0-9]{1,6}$/i.test(tag) && !map[hex]) map[hex] = tag;
       }
     }
+
     return map;
+  }
+
+  // ---------- Core: Resolve SVG NOW ----------
+  function resolveSvgNow() {
+    // 1) DOM
+    const domSvg = findBestOutputSvgInDom();
+    if (domSvg) return domSvg;
+
+    // 2) cached text from blob hook or prior run
+    if (window.__LAST_OUTPUT_SVG_TEXT__ && window.__LAST_OUTPUT_SVG_TEXT__.trim().startsWith("<svg")) {
+      const parsed = parseSvgTextToElement(window.__LAST_OUTPUT_SVG_TEXT__);
+      if (parsed) return parsed;
+    }
+
+    return null;
+  }
+
+  // ---------- Hook: capture SVG when DOWNLOAD SVG creates a Blob URL ----------
+  function installSvgBlobCaptureHook() {
+    if (window.__RECOLOR_SVG_BLOB_HOOK__) return;
+    window.__RECOLOR_SVG_BLOB_HOOK__ = true;
+
+    const originalCreate = URL.createObjectURL.bind(URL);
+
+    URL.createObjectURL = function (blob) {
+      try {
+        if (blob && blob.type && String(blob.type).toLowerCase().includes("svg")) {
+          // Capture SVG text asynchronously without blocking UI
+          blob.text().then((txt) => {
+            if (txt && txt.trim().startsWith("<svg")) {
+              window.__LAST_OUTPUT_SVG_TEXT__ = txt;
+            }
+          }).catch(() => {});
+        }
+      } catch (_) {}
+      return originalCreate(blob);
+    };
   }
 
   // ---------- Editor ----------
@@ -636,6 +527,7 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
+    // Build original tag map (priority: SVG legend > top swatches)
     const topMap = buildOriginalTagByHexFromTopSwatches();
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
     const origTagByHex = { ...topMap, ...legendMap };
@@ -645,6 +537,7 @@
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
 
+    // Previews
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
 
@@ -678,9 +571,11 @@
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
+    // Fill groups
     const fillGroups = collectFillGroups(recolorSvg);
     const entries = Array.from(fillGroups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
+    // Controls layout
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
     host.appendChild(controls);
@@ -702,6 +597,7 @@
 
     let selectedOldHex = null;
 
+    // Grid picker
     const grid = renderGridPicker(({hex:newHex, tag:newTag}) => {
       if (!selectedOldHex) {
         alert("Primero selecciona un color original (panel izquierdo).");
@@ -734,6 +630,7 @@
     });
     right.appendChild(grid);
 
+    // List of original colors
     const list = document.createElement("div");
     list.style.cssText = "display:grid; gap:10px; max-height: 360px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
@@ -741,7 +638,7 @@
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No detecté fills en el SVG (podría estar en CSS).";
+      empty.textContent = "No detecté fills en el SVG.";
       list.appendChild(empty);
     } else {
       entries.forEach(([oldHex]) => {
@@ -767,6 +664,7 @@
         swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
 
         const swOld = makeSwatchBase(oldHex, false);
+        // ✅ tag original centered inside the ORIGINAL swatch
         if (tagOriginal) swOld.appendChild(makeCenteredTag(tagOriginal, oldHex));
 
         const arrow = document.createElement("div");
@@ -778,7 +676,7 @@
 
         const newBadgeHost = document.createElement("div");
         newBadgeHost.className = "new-badge-host";
-        newBadgeHost.setAttribute("style", "position:absolute !important; inset:0 !important;");
+        newBadgeHost.style.cssText = "position:absolute; inset:0;";
         swNew.appendChild(newBadgeHost);
 
         swWrap.appendChild(swOld);
@@ -819,7 +717,7 @@
       });
     }
 
-    // Rename SVG texts
+    // Rename texts
     const labelPanel = document.createElement("div");
     labelPanel.style.cssText = `
       border: 1px solid rgba(0,0,0,.12);
@@ -867,7 +765,7 @@
       }
     }
 
-    // Toggles row
+    // Toggles
     const togglesRow = document.createElement("div");
     togglesRow.style.cssText = `
       margin-top: 12px;
@@ -906,7 +804,7 @@
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
-    // Download buttons (recolored)
+    // Download recolored
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -928,7 +826,7 @@
       try {
         await downloadSvgAsPng(recolorSvg, "paintbynumber_recolored.png");
       } catch (e) {
-        alert("No pude exportar PNG. Prueba Chrome/Edge o dime qué navegador usas.");
+        alert("No pude exportar PNG. Prueba Chrome/Edge.");
       }
     });
 
@@ -936,146 +834,91 @@
     dl.appendChild(btnPng);
   }
 
-  // ---------- LAUNCHER (SAFE + ROBUST) ----------
- function hasDownloadSvgCapability() {
-  const el = findDownloadSvgControl();
-  if (!el) return false;
-  const t = norm(el.textContent || el.value || "");
-  return t.includes("download svg");
-}
+  // ---------- Launcher (simple) ----------
+  function renderLauncher() {
+    const downloadsRow = findDownloadButtonsRow();
+    if (!downloadsRow) return;
 
-function hasSvgStringInGlobals() {
-  const candidates = [
-    window.svgString,
-    window.resultSvg,
-    window.finalSvg,
-    window.outputSvg,
-    window.svg,
-    window.SVG_STRING
-  ];
-  return candidates.some(v => typeof v === "string" && v.trim().startsWith("<svg"));
-}
+    const host = ensureHostBelowDownloads();
 
-function addOrUpdateLauncher() {
-  const downloadsRow = findDownloadButtonsRow();
-  if (!downloadsRow) return;
+    // avoid duplicate
+    let bar = document.getElementById("recolor-launch-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "recolor-launch-bar";
+      bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+      host.appendChild(bar);
 
-  const host = ensureHostBelowDownloads();
-  if (!host) return;
+      const title = document.createElement("div");
+      title.style.cssText = "font-weight:900;";
+      title.textContent = `Recoloreo (paleta ${PALETTE.length})`;
+      bar.appendChild(title);
 
-  let bar = document.getElementById("recolor-launch-bar");
-  let btn = document.getElementById("btn-recolor-launch");
-  let hint = document.getElementById("recolor-launch-hint");
+      const btn = document.createElement("button");
+      btn.id = "btn-recolor-launch";
+      btn.type = "button";
+      btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      bar.appendChild(btn);
 
-  if (!bar) {
-    bar = document.createElement("div");
-    bar.id = "recolor-launch-bar";
-    bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-    bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
-    host.appendChild(bar);
+      const hint = document.createElement("div");
+      hint.id = "recolor-launch-hint";
+      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+      host.appendChild(hint);
+
+      btn.addEventListener("click", () => {
+        const svg = resolveSvgNow();
+        if (!svg) {
+          alert("No detecto el SVG real aún. Si tu output es canvas, el SVG existe igual pero se captura al usar DOWNLOAD SVG.");
+          return;
+        }
+        openEditor(svg);
+      });
+    }
+
+    // Update state text
+    const btn = document.getElementById("btn-recolor-launch");
+    const hint = document.getElementById("recolor-launch-hint");
+    const svgNow = resolveSvgNow();
+
+    if (svgNow) {
+      btn.textContent = "Abrir Recolorear";
+      hint.textContent = "Listo: tomé el SVG real del output.";
+    } else if (window.__LAST_OUTPUT_SVG_TEXT__) {
+      btn.textContent = "Abrir Recolorear";
+      hint.textContent = "Listo: capturé el SVG desde DOWNLOAD SVG.";
+    } else {
+      btn.textContent = "Recolor (esperando SVG...)";
+      hint.textContent = "Genera el output. Si el SVG no está en el DOM, se captura al descargar SVG.";
+    }
   }
 
-  if (!btn) {
-    btn = document.createElement("button");
-    btn.id = "btn-recolor-launch";
-    btn.type = "button";
-    btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
-    bar.appendChild(btn);
+  // ---------- Boot ----------
+  installSvgBlobCaptureHook();
 
-    btn.addEventListener("click", async () => {
-      // try globals first
-      if (!window.__LAST_OUTPUT_SVG_TEXT__ && hasSvgStringInGlobals()) {
-        const txt = (window.svgString || window.resultSvg || window.finalSvg || window.outputSvg || window.svg || window.SVG_STRING);
-        window.__LAST_OUTPUT_SVG_TEXT__ = txt;
-        __parsedSvgCacheEl = parseSvgTextToElement(txt);
-      }
+  // Also: when user clicks DOWNLOAD SVG, very often the blob gets created → hook captures it
+  function attachDownloadSvgClickHint() {
+    const dlSvg = findDownloadSvgControl();
+    if (!dlSvg || dlSvg.__recolor_hooked) return;
+    dlSvg.__recolor_hooked = true;
 
-      const svg = await resolveOutputSvgRobust();
-      if (!svg) {
-        alert("No pude obtener el SVG. Si tu fork no expone DOWNLOAD SVG, hay que habilitarlo en el generador para poder recolorear.");
-        return;
-      }
-      openEditor(svg);
-    });
+    dlSvg.addEventListener("click", () => {
+      // after click, hook should capture; update launcher a bit later
+      setTimeout(renderLauncher, 200);
+      setTimeout(renderLauncher, 800);
+    }, true);
   }
 
-  if (!hint) {
-    hint = document.createElement("div");
-    hint.id = "recolor-launch-hint";
-    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    host.appendChild(hint);
-  }
+  // light poll (doesn't freeze)
+  setInterval(() => {
+    attachDownloadSvgClickHint();
+    renderLauncher();
+  }, 700);
 
-  const domSvg = findDomSvgNearDownloads();
-  const hasCaptured = !!window.__LAST_OUTPUT_SVG_TEXT__;
-  const hasDl = hasDownloadSvgCapability();
-  const hasGlobals = hasSvgStringInGlobals();
+  window.addEventListener("load", () => {
+    setTimeout(() => {
+      attachDownloadSvgClickHint();
+      renderLauncher();
+    }, 300);
+  });
 
-  if (domSvg || hasCaptured || hasDl || hasGlobals) {
-    btn.textContent = "Abrir Recolorear";
-    hint.textContent =
-      hasDl
-        ? "Listo. Si el SVG no está en pantalla, usamos el SVG descargable."
-        : "Listo. Tomaremos el SVG desde variables internas del generador.";
-  } else {
-    btn.textContent = "Recolor (sin SVG disponible aún)";
-    hint.textContent =
-      "Estoy viendo output en pantalla, pero no hay SVG accesible. Necesitas habilitar 'DOWNLOAD SVG' en el generador (o exponer el SVG en window.*) para recolorear.";
-  }
-}
-
-
-  function hookDownloadSvgForCapture() {
-    const el = findDownloadSvgControl();
-    if (!el || el.__recolorHooked) return;
-    el.__recolorHooked = true;
-
-    el.addEventListener("click", async () => {
-      // Espera a que el generador cree el blob/url y lo capturamos
-      setTimeout(async () => {
-        await tryCaptureSvgFromDownloadLink();
-        addOrUpdateLauncher();
-      }, 50);
-
-      setTimeout(async () => {
-        await tryCaptureSvgFromDownloadLink();
-        addOrUpdateLauncher();
-      }, 250);
-    }, { passive: true });
-  }
-
-  function hookProcessImageButton() {
-    const candidates = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
-    const btn = candidates.find(el => /process\s*image/i.test((el.textContent || el.value || "").trim()));
-    if (!btn || btn.__recolorHooked) return;
-    btn.__recolorHooked = true;
-
-    btn.addEventListener("click", () => {
-      setTimeout(addOrUpdateLauncher, 150);
-      setTimeout(hookDownloadSvgForCapture, 150);
-      setTimeout(addOrUpdateLauncher, 800);
-      setTimeout(hookDownloadSvgForCapture, 800);
-      setTimeout(addOrUpdateLauncher, 2000);
-      setTimeout(hookDownloadSvgForCapture, 2000);
-    }, { passive: true });
-  }
-
-  function bootSafe() {
-    installCreateObjectURLInterceptor();
-    addOrUpdateLauncher();
-    hookProcessImageButton();
-    hookDownloadSvgForCapture();
-
-    // polling liviano para agarrar cuando aparezca la zona output
-    let tries = 0;
-    const t = setInterval(() => {
-      tries++;
-      hookProcessImageButton();
-      hookDownloadSvgForCapture();
-      addOrUpdateLauncher();
-      if (tries >= 50) clearInterval(t); // 25s
-    }, 500);
-  }
-
-  window.addEventListener("load", () => setTimeout(bootSafe, 250));
 })();
