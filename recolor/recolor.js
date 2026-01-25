@@ -1,18 +1,22 @@
-/* Recolor add-on (v4)
-   - Inserts UI UNDER the original download buttons
-   - Shows full SVG preview (no cropping / no blank due to missing viewBox)
-   - Detects colors via computed style + fill/style attributes (robust)
-   - Grid picker using PALETTE_ITEMS: each tile shows tag (1,2,42,cg1,bg7,wg9,...)
-   - Shows original -> replacement with tag + hex
-   - Adds download buttons for recolored SVG + PNG
+/* Recolor add-on (v5)
+   - Original color squares show TAG badge (from Excel palette)
+   - Toggle to show/hide "facets" (strokes/lines) without losing edits
+   - Grid picker uses PALETTE_ITEMS (tag+hex)
+   - Downloads recolored SVG + PNG
 */
 
 (function () {
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
+  const TAG_BY_HEX = window.PALETTE_TAG_BY_HEX || {}; // { "#rrggbb": "42" }
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
+
+  function getTagForHex(hex) {
+    const h = norm(hex);
+    return TAG_BY_HEX[h] != null ? String(TAG_BY_HEX[h]) : "";
+  }
 
   function rgbToHex(rgb) {
     const m = (rgb || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
@@ -226,6 +230,29 @@
     return host;
   }
 
+  function makeBadge(text) {
+    const b = document.createElement("div");
+    b.textContent = text;
+    b.style.cssText = `
+      position:absolute;
+      left:4px;
+      top:4px;
+      padding:2px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 900;
+      background: rgba(255,255,255,.90);
+      border: 1px solid rgba(0,0,0,.12);
+      color: rgba(0,0,0,.85);
+      max-width: calc(100% - 8px);
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      pointer-events:none;
+    `;
+    return b;
+  }
+
   function renderGridPicker(onPick) {
     const grid = document.createElement("div");
     grid.style.cssText = `
@@ -259,33 +286,42 @@
         overflow: hidden;
       `;
 
-      if (tag) {
-        const badge = document.createElement("div");
-        badge.textContent = tag;
-        badge.style.cssText = `
-          position:absolute;
-          left:6px;
-          bottom:6px;
-          padding:2px 6px;
-          border-radius: 999px;
-          font-size: 11px;
-          font-weight: 900;
-          background: rgba(255,255,255,.85);
-          border: 1px solid rgba(0,0,0,.12);
-          color: rgba(0,0,0,.85);
-          max-width: calc(100% - 12px);
-          white-space: nowrap;
-          overflow:hidden;
-          text-overflow: ellipsis;
-        `;
-        tile.appendChild(badge);
-      }
+      if (tag) tile.appendChild(makeBadge(tag));
 
       tile.addEventListener("click", () => onPick({hex, tag}));
       grid.appendChild(tile);
     });
 
     return grid;
+  }
+
+  // ---- FACETS TOGGLE (stroke/lines) ----
+  function ensureFacetsStyle(svg) {
+    let style = svg.querySelector("#recolor-facets-style");
+    if (style) return style;
+    style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.setAttribute("id", "recolor-facets-style");
+    svg.insertBefore(style, svg.firstChild);
+    return style;
+  }
+
+  function setFacets(svg, on) {
+    const style = ensureFacetsStyle(svg);
+    if (on) {
+      style.textContent = ""; // show facets (default)
+      return;
+    }
+    // Hide “facets”: usually elements with no fill but stroke, or thin stroked outlines.
+    style.textContent = `
+      /* hide facets/strokes without changing fills */
+      [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] {
+        stroke-opacity: 0 !important;
+      }
+      /* some generators use stroke + transparent fill for facets */
+      [stroke][fill="transparent"], path[stroke][fill="transparent"] {
+        stroke-opacity: 0 !important;
+      }
+    `;
   }
 
   function openEditor(originalSvg) {
@@ -306,6 +342,10 @@
     const recolorSvg = originalSvg.cloneNode(true);
     makePreview(originalClone);
     makePreview(recolorSvg);
+
+    // Facets default ON
+    let facetsOn = true;
+    setFacets(recolorSvg, facetsOn);
 
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
@@ -349,7 +389,7 @@
 
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (hex → reemplazo)</div>`;
+    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + hex → reemplazo)</div>`;
     controls.appendChild(left);
 
     const right = document.createElement("div");
@@ -380,10 +420,15 @@
       const row = left.querySelector(`[data-oldhex="${selectedOldHex}"]`);
       if (row) {
         const swNew = row.querySelector(".sw-new");
+        const swNewBadgeHost = row.querySelector(".sw-new-badgehost");
         const txt = row.querySelector(".row-text");
         swNew.style.background = newHex;
         swNew.style.borderStyle = "solid";
         txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
+
+        // Update replacement badge on the new swatch
+        swNewBadgeHost.innerHTML = "";
+        if (newTag) swNewBadgeHost.appendChild(makeBadge(newTag));
       }
     });
     right.appendChild(grid);
@@ -395,18 +440,19 @@
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent =
-        "No detecté fills en el SVG. Si el SVG usa CSS en vez de fill directo, dime y lo adapto.";
+      empty.textContent = "No detecté fills en el SVG. Si el SVG usa CSS en vez de fill directo, dime y lo adapto.";
       list.appendChild(empty);
     } else {
       entries.forEach(([oldHex]) => {
+        const tag = getTagForHex(oldHex) || ""; // FIX #1: show tag badge on original square
+
         const row = document.createElement("button");
         row.type = "button";
         row.setAttribute("data-oldhex", oldHex);
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 84px 1fr;
+          grid-template-columns: 120px 1fr;
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -419,16 +465,37 @@
         const swWrap = document.createElement("div");
         swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
 
+        // OLD swatch with badge
         const swOld = document.createElement("div");
-        swOld.style.cssText = `width:38px; height:38px; border-radius:12px; border:1px solid rgba(0,0,0,.15); background:${oldHex};`;
+        swOld.style.cssText = `
+          width:54px; height:44px;
+          border-radius:12px;
+          border:1px solid rgba(0,0,0,.15);
+          background:${oldHex};
+          position: relative;
+          overflow:hidden;
+        `;
+        if (tag) swOld.appendChild(makeBadge(tag));
 
         const arrow = document.createElement("div");
         arrow.textContent = "→";
         arrow.style.cssText = "font-weight:900; color: rgba(0,0,0,.55);";
 
+        // NEW swatch (badge updated after pick)
         const swNew = document.createElement("div");
         swNew.className = "sw-new";
-        swNew.style.cssText = `width:38px; height:38px; border-radius:12px; border:1px dashed rgba(0,0,0,.25); background:transparent;`;
+        swNew.style.cssText = `
+          width:54px; height:44px;
+          border-radius:12px;
+          border:1px dashed rgba(0,0,0,.25);
+          background:transparent;
+          position: relative;
+          overflow:hidden;
+        `;
+        const swNewBadgeHost = document.createElement("div");
+        swNewBadgeHost.className = "sw-new-badgehost";
+        swNewBadgeHost.style.cssText = "position:absolute; inset:0;";
+        swNew.appendChild(swNewBadgeHost);
 
         swWrap.appendChild(swOld);
         swWrap.appendChild(arrow);
@@ -439,7 +506,7 @@
 
         const meta = document.createElement("div");
         meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
-        meta.textContent = `Original: ${oldHex}`;
+        meta.textContent = tag ? `Tag: ${tag}  |  Original: ${oldHex}` : `Original: ${oldHex}`;
 
         const repl = document.createElement("div");
         repl.className = "row-text";
@@ -466,6 +533,7 @@
       });
     }
 
+    // Labels rename
     const labelPanel = document.createElement("div");
     labelPanel.style.cssText = `
       border: 1px solid rgba(0,0,0,.12);
@@ -513,6 +581,50 @@
       }
     }
 
+    // ---- FIX #2: Facets toggle just above download buttons ----
+    const facetsRow = document.createElement("div");
+    facetsRow.style.cssText = `
+      margin-top: 12px;
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 10px;
+      border: 1px solid rgba(0,0,0,.10);
+      border-radius: 12px;
+      background: rgba(0,0,0,.02);
+    `;
+
+    const facetsLeft = document.createElement("div");
+    facetsLeft.style.cssText = "display:flex; align-items:center; gap:10px;";
+
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.checked = facetsOn;
+    chk.style.cssText = "transform: scale(1.2);";
+
+    const lbl = document.createElement("div");
+    lbl.style.cssText = "font-weight:900;";
+    lbl.textContent = "Facets (bordes)";
+
+    const desc = document.createElement("div");
+    desc.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
+    desc.textContent = "Apagar/prender bordes sin perder colores/tags/textos editados.";
+
+    facetsLeft.appendChild(chk);
+    facetsLeft.appendChild(lbl);
+
+    facetsRow.appendChild(facetsLeft);
+    facetsRow.appendChild(desc);
+    host.appendChild(facetsRow);
+
+    chk.addEventListener("change", () => {
+      facetsOn = chk.checked;
+      setFacets(recolorSvg, facetsOn);
+    });
+
+    // Downloads recolored
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -565,7 +677,7 @@
 
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    hint.textContent = "La grilla usa los tags del Excel (ej: 1,2,42,WG9). Selecciona color original → pick → descarga.";
+    hint.textContent = "Los tags vienen del Excel (PALETTE_ITEMS).";
     host.appendChild(hint);
   }
 
