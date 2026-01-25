@@ -1,8 +1,8 @@
 /* 
   Recolor add-on for paintbynumbersgenerator
   - Adds "Recolorear" button once final SVG output exists
-  - Clones SVG and lets you remap fills to your 168-color palette
-  - Lets you edit labels/tags (SVG <text> nodes)
+  - Clones SVG and lets you remap fills to your palette
+  - Lets you edit labels/tags (<text>) reliably (keeps working after edits)
 */
 
 (function () {
@@ -28,52 +28,59 @@
     return f;
   }
 
-  function collectUniqueFills(svgEl) {
-    const fills = new Set();
+  function makeSvgResponsive(svgEl) {
+    // Make sure the SVG fits the container (no cropping)
+    svgEl.removeAttribute("width");
+    svgEl.removeAttribute("height");
+    svgEl.style.display = "block";
+    svgEl.style.width = "100%";
+    svgEl.style.height = "auto";
+    svgEl.style.maxWidth = "100%";
+
+    // Ensure viewBox exists (some SVGs rely on width/height only)
+    if (!svgEl.getAttribute("viewBox")) {
+      try {
+        const bb = svgEl.getBBox();
+        if (bb && bb.width && bb.height) {
+          svgEl.setAttribute("viewBox", `0 0 ${bb.width} ${bb.height}`);
+        }
+      } catch (_) {}
+    }
+    svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  }
+
+  function collectFillGroups(svgEl) {
+    // returns Map<fillHex, Element[]>
+    const groups = new Map();
     svgEl.querySelectorAll("[fill]").forEach((el) => {
       const f = getFill(el);
       if (!f) return;
       const ff = norm(f);
       if (ff === "none" || ff === "transparent") return;
-      if (isColor(ff)) fills.add(ff);
+      if (!isColor(ff)) return;
+
+      if (!groups.has(ff)) groups.set(ff, []);
+      groups.get(ff).push(el);
     });
-    return Array.from(fills).sort();
+    return groups;
   }
 
-  function collectUniqueLabels(svgEl) {
-    const labels = new Set();
-    svgEl.querySelectorAll("text").forEach((t) => {
-      const s = (t.textContent || "").trim();
-      if (s) labels.add(s);
-    });
-    return Array.from(labels).sort((a, b) => a.localeCompare(b, "es"));
-  }
-
-  function applyColorMap(svgEl, colorMap) {
-    svgEl.querySelectorAll("[fill]").forEach((el) => {
-      const f = getFill(el);
-      if (!f) return;
-      const key = norm(f);
-      const newC = colorMap[key];
-      if (newC) el.setAttribute("fill", newC);
-    });
-  }
-
-  function applyLabelMap(svgEl, labelMap) {
+  function collectTextGroups(svgEl) {
+    // returns Map<originalText, SVGTextElement[]>
+    const groups = new Map();
     svgEl.querySelectorAll("text").forEach((t) => {
       const s = (t.textContent || "").trim();
       if (!s) return;
-      if (Object.prototype.hasOwnProperty.call(labelMap, s)) {
-        t.textContent = labelMap[s];
-      }
+      if (!groups.has(s)) groups.set(s, []);
+      groups.get(s).push(t);
     });
+    return groups;
   }
 
   function findLikelyOutputSvg() {
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
 
-    // Prefer SVG inside common output containers if they exist
     const containerSelectors = [
       "#output", "#result", "#results", "#svg", "#svgOutput",
       ".output", ".result", ".results", ".svg-output"
@@ -86,7 +93,7 @@
       if (inside) return inside;
     }
 
-    // Fallback: pick largest visible SVG (likely the final output)
+    // Fallback: pick largest visible SVG
     let best = null;
     let bestScore = 0;
     for (const s of svgs) {
@@ -115,7 +122,6 @@
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     `;
 
-    // Put it right after the SVG output if possible
     const anchor = svgEl.closest("div, section, main, article") || svgEl.parentElement;
     if (anchor && anchor.parentElement) {
       anchor.parentElement.insertBefore(host, anchor.nextSibling);
@@ -173,13 +179,12 @@
     editor.id = "recolor-editor";
     editor.style.cssText = "margin-top: 12px; display: grid; gap: 12px;";
 
-    // previews
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start;";
 
     const mkPanel = (name) => {
       const p = document.createElement("div");
-      p.style.cssText = "border:1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px;";
+      p.style.cssText = "border:1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; overflow:auto;";
       const h = document.createElement("div");
       h.style.cssText = "font-weight:800; margin-bottom:8px;";
       h.textContent = name;
@@ -189,32 +194,28 @@
 
     const p1 = mkPanel("Original");
     const o = originalSvg.cloneNode(true);
-    o.style.maxWidth = "100%";
-    o.style.height = "auto";
+    makeSvgResponsive(o);
     p1.appendChild(o);
 
     const p2 = mkPanel("Recoloreada");
     const r = originalSvg.cloneNode(true);
-    r.style.maxWidth = "100%";
-    r.style.height = "auto";
+    makeSvgResponsive(r);
     p2.appendChild(r);
 
     previews.appendChild(p1);
     previews.appendChild(p2);
 
-    // controls
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px;";
 
-    // colors
-    const colorPanel = mkPanel("Colores (fill → paleta)");
-    const fills = collectUniqueFills(r);
-    const colorMap = {};
+    // ---------- COLORS ----------
+    const colorPanel = mkPanel("Colores (original → reemplazo)");
+    const fillGroups = collectFillGroups(r);
 
     const colorsList = document.createElement("div");
     colorsList.style.cssText = "display:grid; gap:10px; max-height: 360px; overflow:auto; padding-right: 6px;";
 
-    const makeSelect = (selected) => {
+    const makeSelect = () => {
       const sel = document.createElement("select");
       sel.style.cssText = "width: 100%; padding: 8px; border-radius: 10px; border:1px solid rgba(0,0,0,.22); background:white;";
       const o0 = document.createElement("option");
@@ -225,57 +226,83 @@
         const op = document.createElement("option");
         op.value = hex;
         op.textContent = hex;
-        if (norm(hex) === norm(selected)) op.selected = true;
         sel.appendChild(op);
       });
       return sel;
     };
 
-    if (!fills.length) {
+    if (!fillGroups.size) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
       empty.textContent = "No detecté colores fill en el SVG. Asegúrate de que el resultado final sea SVG (no PNG).";
       colorPanel.appendChild(empty);
     } else {
-      fills.forEach((oldHex) => {
+      for (const [oldHex, nodes] of Array.from(fillGroups.entries()).sort((a,b)=>a[0].localeCompare(b[0]))) {
         const row = document.createElement("div");
-        row.style.cssText = "display:grid; grid-template-columns: 38px 1fr; gap: 10px; align-items:center;";
+        row.style.cssText = "display:grid; grid-template-columns: 84px 1fr; gap: 10px; align-items:center;";
 
-        const sw = document.createElement("div");
-        sw.style.cssText = `width:38px; height:38px; border-radius:12px; border:1px solid rgba(0,0,0,.15); background:${oldHex};`;
+        // two swatches (original + new)
+        const swWrap = document.createElement("div");
+        swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
+
+        const swOld = document.createElement("div");
+        swOld.style.cssText = `width:38px; height:38px; border-radius:12px; border:1px solid rgba(0,0,0,.15); background:${oldHex};`;
+
+        const arrow = document.createElement("div");
+        arrow.textContent = "→";
+        arrow.style.cssText = "font-weight:800; color: rgba(0,0,0,.55);";
+
+        const swNew = document.createElement("div");
+        swNew.style.cssText = `width:38px; height:38px; border-radius:12px; border:1px dashed rgba(0,0,0,.25); background:transparent;`;
+
+        swWrap.appendChild(swOld);
+        swWrap.appendChild(arrow);
+        swWrap.appendChild(swNew);
 
         const stack = document.createElement("div");
         stack.style.cssText = "display:grid; gap:6px;";
 
         const lab = document.createElement("div");
         lab.style.cssText = "font-size:12px; color: rgba(0,0,0,.7)";
-        lab.textContent = `Actual: ${oldHex}`;
+        lab.textContent = `Original: ${oldHex}   |   Reemplazo: —`;
 
-        const sel = makeSelect("");
+        const sel = makeSelect();
         sel.addEventListener("change", () => {
           const v = sel.value;
-          if (v) colorMap[norm(oldHex)] = v;
-          else delete colorMap[norm(oldHex)];
-          applyColorMap(r, colorMap);
+          const newHex = v ? v : null;
+
+          // apply directly to the elements for this original color
+          nodes.forEach((el) => el.setAttribute("fill", newHex || oldHex));
+
+          // UI update
+          if (newHex) {
+            swNew.style.background = newHex;
+            lab.textContent = `Original: ${oldHex}   |   Reemplazo: ${newHex}`;
+            swNew.style.borderStyle = "solid";
+          } else {
+            swNew.style.background = "transparent";
+            lab.textContent = `Original: ${oldHex}   |   Reemplazo: —`;
+            swNew.style.borderStyle = "dashed";
+          }
         });
 
         stack.appendChild(lab);
         stack.appendChild(sel);
 
-        row.appendChild(sw);
+        row.appendChild(swWrap);
         row.appendChild(stack);
+
         colorsList.appendChild(row);
-      });
+      }
 
       colorPanel.appendChild(colorsList);
     }
 
-    // labels
+    // ---------- LABELS / TAGS ----------
     const labelPanel = mkPanel("Tags / Labels (texto en SVG)");
-    const labels = collectUniqueLabels(r);
-    const labelMap = {};
+    const textGroups = collectTextGroups(r);
 
-    if (!labels.length) {
+    if (!textGroups.size) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
       empty.textContent = "No encontré <text> en el SVG. Si tu proyecto tiene opción de labels, actívala y vuelve a generar.";
@@ -284,29 +311,27 @@
       const labelList = document.createElement("div");
       labelList.style.cssText = "display:grid; gap:10px; max-height: 360px; overflow:auto; padding-right: 6px;";
 
-      labels.forEach((oldText) => {
+      for (const [originalText, nodes] of Array.from(textGroups.entries()).sort((a,b)=>a[0].localeCompare(b[0], "es"))) {
         const row = document.createElement("div");
         row.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items:center;";
 
         const oldBox = document.createElement("div");
         oldBox.style.cssText = "font-size: 13px; padding: 8px; border-radius: 10px; background: rgba(0,0,0,.04);";
-        oldBox.textContent = oldText;
+        oldBox.textContent = originalText;
 
         const input = document.createElement("input");
         input.type = "text";
-        input.placeholder = "Nuevo tag…";
+        input.value = originalText; // editable and keeps working
         input.style.cssText = "padding: 8px; border-radius: 10px; border:1px solid rgba(0,0,0,.22);";
         input.addEventListener("input", () => {
-          const v = input.value.trim();
-          if (v) labelMap[oldText] = v;
-          else labelMap[oldText] = oldText; // revert
-          applyLabelMap(r, labelMap);
+          const v = input.value;
+          nodes.forEach((t) => (t.textContent = v));
         });
 
         row.appendChild(oldBox);
         row.appendChild(input);
         labelList.appendChild(row);
-      });
+      }
 
       labelPanel.appendChild(labelList);
     }
