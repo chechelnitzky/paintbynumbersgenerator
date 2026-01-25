@@ -96,22 +96,50 @@
   }
 
   // ---------- Find main output SVG ----------
-  function findFinalOutputSvg() {
-    const svgs = Array.from(document.querySelectorAll("svg"));
-    if (!svgs.length) return null;
+ function findFinalOutputSvg() {
+  const downloadsRow = findDownloadButtonsRow();
+  if (!downloadsRow) return null;
 
-    let best = null;
-    let bestScore = 0;
-    for (const s of svgs) {
-      const box = s.getBoundingClientRect();
-      const score = box.width * box.height;
-      if (score > bestScore && box.width > 200 && box.height > 200) {
-        bestScore = score;
-        best = s;
-      }
+  // Buscamos el SVG "output" cerca del bloque de descargas
+  // 1) Primero en el mismo contenedor
+  const root = downloadsRow.parentElement || document;
+
+  // Heurística A: un svg dentro del mismo root que tenga tamaño visible
+  const candidates = Array.from(root.querySelectorAll("svg"));
+  let best = null;
+  let bestScore = 0;
+
+  for (const s of candidates) {
+    const box = s.getBoundingClientRect();
+    const score = box.width * box.height;
+    if (score > bestScore && box.width > 120 && box.height > 120) {
+      bestScore = score;
+      best = s;
     }
-    return best;
   }
+  if (best) return best;
+
+  // Heurística B: caminar desde downloads hacia arriba buscando svg en siblings
+  let el = downloadsRow;
+  for (let i = 0; i < 60 && el; i++) {
+    const prev = el.previousElementSibling;
+    if (prev) {
+      const s = prev.querySelector && prev.querySelector("svg");
+      if (s) return s;
+    }
+    el = prev || el.parentElement;
+  }
+
+  // Fallback final: el último svg visible del documento
+  const all = Array.from(document.querySelectorAll("svg"));
+  for (let i = all.length - 1; i >= 0; i--) {
+    const box = all[i].getBoundingClientRect();
+    if (box.width > 120 && box.height > 120) return all[i];
+  }
+
+  return null;
+}
+
 
   // ---------- Locate download row and mount host ----------
   function findDownloadButtonsRow() {
@@ -821,12 +849,42 @@
   }
 
   // ---------- Launcher ----------
-  function addLaunchButtonOnceReady() {
-    const svg = findFinalOutputSvg();
-    if (!svg) return;
+function addLaunchButtonOnceReady() {
+  const svg = findFinalOutputSvg();
+  if (!svg) return;
 
-    const host = ensureHostBelowDownloads();
-    if (document.getElementById("btn-recolor-launch")) return;
+  const host = ensureHostBelowDownloads();
+
+  // Si el botón ya existe, solo actualiza el SVG al más reciente
+  const existing = document.getElementById("btn-recolor-launch");
+  if (existing) {
+    existing._recolorSvgRef = svg;
+    return;
+  }
+
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+  bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
+
+  const btn = document.createElement("button");
+  btn.id = "btn-recolor-launch";
+  btn.type = "button";
+  btn.textContent = "Abrir Recolorear";
+  btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+
+  // guarda la referencia al svg actual
+  btn._recolorSvgRef = svg;
+  btn.addEventListener("click", () => openEditor(btn._recolorSvgRef));
+
+  bar.appendChild(btn);
+  host.appendChild(bar);
+
+  const hint = document.createElement("div");
+  hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+  hint.textContent = "El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
+  host.appendChild(hint);
+}
+
 
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
