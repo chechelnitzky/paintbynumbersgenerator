@@ -1,30 +1,37 @@
-/* Recolor add-on (v6)
-   Fixes:
-   1) Original color squares show TAG badge ON TOP reliably (CSS-proof)
-   2) Toggles are buttons (not checkbox) so they never get hidden
-   3) Adds "Colores ON/OFF" toggle: OFF => outlines + numbers only (no fills)
-   4) Adds "Bordes ON/OFF" toggle: hide/show facet strokes (optional)
+/* Recolor add-on (v7)
+   - Original swatches show ORIGINAL TAG (0/1/2/3...) centered inside the color
+     (read from top swatches OR SVG legend when available)
+   - Replacement swatches keep Excel tag badge (corner)
+   - Toggles:
+      * Colores ON/OFF => OFF downloads outlines + numbers only (no fills)
+      * Bordes ON/OFF
+   - Keeps all edits (colors/tags/text) because toggles only inject SVG <style>
 */
 
 (function () {
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
-  const TAG_BY_HEX = window.PALETTE_TAG_BY_HEX || {}; // { "#rrggbb": "42" }
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
 
-  function getTagForHex(hex) {
-    const h = norm(hex);
-    return TAG_BY_HEX[h] != null ? String(TAG_BY_HEX[h]) : "";
-  }
-
+  // ---------- Color helpers ----------
   function rgbToHex(rgb) {
     const m = (rgb || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
     if (!m) return null;
     const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
     const to2 = (n) => n.toString(16).padStart(2, "0");
     return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
+  }
+
+  function textColorForBg(hex) {
+    const h = (hex || "").replace("#", "");
+    if (h.length !== 6) return "#000";
+    const r = parseInt(h.slice(0,2), 16);
+    const g = parseInt(h.slice(2,4), 16);
+    const b = parseInt(h.slice(4,6), 16);
+    const y = (0.2126*r + 0.7152*g + 0.0722*b);
+    return y > 140 ? "#000" : "#fff";
   }
 
   function getElementFill(el) {
@@ -56,6 +63,7 @@
     return null;
   }
 
+  // ---------- SVG sizing ----------
   function ensureViewBox(svg) {
     if (!svg || svg.tagName.toLowerCase() !== "svg") return;
     if (svg.getAttribute("viewBox")) return;
@@ -87,6 +95,7 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
+  // ---------- Find main output SVG ----------
   function findFinalOutputSvg() {
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
@@ -104,6 +113,7 @@
     return best;
   }
 
+  // ---------- Locate download row and mount host ----------
   function findDownloadButtonsRow() {
     const btns = Array.from(document.querySelectorAll("button, a"));
     const hits = btns.filter((b) => {
@@ -121,6 +131,31 @@
     return hits[0].parentElement || null;
   }
 
+  function ensureHostBelowDownloads() {
+    let host = document.getElementById("recolor-host");
+    if (host) return host;
+
+    host = document.createElement("div");
+    host.id = "recolor-host";
+    host.style.cssText = `
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid rgba(0,0,0,.12);
+      border-radius: 12px;
+      background: rgba(255,255,255,.96);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    `;
+
+    const downloadsRow = findDownloadButtonsRow();
+    if (downloadsRow && downloadsRow.parentElement) {
+      downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
+    } else {
+      document.body.appendChild(host);
+    }
+    return host;
+  }
+
+  // ---------- Group fills + texts ----------
   function collectFillGroups(svg) {
     const groups = new Map();
     const nodes = Array.from(svg.querySelectorAll("*"))
@@ -149,6 +184,7 @@
     return groups;
   }
 
+  // ---------- Download helpers ----------
   function downloadText(filename, text, mime = "text/plain") {
     const blob = new Blob([text], { type: mime });
     const url = URL.createObjectURL(blob);
@@ -207,31 +243,7 @@
     }, "image/png", 1.0);
   }
 
-  function ensureHostBelowDownloads() {
-    let host = document.getElementById("recolor-host");
-    if (host) return host;
-
-    host = document.createElement("div");
-    host.id = "recolor-host";
-    host.style.cssText = `
-      margin-top: 14px;
-      padding: 14px;
-      border: 1px solid rgba(0,0,0,.12);
-      border-radius: 12px;
-      background: rgba(255,255,255,.96);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    `;
-
-    const downloadsRow = findDownloadButtonsRow();
-    if (downloadsRow && downloadsRow.parentElement) {
-      downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
-    } else {
-      document.body.appendChild(host);
-    }
-    return host;
-  }
-
-  // ---------- SVG style toggles (do NOT lose edits) ----------
+  // ---------- SVG style injection (toggles without losing edits) ----------
   function ensureSvgStyle(svg, id) {
     let style = svg.querySelector(`#${id}`);
     if (style) return style;
@@ -241,7 +253,6 @@
     return style;
   }
 
-  // Toggle borders/facets (strokes)
   function setBorders(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-borders-style");
     style.textContent = on
@@ -256,37 +267,32 @@
       `;
   }
 
-  // Toggle COLOR FILLS (this is what you asked now)
-  // OFF => remove fills for shapes but KEEP text (numbers) and borders.
   function setColorFills(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-fills-style");
     style.textContent = on
       ? ""
       : `
-        /* hide fills for paint areas */
+        /* hide paint area fills */
         path, polygon, rect, circle, ellipse {
           fill: none !important;
         }
-        /* keep text/numbers visible */
+        /* keep numbers visible */
         text {
           fill: #000 !important;
         }
       `;
   }
 
-  // ---------- UI bits ----------
-  function makeBadge(text, corner = "tl") {
+  // ---------- UI components ----------
+  function makeBadgeCorner(text) {
     const b = document.createElement("span");
     b.textContent = text;
-    const pos = corner === "br"
-      ? "right:4px !important; bottom:4px !important;"
-      : "left:4px !important; top:4px !important;";
-
     b.setAttribute(
       "style",
       `
         position:absolute !important;
-        ${pos}
+        left:4px !important;
+        top:4px !important;
         padding:2px 6px !important;
         border-radius:999px !important;
         font-size:11px !important;
@@ -305,7 +311,27 @@
     return b;
   }
 
-  function makeSwatch(hex, tag) {
+  // ✅ centered ORIGINAL tag inside swatch
+  function makeCenteredTag(tag, bgHex) {
+    const d = document.createElement("div");
+    d.textContent = String(tag);
+    d.style.cssText = `
+      position:absolute !important;
+      inset:0 !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      font-weight:900 !important;
+      font-size:20px !important;
+      line-height:1 !important;
+      color:${textColorForBg(bgHex)} !important;
+      pointer-events:none !important;
+      text-shadow: 0 1px 0 rgba(0,0,0,.15);
+    `;
+    return d;
+  }
+
+  function makeSwatchBase(hex, dashed=false) {
     const box = document.createElement("div");
     box.setAttribute(
       "style",
@@ -313,15 +339,41 @@
         width:56px !important;
         height:44px !important;
         border-radius:12px !important;
-        border:1px solid rgba(0,0,0,.15) !important;
-        background:${hex} !important;
+        border:1px ${dashed ? "dashed" : "solid"} rgba(0,0,0,.20) !important;
+        background:${hex || "transparent"} !important;
         position:relative !important;
         overflow:hidden !important;
         flex: 0 0 auto !important;
       `.trim()
     );
-    if (tag) box.appendChild(makeBadge(tag));
     return box;
+  }
+
+  function makeToggleButton(label, initialOn, onChange) {
+    let on = !!initialOn;
+    const btn = document.createElement("button");
+    btn.type = "button";
+
+    const paint = () => {
+      btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
+      btn.style.cssText = `
+        padding:10px 14px;
+        border-radius:12px;
+        border:1px solid rgba(0,0,0,.22);
+        background:${on ? "white" : "rgba(0,0,0,.06)"};
+        cursor:pointer;
+        font-weight:900;
+      `;
+    };
+    paint();
+
+    btn.addEventListener("click", () => {
+      on = !on;
+      paint();
+      onChange(on);
+    });
+
+    return btn;
   }
 
   function renderGridPicker(onPick) {
@@ -356,8 +408,7 @@
         position: relative;
         overflow: hidden;
       `;
-
-      if (tag) tile.appendChild(makeBadge(tag));
+      if (tag) tile.appendChild(makeBadgeCorner(tag));
       tile.addEventListener("click", () => onPick({hex, tag}));
 
       grid.appendChild(tile);
@@ -366,36 +417,79 @@
     return grid;
   }
 
-  function makeToggleButton(label, initialOn, onChange) {
-    let on = !!initialOn;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.setAttribute("aria-pressed", String(on));
+  // ---------- ORIGINAL tag mapping ----------
+  function buildOriginalTagByHexFromTopSwatches() {
+    // Reads the mini swatches at the top (0/1/2/3...) BUT excludes our recolor UI
+    const map = {}; // hex -> tagOriginal
 
-    const paint = () => {
-      btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
-      btn.style.cssText = `
-        padding:10px 14px;
-        border-radius:12px;
-        border:1px solid rgba(0,0,0,.22);
-        background:${on ? "white" : "rgba(0,0,0,.06)"};
-        cursor:pointer;
-        font-weight:900;
-      `;
-      btn.setAttribute("aria-pressed", String(on));
-    };
+    const candidates = Array.from(document.querySelectorAll("button, div, span"))
+      .filter(el => {
+        if (!el || !el.textContent) return false;
+        if (el.closest && el.closest("#recolor-host")) return false; // exclude our UI
+        const t = (el.textContent || "").trim();
+        if (!t) return false;
 
-    paint();
+        // We want short tags: numbers like 0,1,2,3 (supports alphanum too)
+        if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
 
-    btn.addEventListener("click", () => {
-      on = !on;
-      paint();
-      onChange(on);
-    });
+        const r = el.getBoundingClientRect();
+        if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
 
-    return btn;
+        const bg = getComputedStyle(el).backgroundColor;
+        if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
+
+        return true;
+      });
+
+    for (const el of candidates) {
+      const tag = (el.textContent || "").trim();
+      const bg = getComputedStyle(el).backgroundColor;
+      const hex = rgbToHex(bg);
+      if (hex && !map[hex]) map[hex] = tag;
+    }
+    return map;
   }
 
+  function buildOriginalTagByHexFromSvgLegend(svg) {
+    // Tries to read a legend inside the SVG: colored rect near a text tag
+    const map = {};
+    if (!svg) return map;
+
+    const rects = Array.from(svg.querySelectorAll("rect"))
+      .filter(r => {
+        const w = parseFloat(r.getAttribute("width") || "0");
+        const h = parseFloat(r.getAttribute("height") || "0");
+        return w > 6 && h > 6 && w <= 140 && h <= 140;
+      });
+
+    for (const rect of rects) {
+      const fill = (rect.getAttribute("fill") || "").trim();
+      let hex = "";
+      if (fill.startsWith("#") && fill.length === 7) hex = fill.toLowerCase();
+      else if (fill.startsWith("rgb")) hex = rgbToHex(fill) || "";
+      if (!hex) continue;
+
+      const parent = rect.parentElement;
+      if (!parent) continue;
+
+      const kids = Array.from(parent.children);
+      const idx = kids.indexOf(rect);
+      if (idx === -1) continue;
+
+      const near = kids.slice(idx + 1, idx + 6).find(n =>
+        n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
+      );
+
+      if (near) {
+        const tag = (near.textContent || "").trim();
+        if (tag && /^[a-z0-9]{1,6}$/i.test(tag) && !map[hex]) map[hex] = tag;
+      }
+    }
+
+    return map;
+  }
+
+  // ---------- Editor ----------
   function openEditor(originalSvg) {
     const host = ensureHostBelowDownloads();
     host.innerHTML = "";
@@ -415,12 +509,18 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    // defaults
+    // Build original tag map (priority: SVG legend > top swatches)
+    const topMap = buildOriginalTagByHexFromTopSwatches();
+    const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
+    const origTagByHex = { ...topMap, ...legendMap };
+
+    // Defaults
     let colorsOn = true;
     let bordersOn = true;
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
 
+    // Previews
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
 
@@ -454,16 +554,18 @@
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
+    // Fill groups
     const fillGroups = collectFillGroups(recolorSvg);
     const entries = Array.from(fillGroups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
+    // Controls layout
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
     host.appendChild(controls);
 
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + hex → reemplazo)</div>`;
+    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG original + hex → reemplazo)</div>`;
     controls.appendChild(left);
 
     const right = document.createElement("div");
@@ -478,11 +580,13 @@
 
     let selectedOldHex = null;
 
+    // Grid picker for replacement colors
     const grid = renderGridPicker(({hex:newHex, tag:newTag}) => {
       if (!selectedOldHex) {
         alert("Primero selecciona un color original (panel izquierdo).");
         return;
       }
+
       const nodes = fillGroups.get(selectedOldHex) || [];
       nodes.forEach((el) => {
         el.setAttribute("fill", newHex);
@@ -495,15 +599,14 @@
       if (row) {
         const swNew = row.querySelector(".sw-new");
         const txt = row.querySelector(".row-text");
-
         swNew.style.background = newHex;
         swNew.style.borderStyle = "solid";
 
-        // set badge on new swatch
+        // Replacement tag badge (Excel tag) stays corner
         const badgeHost = row.querySelector(".new-badge-host");
         if (badgeHost) {
           badgeHost.innerHTML = "";
-          if (newTag) badgeHost.appendChild(makeBadge(newTag));
+          if (newTag) badgeHost.appendChild(makeBadgeCorner(newTag));
         }
 
         txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
@@ -511,6 +614,7 @@
     });
     right.appendChild(grid);
 
+    // Original colors list
     const list = document.createElement("div");
     list.style.cssText = "display:grid; gap:10px; max-height: 360px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
@@ -522,8 +626,8 @@
       list.appendChild(empty);
     } else {
       entries.forEach(([oldHex]) => {
-        // ✅ FIX #1: badge must show ON the original swatch (CSS-proof)
-        const tag = getTagForHex(oldHex);
+        // ✅ THIS is your requested tag: ORIGINAL tag from drawing (0/1/2/3...)
+        const tagOriginal = origTagByHex[oldHex] || "";
 
         const row = document.createElement("button");
         row.type = "button";
@@ -531,7 +635,7 @@
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 140px 1fr;
+          grid-template-columns: 150px 1fr;
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -544,26 +648,17 @@
         const swWrap = document.createElement("div");
         swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
 
-        const swOld = makeSwatch(oldHex, tag);
+        // Original swatch: centered original tag INSIDE
+        const swOld = makeSwatchBase(oldHex, false);
+        if (tagOriginal) swOld.appendChild(makeCenteredTag(tagOriginal, oldHex));
 
         const arrow = document.createElement("div");
         arrow.textContent = "→";
         arrow.style.cssText = "font-weight:900; color: rgba(0,0,0,.55);";
 
-        const swNew = document.createElement("div");
+        // Replacement swatch: keeps Excel tag as corner badge
+        const swNew = makeSwatchBase("transparent", true);
         swNew.className = "sw-new";
-        swNew.setAttribute(
-          "style",
-          `
-            width:56px !important;
-            height:44px !important;
-            border-radius:12px !important;
-            border:1px dashed rgba(0,0,0,.25) !important;
-            background:transparent !important;
-            position:relative !important;
-            overflow:hidden !important;
-          `.trim()
-        );
 
         const newBadgeHost = document.createElement("div");
         newBadgeHost.className = "new-badge-host";
@@ -579,7 +674,9 @@
 
         const meta = document.createElement("div");
         meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
-        meta.textContent = tag ? `Tag: ${tag}  |  Original: ${oldHex}` : `Original: ${oldHex}`;
+        meta.textContent = tagOriginal
+          ? `Tag original: ${tagOriginal}  |  Color: ${oldHex}`
+          : `Color: ${oldHex}`;
 
         const repl = document.createElement("div");
         repl.className = "row-text";
@@ -606,7 +703,7 @@
       });
     }
 
-    // Labels rename
+    // Rename SVG texts
     const labelPanel = document.createElement("div");
     labelPanel.style.cssText = `
       border: 1px solid rgba(0,0,0,.12);
@@ -654,7 +751,7 @@
       }
     }
 
-    // ✅ FIX #2: Real actionable toggles (buttons) just above downloads
+    // Toggles row
     const togglesRow = document.createElement("div");
     togglesRow.style.cssText = `
       margin-top: 12px;
@@ -693,7 +790,7 @@
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
-    // Downloads recolored
+    // Download buttons (recolored)
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -723,6 +820,7 @@
     dl.appendChild(btnPng);
   }
 
+  // ---------- Launcher ----------
   function addLaunchButtonOnceReady() {
     const svg = findFinalOutputSvg();
     if (!svg) return;
@@ -746,7 +844,7 @@
 
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    hint.textContent = "Tags del Excel + toggles para descargar con color o solo bordes/números.";
+    hint.textContent = "El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
     host.appendChild(hint);
   }
 
