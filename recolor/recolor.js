@@ -937,61 +937,93 @@
   }
 
   // ---------- LAUNCHER (SAFE + ROBUST) ----------
-  function addOrUpdateLauncher() {
-    const downloadsRow = findDownloadButtonsRow();
-    if (!downloadsRow) return;
+ function hasDownloadSvgCapability() {
+  const el = findDownloadSvgControl();
+  if (!el) return false;
+  const t = norm(el.textContent || el.value || "");
+  return t.includes("download svg");
+}
 
-    const host = ensureHostBelowDownloads();
-    if (!host) return;
+function hasSvgStringInGlobals() {
+  const candidates = [
+    window.svgString,
+    window.resultSvg,
+    window.finalSvg,
+    window.outputSvg,
+    window.svg,
+    window.SVG_STRING
+  ];
+  return candidates.some(v => typeof v === "string" && v.trim().startsWith("<svg"));
+}
 
-    let bar = document.getElementById("recolor-launch-bar");
-    let btn = document.getElementById("btn-recolor-launch");
-    let hint = document.getElementById("recolor-launch-hint");
+function addOrUpdateLauncher() {
+  const downloadsRow = findDownloadButtonsRow();
+  if (!downloadsRow) return;
 
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "recolor-launch-bar";
-      bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-      bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
-      host.appendChild(bar);
-    }
+  const host = ensureHostBelowDownloads();
+  if (!host) return;
 
-    if (!btn) {
-      btn = document.createElement("button");
-      btn.id = "btn-recolor-launch";
-      btn.type = "button";
-      btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
-      bar.appendChild(btn);
+  let bar = document.getElementById("recolor-launch-bar");
+  let btn = document.getElementById("btn-recolor-launch");
+  let hint = document.getElementById("recolor-launch-hint");
 
-      btn.addEventListener("click", async () => {
-        // IMPORTANT: resolve robust from DOM or captured DOWNLOAD SVG
-        const svg = await resolveOutputSvgRobust();
-        if (!svg) {
-          alert("Todavía no puedo acceder al SVG. Prueba apretar DOWNLOAD SVG una vez (solo para capturarlo) y luego Abrir Recolorear.");
-          return;
-        }
-        openEditor(svg);
-      });
-    }
-
-    if (!hint) {
-      hint = document.createElement("div");
-      hint.id = "recolor-launch-hint";
-      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-      host.appendChild(hint);
-    }
-
-    const domSvg = findDomSvgNearDownloads();
-    const hasCaptured = !!window.__LAST_OUTPUT_SVG_TEXT__;
-
-    if (domSvg || hasCaptured) {
-      btn.textContent = "Abrir Recolorear";
-      hint.textContent = "Listo. Si no hay <svg> en DOM, usamos el SVG capturado desde DOWNLOAD SVG.";
-    } else {
-      btn.textContent = "Abrir Recolorear (capturar desde DOWNLOAD SVG)";
-      hint.textContent = "Si no aparece el SVG, aprieta DOWNLOAD SVG una vez para capturarlo y luego abre el recolor.";
-    }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "recolor-launch-bar";
+    bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
+    host.appendChild(bar);
   }
+
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "btn-recolor-launch";
+    btn.type = "button";
+    btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+    bar.appendChild(btn);
+
+    btn.addEventListener("click", async () => {
+      // try globals first
+      if (!window.__LAST_OUTPUT_SVG_TEXT__ && hasSvgStringInGlobals()) {
+        const txt = (window.svgString || window.resultSvg || window.finalSvg || window.outputSvg || window.svg || window.SVG_STRING);
+        window.__LAST_OUTPUT_SVG_TEXT__ = txt;
+        __parsedSvgCacheEl = parseSvgTextToElement(txt);
+      }
+
+      const svg = await resolveOutputSvgRobust();
+      if (!svg) {
+        alert("No pude obtener el SVG. Si tu fork no expone DOWNLOAD SVG, hay que habilitarlo en el generador para poder recolorear.");
+        return;
+      }
+      openEditor(svg);
+    });
+  }
+
+  if (!hint) {
+    hint = document.createElement("div");
+    hint.id = "recolor-launch-hint";
+    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+    host.appendChild(hint);
+  }
+
+  const domSvg = findDomSvgNearDownloads();
+  const hasCaptured = !!window.__LAST_OUTPUT_SVG_TEXT__;
+  const hasDl = hasDownloadSvgCapability();
+  const hasGlobals = hasSvgStringInGlobals();
+
+  if (domSvg || hasCaptured || hasDl || hasGlobals) {
+    btn.textContent = "Abrir Recolorear";
+    hint.textContent =
+      hasDl
+        ? "Listo. Si el SVG no está en pantalla, usamos el SVG descargable."
+        : "Listo. Tomaremos el SVG desde variables internas del generador.";
+  } else {
+    btn.textContent = "Recolor (sin SVG disponible aún)";
+    hint.textContent =
+      "Estoy viendo output en pantalla, pero no hay SVG accesible. Necesitas habilitar 'DOWNLOAD SVG' en el generador (o exponer el SVG en window.*) para recolorear.";
+  }
+}
+
 
   function hookDownloadSvgForCapture() {
     const el = findDownloadSvgControl();
