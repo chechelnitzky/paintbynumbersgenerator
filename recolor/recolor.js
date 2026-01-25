@@ -1,14 +1,16 @@
-/* Recolor add-on (v7)
-   - Original swatches show ORIGINAL TAG (0/1/2/3...) centered inside the color
-     (read from top swatches OR SVG legend when available)
-   - Replacement swatches keep Excel tag badge (corner)
-   - Toggles:
-      * Colores ON/OFF => OFF downloads outlines + numbers only (no fills)
-      * Bordes ON/OFF
-   - Keeps all edits (colors/tags/text) because toggles only inject SVG <style>
+/* Recolor add-on (v8)
+   Launcher robusto (trivial / small / medium):
+   - El launcher se monta cuando aparecen los botones DOWNLOAD (ancla estable)
+   - El SVG se resuelve "en el click" (no queda pegado a un SVG viejo)
+   - Si el output no está listo aún, el botón queda pero avisa.
+   - Mantiene: recolor, tags originales centrados en swatch original, picker excel, toggles, downloads.
 */
 
 (function () {
+  // Guard para evitar doble carga (por hot reload / inyecciones)
+  if (window.__RECOLOR_ADDON_LOADED__) return;
+  window.__RECOLOR_ADDON_LOADED__ = true;
+
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
 
@@ -95,92 +97,123 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
-  // ---------- Find main output SVG ----------
- function findFinalOutputSvg() {
-  const downloadsRow = findDownloadButtonsRow();
-  if (!downloadsRow) return null;
-
-  // Buscamos el SVG "output" cerca del bloque de descargas
-  // 1) Primero en el mismo contenedor
-  const root = downloadsRow.parentElement || document;
-
-  // Heurística A: un svg dentro del mismo root que tenga tamaño visible
-  const candidates = Array.from(root.querySelectorAll("svg"));
-  let best = null;
-  let bestScore = 0;
-
-  for (const s of candidates) {
-    const box = s.getBoundingClientRect();
-    const score = box.width * box.height;
-    if (score > bestScore && box.width > 120 && box.height > 120) {
-      bestScore = score;
-      best = s;
-    }
-  }
-  if (best) return best;
-
-  // Heurística B: caminar desde downloads hacia arriba buscando svg en siblings
-  let el = downloadsRow;
-  for (let i = 0; i < 60 && el; i++) {
-    const prev = el.previousElementSibling;
-    if (prev) {
-      const s = prev.querySelector && prev.querySelector("svg");
-      if (s) return s;
-    }
-    el = prev || el.parentElement;
-  }
-
-  // Fallback final: el último svg visible del documento
-  const all = Array.from(document.querySelectorAll("svg"));
-  for (let i = all.length - 1; i >= 0; i--) {
-    const box = all[i].getBoundingClientRect();
-    if (box.width > 120 && box.height > 120) return all[i];
-  }
-
-  return null;
-}
-
-
   // ---------- Locate download row and mount host ----------
   function findDownloadButtonsRow() {
-    const btns = Array.from(document.querySelectorAll("button, a"));
+    // Robusto: algunos templates usan uppercase, otros buttons, otros a-links
+    const btns = Array.from(document.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
     const hits = btns.filter((b) => {
-      const t = norm(b.textContent);
-      return t.includes("download svg") || t.includes("download png") || t.includes("download palette");
+      const t = norm(b.textContent || b.value || "");
+      return /download\s*svg/i.test(t) || /download\s*png/i.test(t) || /download\s*palette/i.test(t);
     });
     if (!hits.length) return null;
 
+    // Busca contenedor que incluya al menos 2 de 3
     for (const b of hits) {
       const p = b.parentElement;
       if (!p) continue;
-      const txt = norm(p.textContent);
-      if (txt.includes("download svg") && (txt.includes("download png") || txt.includes("download palette"))) return p;
+      const txt = norm(p.textContent || "");
+      const hasSvg = txt.includes("download svg");
+      const hasPng = txt.includes("download png");
+      const hasPal = txt.includes("download palette");
+      if ((hasSvg && hasPng) || (hasSvg && hasPal) || (hasPng && hasPal)) return p;
     }
+
     return hits[0].parentElement || null;
   }
 
   function ensureHostBelowDownloads() {
+    // Si ya existe pero fue “desconectado” del DOM por rerender, lo recreamos
     let host = document.getElementById("recolor-host");
-    if (host) return host;
-
-    host = document.createElement("div");
-    host.id = "recolor-host";
-    host.style.cssText = `
-      margin-top: 14px;
-      padding: 14px;
-      border: 1px solid rgba(0,0,0,.12);
-      border-radius: 12px;
-      background: rgba(255,255,255,.96);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    `;
-
     const downloadsRow = findDownloadButtonsRow();
-    if (downloadsRow && downloadsRow.parentElement) {
-      downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
-    } else {
-      document.body.appendChild(host);
+
+    const needsRecreate = host && !document.body.contains(host);
+    if (needsRecreate) {
+      try { host.remove(); } catch(_) {}
+      host = null;
     }
+
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "recolor-host";
+      host.style.cssText = `
+        margin-top: 14px;
+        padding: 14px;
+        border: 1px solid rgba(0,0,0,.12);
+        border-radius: 12px;
+        background: rgba(255,255,255,.96);
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      `;
+    }
+
+    // Reubica siempre debajo del downloadsRow (si existe)
+    if (downloadsRow && downloadsRow.parentElement) {
+      if (downloadsRow.nextSibling !== host) {
+        downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
+      }
+    } else {
+      // fallback: al final
+      if (!document.body.contains(host)) document.body.appendChild(host);
+    }
+
     return host;
+  }
+
+  // ---------- Output SVG resolver (la clave del bug) ----------
+  function isVisibleSvg(svg) {
+    if (!svg || svg.tagName?.toLowerCase() !== "svg") return false;
+    const box = svg.getBoundingClientRect();
+    // small/medium a veces tienen el SVG dentro de un container scrolleable; sigue teniendo dimensiones
+    return box.width > 80 && box.height > 80;
+  }
+
+  function resolveOutputSvgNearDownloads() {
+    const downloadsRow = findDownloadButtonsRow();
+    if (!downloadsRow) return null;
+
+    // 1) Busca en el bloque cercano al downloadsRow
+    const root = downloadsRow.parentElement || document;
+
+    // A) Primero: el svg visible más grande dentro del root
+    const localSvgs = Array.from(root.querySelectorAll("svg")).filter(isVisibleSvg);
+    if (localSvgs.length) {
+      let best = localSvgs[0];
+      let bestScore = 0;
+      for (const s of localSvgs) {
+        const box = s.getBoundingClientRect();
+        const score = box.width * box.height;
+        if (score > bestScore) { bestScore = score; best = s; }
+      }
+      return best;
+    }
+
+    // B) Caminar siblings hacia arriba desde downloadsRow (muy típico: output está justo antes)
+    let el = downloadsRow;
+    for (let i = 0; i < 80 && el; i++) {
+      const prev = el.previousElementSibling;
+      if (prev) {
+        const s = prev.querySelector && prev.querySelector("svg");
+        if (isVisibleSvg(s)) return s;
+        const svgs = prev.querySelectorAll ? Array.from(prev.querySelectorAll("svg")).filter(isVisibleSvg) : [];
+        if (svgs.length) return svgs[0];
+      }
+      el = prev || el.parentElement;
+    }
+
+    // 2) Fallback global: busca un svg que esté “cerca” del downloadsRow en Y
+    const all = Array.from(document.querySelectorAll("svg")).filter(isVisibleSvg);
+    if (all.length) {
+      const dbox = downloadsRow.getBoundingClientRect();
+      let best = null;
+      let bestDist = Infinity;
+      for (const s of all) {
+        const box = s.getBoundingClientRect();
+        const dist = Math.abs((box.top + box.bottom)/2 - (dbox.top + dbox.bottom)/2);
+        if (dist < bestDist) { bestDist = dist; best = s; }
+      }
+      return best;
+    }
+
+    return null;
   }
 
   // ---------- Group fills + texts ----------
@@ -339,7 +372,6 @@
     return b;
   }
 
-  // ✅ centered ORIGINAL tag inside swatch
   function makeCenteredTag(tag, bgHex) {
     const d = document.createElement("div");
     d.textContent = String(tag);
@@ -447,7 +479,6 @@
 
   // ---------- ORIGINAL tag mapping ----------
   function buildOriginalTagByHexFromTopSwatches() {
-    // Reads the mini swatches at the top (0/1/2/3...) BUT excludes our recolor UI
     const map = {}; // hex -> tagOriginal
 
     const candidates = Array.from(document.querySelectorAll("button, div, span"))
@@ -457,11 +488,10 @@
         const t = (el.textContent || "").trim();
         if (!t) return false;
 
-        // We want short tags: numbers like 0,1,2,3 (supports alphanum too)
         if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
 
         const r = el.getBoundingClientRect();
-        if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
+        if (r.width < 12 || r.height < 12 || r.width > 120 || r.height > 120) return false;
 
         const bg = getComputedStyle(el).backgroundColor;
         if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
@@ -479,7 +509,6 @@
   }
 
   function buildOriginalTagByHexFromSvgLegend(svg) {
-    // Tries to read a legend inside the SVG: colored rect near a text tag
     const map = {};
     if (!svg) return map;
 
@@ -487,7 +516,7 @@
       .filter(r => {
         const w = parseFloat(r.getAttribute("width") || "0");
         const h = parseFloat(r.getAttribute("height") || "0");
-        return w > 6 && h > 6 && w <= 140 && h <= 140;
+        return w > 6 && h > 6 && w <= 160 && h <= 160;
       });
 
     for (const rect of rects) {
@@ -504,7 +533,7 @@
       const idx = kids.indexOf(rect);
       if (idx === -1) continue;
 
-      const near = kids.slice(idx + 1, idx + 6).find(n =>
+      const near = kids.slice(idx + 1, idx + 8).find(n =>
         n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
       );
 
@@ -537,18 +566,15 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    // Build original tag map (priority: SVG legend > top swatches)
     const topMap = buildOriginalTagByHexFromTopSwatches();
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
     const origTagByHex = { ...topMap, ...legendMap };
 
-    // Defaults
     let colorsOn = true;
     let bordersOn = true;
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
 
-    // Previews
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
 
@@ -582,11 +608,9 @@
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
-    // Fill groups
     const fillGroups = collectFillGroups(recolorSvg);
     const entries = Array.from(fillGroups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
-    // Controls layout
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
     host.appendChild(controls);
@@ -608,7 +632,6 @@
 
     let selectedOldHex = null;
 
-    // Grid picker for replacement colors
     const grid = renderGridPicker(({hex:newHex, tag:newTag}) => {
       if (!selectedOldHex) {
         alert("Primero selecciona un color original (panel izquierdo).");
@@ -630,7 +653,6 @@
         swNew.style.background = newHex;
         swNew.style.borderStyle = "solid";
 
-        // Replacement tag badge (Excel tag) stays corner
         const badgeHost = row.querySelector(".new-badge-host");
         if (badgeHost) {
           badgeHost.innerHTML = "";
@@ -642,7 +664,6 @@
     });
     right.appendChild(grid);
 
-    // Original colors list
     const list = document.createElement("div");
     list.style.cssText = "display:grid; gap:10px; max-height: 360px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
@@ -650,11 +671,10 @@
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No detecté fills en el SVG. Si el SVG usa CSS en vez de fill directo, dime y lo adapto.";
+      empty.textContent = "No detecté fills en el SVG (puede estar en CSS). Si te pasa con un caso real, lo adapto.";
       list.appendChild(empty);
     } else {
       entries.forEach(([oldHex]) => {
-        // ✅ THIS is your requested tag: ORIGINAL tag from drawing (0/1/2/3...)
         const tagOriginal = origTagByHex[oldHex] || "";
 
         const row = document.createElement("button");
@@ -676,7 +696,6 @@
         const swWrap = document.createElement("div");
         swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
 
-        // Original swatch: centered original tag INSIDE
         const swOld = makeSwatchBase(oldHex, false);
         if (tagOriginal) swOld.appendChild(makeCenteredTag(tagOriginal, oldHex));
 
@@ -684,7 +703,6 @@
         arrow.textContent = "→";
         arrow.style.cssText = "font-weight:900; color: rgba(0,0,0,.55);";
 
-        // Replacement swatch: keeps Excel tag as corner badge
         const swNew = makeSwatchBase("transparent", true);
         swNew.className = "sw-new";
 
@@ -731,7 +749,6 @@
       });
     }
 
-    // Rename SVG texts
     const labelPanel = document.createElement("div");
     labelPanel.style.cssText = `
       border: 1px solid rgba(0,0,0,.12);
@@ -749,7 +766,7 @@
     if (!textEntries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No encontré <text> en el SVG. Si el generador tiene 'labels', actívalo y vuelve a generar.";
+      empty.textContent = "No encontré <text> en el SVG.";
       labelPanel.appendChild(empty);
     } else {
       const labelList = document.createElement("div");
@@ -779,7 +796,6 @@
       }
     }
 
-    // Toggles row
     const togglesRow = document.createElement("div");
     togglesRow.style.cssText = `
       margin-top: 12px;
@@ -818,7 +834,6 @@
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
-    // Download buttons (recolored)
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -840,7 +855,7 @@
       try {
         await downloadSvgAsPng(recolorSvg, "paintbynumber_recolored.png");
       } catch (e) {
-        alert("No pude exportar PNG. Dime qué navegador usas y lo ajusto.");
+        alert("No pude exportar PNG. Prueba Chrome/Edge o dime qué navegador usas.");
       }
     });
 
@@ -848,65 +863,75 @@
     dl.appendChild(btnPng);
   }
 
-  // ---------- Launcher ----------
-function addLaunchButtonOnceReady() {
-  const svg = findFinalOutputSvg();
-  if (!svg) return;
+  // ---------- Launcher (v8) ----------
+  function mountOrUpdateLauncher() {
+    const downloadsRow = findDownloadButtonsRow();
+    if (!downloadsRow) return; // aún no hay output section
 
-  const host = ensureHostBelowDownloads();
+    const host = ensureHostBelowDownloads();
+    if (!host) return;
 
-  // Si el botón ya existe, solo actualiza el SVG al más reciente
-  const existing = document.getElementById("btn-recolor-launch");
-  if (existing) {
-    existing._recolorSvgRef = svg;
-    return;
+    let bar = document.getElementById("recolor-launch-bar");
+    let btn = document.getElementById("btn-recolor-launch");
+    let hint = document.getElementById("recolor-launch-hint");
+
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "recolor-launch-bar";
+      bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+      bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
+      host.appendChild(bar);
+    }
+
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = "btn-recolor-launch";
+      btn.type = "button";
+      btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      btn.addEventListener("click", () => {
+        // Resuelve EL SVG AL MOMENTO DEL CLICK
+        const svg = resolveOutputSvgNearDownloads();
+        if (!svg) {
+          alert("Aún no detecto el SVG output. Genera y espera a que aparezca el preview, luego prueba de nuevo.");
+          return;
+        }
+        openEditor(svg);
+      });
+      bar.appendChild(btn);
+    }
+
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.id = "recolor-launch-hint";
+      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+      host.appendChild(hint);
+    }
+
+    // Estado: si hay SVG ya disponible, habilita; si no, igual muestra botón pero con texto "no listo"
+    const svgNow = resolveOutputSvgNearDownloads();
+    if (svgNow) {
+      btn.textContent = "Abrir Recolorear";
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      hint.textContent = "Listo. El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
+    } else {
+      btn.textContent = "Recolor (esperando output…)";
+      btn.disabled = false; // lo dejamos clickeable para reintentar
+      btn.style.opacity = "0.95";
+      hint.textContent = "Genera el output (Process Image) y espera a ver el preview. El botón se activa cuando detecte el SVG.";
+    }
   }
 
-  const bar = document.createElement("div");
-  bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-  bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
-
-  const btn = document.createElement("button");
-  btn.id = "btn-recolor-launch";
-  btn.type = "button";
-  btn.textContent = "Abrir Recolorear";
-  btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
-
-  // guarda la referencia al svg actual
-  btn._recolorSvgRef = svg;
-  btn.addEventListener("click", () => openEditor(btn._recolorSvgRef));
-
-  bar.appendChild(btn);
-  host.appendChild(bar);
-
-  const hint = document.createElement("div");
-  hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-  hint.textContent = "El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
-  host.appendChild(hint);
-}
-
-
-    const bar = document.createElement("div");
-    bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-    bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
-
-    const btn = document.createElement("button");
-    btn.id = "btn-recolor-launch";
-    btn.type = "button";
-    btn.textContent = "Abrir Recolorear";
-    btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
-    btn.addEventListener("click", () => openEditor(svg));
-
-    bar.appendChild(btn);
-    host.appendChild(bar);
-
-    const hint = document.createElement("div");
-    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    hint.textContent = "El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel.";
-    host.appendChild(hint);
-  }
-
-  const observer = new MutationObserver(() => addLaunchButtonOnceReady());
+  // Observa cambios del DOM (cuando regeneras output, cambia el layout)
+  const observer = new MutationObserver(() => {
+    try { mountOrUpdateLauncher(); } catch (_) {}
+  });
   observer.observe(document.documentElement, { subtree: true, childList: true });
-  window.addEventListener("load", () => setTimeout(addLaunchButtonOnceReady, 300));
+
+  // Primer intento en load + reintentos
+  window.addEventListener("load", () => {
+    setTimeout(() => { try { mountOrUpdateLauncher(); } catch (_) {} }, 300);
+    setTimeout(() => { try { mountOrUpdateLauncher(); } catch (_) {} }, 1200);
+    setTimeout(() => { try { mountOrUpdateLauncher(); } catch (_) {} }, 2500);
+  });
 })();
