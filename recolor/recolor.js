@@ -1,11 +1,7 @@
-/* Recolor add-on (v7.1 UI tweaks)
-   1) Original colors list sorted by ORIGINAL TAG ascending (0..n)
-   2) "Renombrar labels" panel moved to the right (3rd column) next to the other two panels
-   3) Picker tiles show an X overlay when that hex is already used as replacement (not blocked)
-
-   Keeps prior behavior:
-   - Original swatches show ORIGINAL TAG centered inside
-   - Replacement swatches keep Excel tag badge (corner)
+/* Recolor add-on (v7.2 UI)
+   - Fix 1 OK: Original colors sorted by ORIGINAL TAG ascending (0..n)
+   - Fix 2 UPDATED: "Renombrar labels" input is embedded INSIDE each original color row (left panel)
+   - Fix 3 OK: Picker tiles show an X overlay when that hex is already used as replacement (not blocked)
    - Toggles inject SVG <style> only (no loss of edits)
 */
 
@@ -98,8 +94,6 @@
 
   // ---------- Find main output SVG ----------
   function findFinalOutputSvg() {
-    // keep it simple + robust:
-    // choose the largest visible SVG on screen.
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
 
@@ -249,7 +243,7 @@
     }, "image/png", 1.0);
   }
 
-  // ---------- SVG style injection (toggles without losing edits) ----------
+  // ---------- SVG style injection ----------
   function ensureSvgStyle(svg, id) {
     let style = svg.querySelector(`#${id}`);
     if (style) return style;
@@ -273,7 +267,7 @@
       `;
   }
 
-  // IMPORTANT: keep text color as-is (do not force black)
+  // Keep text colors as-is
   function setColorFills(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-fills-style");
     style.textContent = on
@@ -396,7 +390,6 @@
     return o;
   }
 
-  // We need to update X overlays when replacements change
   function renderGridPicker(getUsedSet, onPick) {
     const grid = document.createElement("div");
     grid.style.cssText = `
@@ -416,10 +409,9 @@
     const tilesByHex = new Map();
 
     function paintUsed() {
-      const used = getUsedSet(); // Set of lowercased hex
+      const used = getUsedSet();
       for (const [hex, tile] of tilesByHex.entries()) {
         const has = used.has(hex);
-        tile.dataset.used = has ? "1" : "0";
         const marker = tile.querySelector(".used-x");
         if (has && !marker) {
           const x = makeUsedXOverlay();
@@ -454,9 +446,7 @@
       grid.appendChild(tile);
     });
 
-    // Expose a method to refresh X markers
     grid.__refreshUsed = paintUsed;
-    // initial
     setTimeout(paintUsed, 0);
 
     return grid;
@@ -464,7 +454,7 @@
 
   // ---------- ORIGINAL tag mapping ----------
   function buildOriginalTagByHexFromTopSwatches() {
-    const map = {}; // hex -> tagOriginal
+    const map = {};
 
     const candidates = Array.from(document.querySelectorAll("button, div, span"))
       .filter(el => {
@@ -472,7 +462,6 @@
         if (el.closest && el.closest("#recolor-host")) return false;
         const t = (el.textContent || "").trim();
         if (!t) return false;
-
         if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
 
         const r = el.getBoundingClientRect();
@@ -532,7 +521,6 @@
   }
 
   function parseSortableTag(tag) {
-    // returns { kind: "num"|"str"|"none", val: number|string }
     const t = (tag || "").toString().trim();
     if (!t) return { kind: "none", val: Infinity };
     if (/^\d+$/.test(t)) return { kind: "num", val: Number(t) };
@@ -559,12 +547,10 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    // Build original tag map (priority: SVG legend > top swatches)
     const topMap = buildOriginalTagByHexFromTopSwatches();
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
     const origTagByHex = { ...topMap, ...legendMap };
 
-    // Defaults
     let colorsOn = true;
     let bordersOn = true;
     setColorFills(recolorSvg, colorsOn);
@@ -604,17 +590,17 @@
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
-    // Fill groups
+    // Data
     const fillGroups = collectFillGroups(recolorSvg);
+    const textGroups = collectTextGroups(recolorSvg); // label rename groups
 
-    // Build entries with tag for sorting
     let entries = Array.from(fillGroups.entries()).map(([hex, nodes]) => {
       const tagOriginal = origTagByHex[hex] || "";
       const sortable = parseSortableTag(tagOriginal);
       return { hex, nodes, tagOriginal, sortable };
     });
 
-    // (1) sort by tagOriginal asc (numeric first, then strings), fallback by hex
+    // Sort by tag asc (0..n)
     entries.sort((a, b) => {
       const ak = a.sortable.kind, bk = b.sortable.kind;
       if (ak === "num" && bk === "num") return a.sortable.val - b.sortable.val;
@@ -630,13 +616,11 @@
       return a.hex.localeCompare(b.hex);
     });
 
-    // Controls layout:
-    // Row 1: two columns (original list + picker)
-    // Row 2: third panel to the right spanning height like your drawing
+    // Layout: 2 columns only now (Left: originals+rename, Right: picker)
     const controlsWrap = document.createElement("div");
     controlsWrap.style.cssText = `
       display:grid;
-      grid-template-columns: 1.2fr 1fr 1.1fr;
+      grid-template-columns: 1.4fr 1fr;
       gap: 12px;
       margin-top: 12px;
       align-items:start;
@@ -645,7 +629,7 @@
 
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG original + hex → reemplazo)</div>`;
+    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + hex → reemplazo + renombrar)</div>`;
     controlsWrap.appendChild(left);
 
     const right = document.createElement("div");
@@ -653,28 +637,14 @@
     right.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Picker (grilla con tags del Excel)</div>`;
     controlsWrap.appendChild(right);
 
-    // (2) Labels panel as 3rd column
-    const labelPanel = document.createElement("div");
-    labelPanel.style.cssText = `
-      border: 1px solid rgba(0,0,0,.12);
-      border-radius: 12px;
-      padding: 10px;
-      background: white;
-    `;
-    labelPanel.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Renombrar labels (texto dentro del SVG)</div>`;
-    controlsWrap.appendChild(labelPanel);
-
     const info = document.createElement("div");
     info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
     info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
     right.appendChild(info);
 
     let selectedOldHex = null;
-
-    // Track chosen replacements: oldHex -> {hex, tag}
     const chosenReplacementByOldHex = new Map();
 
-    // helper: compute set of used replacement hexes
     const getUsedReplacementHexSet = () => {
       const s = new Set();
       for (const v of chosenReplacementByOldHex.values()) {
@@ -683,14 +653,12 @@
       return s;
     };
 
-    // (3) Grid picker with X overlay for used colors
     const grid = renderGridPicker(getUsedReplacementHexSet, ({hex:newHex, tag:newTag}) => {
       if (!selectedOldHex) {
         alert("Primero selecciona un color original (panel izquierdo).");
         return;
       }
 
-      // apply fill change
       const nodes = fillGroups.get(selectedOldHex) || [];
       nodes.forEach((el) => {
         el.setAttribute("fill", newHex);
@@ -699,10 +667,8 @@
         }
       });
 
-      // record chosen replacement
       chosenReplacementByOldHex.set(selectedOldHex, { hex: newHex, tag: newTag || "" });
 
-      // update row UI
       const row = left.querySelector(`[data-oldhex="${selectedOldHex}"]`);
       if (row) {
         const swNew = row.querySelector(".sw-new");
@@ -719,20 +685,26 @@
         txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
       }
 
-      // refresh used-X markers
       if (grid && typeof grid.__refreshUsed === "function") grid.__refreshUsed();
     });
     right.appendChild(grid);
 
-    // Original colors list
+    // Left list
     const list = document.createElement("div");
-    list.style.cssText = "display:grid; gap:10px; max-height: 520px; overflow:auto; padding-right: 6px;";
+    list.style.cssText = "display:grid; gap:10px; max-height: 560px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
+
+    // Helper: get a stable "label key" based on tagOriginal
+    function findTextGroupForTag(tagOriginal) {
+      const key = (tagOriginal || "").toString().trim();
+      if (!key) return null;
+      return textGroups.get(key) || null;
+    }
 
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No detecté fills en el SVG. Si el SVG usa CSS en vez de fill directo, dime y lo adapto.";
+      empty.textContent = "No detecté fills en el SVG.";
       list.appendChild(empty);
     } else {
       entries.forEach((entry) => {
@@ -742,10 +714,12 @@
         const row = document.createElement("button");
         row.type = "button";
         row.setAttribute("data-oldhex", oldHex);
+
+        // IMPORTANT: row is a button for selection, but we will stopPropagation on input so typing works
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 150px 1fr;
+          grid-template-columns: 150px 1fr 220px;
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -755,6 +729,7 @@
           cursor: pointer;
         `;
 
+        // swatches
         const swWrap = document.createElement("div");
         swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
 
@@ -777,6 +752,7 @@
         swWrap.appendChild(arrow);
         swWrap.appendChild(swNew);
 
+        // meta text
         const stack = document.createElement("div");
         stack.style.cssText = "display:grid; gap:4px;";
 
@@ -794,8 +770,44 @@
         stack.appendChild(meta);
         stack.appendChild(repl);
 
+        // rename input (embedded)
+        const renameWrap = document.createElement("div");
+        renameWrap.style.cssText = "display:grid; gap:6px;";
+
+        const renameLabel = document.createElement("div");
+        renameLabel.style.cssText = "font-size:12px; font-weight:800; color: rgba(0,0,0,.70)";
+        renameLabel.textContent = "Renombrar";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = tagOriginal || "";
+        input.placeholder = tagOriginal ? tagOriginal : "—";
+        input.style.cssText = "padding: 10px; border-radius: 10px; border:1px solid rgba(0,0,0,.22); width:100%;";
+
+        // Link input to SVG text nodes matching tagOriginal
+        const nodes = findTextGroupForTag(tagOriginal);
+        if (!nodes) {
+          // if there's no matching text group, still allow typing but it won't change anything
+          input.title = "No encontré <text> con este valor en el SVG.";
+        }
+
+        input.addEventListener("click", (e) => {
+          e.stopPropagation(); // so clicking input doesn't change selection unexpectedly
+        });
+        input.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+        });
+        input.addEventListener("input", () => {
+          const v = input.value;
+          if (nodes && nodes.length) nodes.forEach((t) => (t.textContent = v));
+        });
+
+        renameWrap.appendChild(renameLabel);
+        renameWrap.appendChild(input);
+
         row.appendChild(swWrap);
         row.appendChild(stack);
+        row.appendChild(renameWrap);
 
         row.addEventListener("click", () => {
           selectedOldHex = oldHex;
@@ -809,43 +821,6 @@
 
         list.appendChild(row);
       });
-    }
-
-    // Labels rename panel contents (now right column)
-    const textGroups = collectTextGroups(recolorSvg);
-    const textEntries = Array.from(textGroups.entries()).sort((a, b) => a[0].localeCompare(b[0], "es"));
-
-    if (!textEntries.length) {
-      const empty = document.createElement("div");
-      empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No encontré <text> en el SVG. Si el generador tiene 'labels', actívalo y vuelve a generar.";
-      labelPanel.appendChild(empty);
-    } else {
-      const labelList = document.createElement("div");
-      labelList.style.cssText = "display:grid; gap:10px; max-height: 580px; overflow:auto; padding-right:6px;";
-      labelPanel.appendChild(labelList);
-
-      for (const [originalText, nodes] of textEntries) {
-        const row = document.createElement("div");
-        row.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items:center;";
-
-        const oldBox = document.createElement("div");
-        oldBox.style.cssText = "font-size: 13px; padding: 8px; border-radius: 10px; background: rgba(0,0,0,.04);";
-        oldBox.textContent = originalText;
-
-        const input = document.createElement("input");
-        input.type = "text";
-        input.value = originalText;
-        input.style.cssText = "padding: 8px; border-radius: 10px; border:1px solid rgba(0,0,0,.22);";
-        input.addEventListener("input", () => {
-          const v = input.value;
-          nodes.forEach((t) => (t.textContent = v));
-        });
-
-        row.appendChild(oldBox);
-        row.appendChild(input);
-        labelList.appendChild(row);
-      }
     }
 
     // Toggles row
@@ -887,7 +862,7 @@
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
-    // Download buttons (recolored)
+    // Download buttons
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -916,7 +891,6 @@
     dl.appendChild(btnSvg);
     dl.appendChild(btnPng);
 
-    // Ensure picker marks are correct if user had prior state
     if (grid && typeof grid.__refreshUsed === "function") grid.__refreshUsed();
   }
 
@@ -944,7 +918,7 @@
 
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    hint.textContent = "El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel. En el picker: ✕ = color ya usado (igual se puede seleccionar).";
+    hint.textContent = "Izquierda: tag original + reemplazo + renombrar. En el picker: ✕ = color ya usado (igual se puede seleccionar).";
     host.appendChild(hint);
   }
 
