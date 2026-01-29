@@ -1,17 +1,24 @@
-/* Recolor add-on (v9.1 - ALL FIXES + EXPORT OPACITY + BUTTON FEEDBACK)
+/* Recolor add-on (v10.0 - SUGGESTION + PERSISTENCE + ALL PREVIOUS FIXES)
    ✅ Hard reload safe: FAB + modal overlay (no early DOM injection)
    ✅ ORIGINAL tag detection restored (top swatches + svg legend + proximity) + sort asc
    ✅ Rename works on real SVG text nodes
    ✅ Auto-rename on pick: rename input becomes picker tag (still editable)
    ✅ Picker shows X when a color is already used (indicator only)
    ✅ Colores ON/OFF, Bordes ON/OFF
-   ✅ Color textos toggle:
-        - ON  => text fill = replacement hex (by current text tag), else black
-        - OFF => text fill = black
-      Opacity slider ALWAYS applies (ON or OFF, color or black)
-   ✅ EXPORT FIX: text opacity is “baked” (fill + fill-opacity + opacity inline) before SVG/PNG export
+   ✅ Color textos toggle + Opacity slider ALWAYS applies (ON or OFF, color or black)
+   ✅ EXPORT FIX: text opacity is “baked” before SVG/PNG export
    ✅ PNG download fixed + HQ export (scale 10x default) + robust download
-   ✅ Download buttons: press feedback + loading spinner while preparing (PNG) + brief spinner on SVG
+   ✅ Buttons: press feedback + loading spinner while exporting
+
+   🆕 SUGGESTION (closest color):
+      - Algorithm: convert sRGB -> Lab and pick minimal ΔE (CIE76)
+      - Adds 4th box per row: suggested swatch (hex + tag)
+      - Click suggestion to auto-apply replacement + auto-rename (still editable)
+
+   🆕 MEMORY (persist between open/close):
+      - Saves selections (repl hex + repl tag + rename) + toggles + opacity
+      - Restores when you close modal and reopen
+      - Auto-resets ONLY when a NEW output SVG is generated (signature changes)
 */
 
 (function () {
@@ -22,6 +29,39 @@
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
   const isTagLike = (t) => /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim());
+
+  // ---------- Memory ----------
+  const STORAGE_KEY = "recolor_state_v10";
+  let saveTimer = null;
+
+  function safeJsonParse(s) {
+    try { return JSON.parse(s); } catch { return null; }
+  }
+
+  function hashDjb2(str) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
+    return (h >>> 0).toString(16);
+  }
+
+  function svgSignature(svgEl) {
+    try {
+      const s = new XMLSerializer().serializeToString(svgEl);
+      // Small normalization to reduce noise
+      const compact = s.replace(/\s+/g, " ").slice(0, 40000);
+      return hashDjb2(`${compact.length}|${compact}`);
+    } catch {
+      return String(Date.now());
+    }
+  }
+
+  function loadStored() {
+    return safeJsonParse(localStorage.getItem(STORAGE_KEY)) || null;
+  }
+
+  function writeStored(obj) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); } catch (_) {}
+  }
 
   // ---------- Global UI CSS (spinner + button feedback) ----------
   function ensureUiStyle() {
@@ -46,6 +86,11 @@
         animation: recolorSpin .7s linear infinite;
         display: inline-block;
       }
+      .recolor-suggest {
+        transition: transform 80ms ease, box-shadow 120ms ease;
+      }
+      .recolor-suggest:hover { box-shadow: 0 10px 18px rgba(0,0,0,.12); }
+      .recolor-suggest:active { transform: translateY(1px) scale(.99); }
     `;
     document.head.appendChild(st);
   }
@@ -129,6 +174,94 @@
     } catch (_) {}
 
     return null;
+  }
+
+  // ---------- sRGB -> Lab (for suggestion) ----------
+  function hexToRgb01(hex) {
+    const h = (hex || "").replace("#", "");
+    if (h.length !== 6) return null;
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    return { r, g, b };
+  }
+
+  function srgbToLinear(u) {
+    return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4);
+  }
+
+  function rgbToXyz({ r, g, b }) {
+    const R = srgbToLinear(r);
+    const G = srgbToLinear(g);
+    const B = srgbToLinear(b);
+    // D65
+    const x = R * 0.4124564 + G * 0.3575761 + B * 0.1804375;
+    const y = R * 0.2126729 + G * 0.7151522 + B * 0.0721750;
+    const z = R * 0.0193339 + G * 0.1191920 + B * 0.9503041;
+    return { x, y, z };
+  }
+
+  function fLab(t) {
+    return t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16 / 116);
+  }
+
+  function xyzToLab({ x, y, z }) {
+    // Reference white D65
+    const Xn = 0.95047;
+    const Yn = 1.00000;
+    const Zn = 1.08883;
+
+    const fx = fLab(x / Xn);
+    const fy = fLab(y / Yn);
+    const fz = fLab(z / Zn);
+
+    const L = 116 * fy - 16;
+    const a = 500 * (fx - fy);
+    const b = 200 * (fy - fz);
+    return { L, a, b };
+  }
+
+  function hexToLab(hex) {
+    const rgb = hexToRgb01(hex);
+    if (!rgb) return null;
+    return xyzToLab(rgbToXyz(rgb));
+  }
+
+  function deltaE76(l1, l2) {
+    const dL = l1.L - l2.L;
+    const da = l1.a - l2.a;
+    const db = l1.b - l2.b;
+    return Math.sqrt(dL * dL + da * da + db * db);
+  }
+
+  const PALETTE_LAB = (function buildPaletteLab() {
+    const items = PALETTE_ITEMS.length
+      ? PALETTE_ITEMS
+      : PALETTE.map((hex) => ({ tag: "", hex }));
+
+    return items
+      .map((it) => {
+        const hex = norm(it.hex);
+        const lab = isHex6(hex) ? hexToLab(hex) : null;
+        return lab ? { tag: (it.tag || "").toString().trim(), hex, lab } : null;
+      })
+      .filter(Boolean);
+  })();
+
+  function suggestClosestPickerColor(oldHex) {
+    const lab0 = hexToLab(oldHex);
+    if (!lab0 || !PALETTE_LAB.length) return { hex: "", tag: "" };
+
+    let best = null;
+    let bestD = Infinity;
+    for (const it of PALETTE_LAB) {
+      const d = deltaE76(lab0, it.lab);
+      if (d < bestD) {
+        bestD = d;
+        best = it;
+      }
+    }
+    return best ? { hex: best.hex, tag: best.tag } : { hex: "", tag: "" };
   }
 
   // ---------- SVG sizing ----------
@@ -310,7 +443,6 @@
         return;
       }
 
-      // fallback if toBlob fails
       const dataUrl = canvas.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = dataUrl;
@@ -701,7 +833,7 @@
     close.type = "button";
     close.textContent = "Cerrar";
     close.style.cssText =
-      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
     enhanceButton(close);
     close.addEventListener("click", () => overlay.remove());
 
@@ -747,13 +879,22 @@
     const host = openModal();
     host.innerHTML = "";
 
+    const sig = svgSignature(originalSvg);
+    const stored = loadStored();
+    const sameDoc = stored && stored.svgSig === sig;
+
+    // If new output -> reset stored state
+    if (!sameDoc) {
+      writeStored({ svgSig: sig, mappings: {}, ui: {} });
+    }
+
     const header = document.createElement("div");
     header.style.cssText =
       "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
     header.innerHTML = `
       <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
       <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        Selecciona color original → elige reemplazo → (renombrar) → toggles → descarga
+        Selecciona color original → elige reemplazo / sugerencia → (renombrar) → toggles → descarga
       </div>
     `;
     host.appendChild(header);
@@ -821,11 +962,21 @@
       return a.oldHex.localeCompare(b.oldHex);
     });
 
-    // Toggles state
+    // ---- State ----
     let colorsOn = true;
     let bordersOn = true;
     let textColorModeOn = false; // OFF => black
     let textOpacity = 0.7;       // ALWAYS applied (0..1)
+    let selectedOldHex = null;
+
+    // Restore UI state if same SVG
+    const storedNow = loadStored();
+    const savedUi = (storedNow && storedNow.svgSig === sig && storedNow.ui) ? storedNow.ui : {};
+    if (typeof savedUi.colorsOn === "boolean") colorsOn = savedUi.colorsOn;
+    if (typeof savedUi.bordersOn === "boolean") bordersOn = savedUi.bordersOn;
+    if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
+    if (typeof savedUi.textOpacity === "number") textOpacity = Math.max(0, Math.min(1, savedUi.textOpacity));
+    if (typeof savedUi.selectedOldHex === "string") selectedOldHex = savedUi.selectedOldHex;
 
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
@@ -839,7 +990,7 @@
     const left = document.createElement("div");
     left.style.cssText =
       "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar)</div>`;
+    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar + sugerencia)</div>`;
     controls.appendChild(left);
 
     const right = document.createElement("div");
@@ -850,10 +1001,8 @@
 
     const info = document.createElement("div");
     info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
-    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
+    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla (o usa la sugerencia).";
     right.appendChild(info);
-
-    let selectedOldHex = null;
 
     // Row state maps
     const rowByOldHex = new Map();
@@ -885,8 +1034,6 @@
       return s;
     }
 
-    // ✅ Slider must apply always; OFF => black, ON => replacement hex (else black)
-    // ✅ Export stability: set fill + fill-opacity + opacity AND bake inline style
     function applyTextColors() {
       const map = buildTagToReplacementHexMap();
       const texts = Array.from(recolorSvg.querySelectorAll("text"));
@@ -899,16 +1046,46 @@
         const key = norm(raw);
         const hex = textColorModeOn ? (map.get(key) || "#000000") : "#000000";
 
-        // attrs
         t.setAttribute("fill", hex);
         t.setAttribute("fill-opacity", op);
         t.setAttribute("opacity", op);
 
-        // inline bake (wins over generator rules in export rasterizers)
         const prev = t.getAttribute("style") || "";
         const cleaned = stripStyleProps(prev, ["fill", "fill-opacity", "opacity"]);
         const prefix = cleaned ? (cleaned.trim().endsWith(";") ? cleaned : cleaned + ";") : "";
         t.setAttribute("style", `${prefix}fill:${hex};fill-opacity:${op};opacity:${op};`);
+      });
+    }
+
+    function queueSaveState(buildStateFn) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        const current = loadStored() || { svgSig: sig, mappings: {}, ui: {} };
+        if (current.svgSig !== sig) return; // another output already stored
+        const next = buildStateFn(current);
+        writeStored(next);
+      }, 80);
+    }
+
+    function saveAllState() {
+      queueSaveState((cur) => {
+        const mappings = {};
+        for (const [oldHex, row] of rowByOldHex.entries()) {
+          const replHex = norm(row.getAttribute("data-replhex") || "");
+          const replTag = (row.getAttribute("data-repltag") || "").toString();
+          const inp = renameInputByOldHex.get(oldHex);
+          const rename = inp ? (inp.value || "").toString() : "";
+          if (replHex || rename || replTag) mappings[oldHex] = { replHex, replTag, rename };
+        }
+        cur.mappings = mappings;
+        cur.ui = {
+          colorsOn,
+          bordersOn,
+          textColorModeOn,
+          textOpacity,
+          selectedOldHex: selectedOldHex || ""
+        };
+        return cur;
       });
     }
 
@@ -921,57 +1098,69 @@
       inp.value = (newLabel || "").toString();
       nodes.forEach((t) => (t.textContent = inp.value));
       applyTextColors();
+      saveAllState();
+    }
+
+    function applyReplacementToOldHex(oldHex, newHex, newTag, { autoRename = true } = {}) {
+      oldHex = norm(oldHex);
+      newHex = norm(newHex);
+      newTag = (newTag || "").toString().trim();
+
+      if (!isHex6(newHex)) return;
+
+      const row = rowByOldHex.get(oldHex);
+      if (!row) return;
+
+      // update used set: remove previous
+      const prev = row.getAttribute("data-replhex") || "";
+      if (prev) usedReplacementHex.delete(norm(prev));
+      usedReplacementHex.add(newHex);
+
+      // apply to SVG fills
+      const nodes = fillGroups.get(oldHex) || [];
+      nodes.forEach((el) => {
+        el.setAttribute("fill", newHex);
+        if (el.hasAttribute("style")) {
+          el.setAttribute("style", el.getAttribute("style").replace(/fill:\s*[^;]+;?/gi, ""));
+        }
+      });
+
+      // row attrs
+      row.setAttribute("data-replhex", newHex);
+      row.setAttribute("data-repltag", newTag);
+
+      // row UI
+      const swNew = row.querySelector(".sw-new");
+      const txt = row.querySelector(".row-text");
+      if (swNew) {
+        swNew.style.background = newHex;
+        swNew.style.borderStyle = "solid";
+      }
+
+      const badgeHost = row.querySelector(".new-badge-host");
+      if (badgeHost) {
+        badgeHost.innerHTML = "";
+        if (newTag) badgeHost.appendChild(makeBadgeCorner(newTag));
+      }
+
+      if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
+
+      // auto-rename to picker tag (still editable)
+      if (autoRename && newTag) setRenameForOldHex(oldHex, newTag);
+      else {
+        applyTextColors();
+        saveAllState();
+      }
     }
 
     const picker = renderGridPicker({
       isUsed: (hex) => usedReplacementHex.has(norm(hex)),
-      onPick: ({ hex: newHex, tag: newTag }) => {
+      onPick: ({ hex, tag }) => {
         if (!selectedOldHex) {
           alert("Primero selecciona un color original (panel izquierdo).");
           return;
         }
-
-        newHex = norm(newHex);
-        newTag = (newTag || "").toString().trim();
-
-        const row = rowByOldHex.get(norm(selectedOldHex));
-        if (row) {
-          const prev = row.getAttribute("data-replhex") || "";
-          if (prev) usedReplacementHex.delete(norm(prev));
-        }
-        usedReplacementHex.add(newHex);
-
-        const nodes = fillGroups.get(norm(selectedOldHex)) || [];
-        nodes.forEach((el) => {
-          el.setAttribute("fill", newHex);
-          if (el.hasAttribute("style")) {
-            el.setAttribute("style", el.getAttribute("style").replace(/fill:\s*[^;]+;?/gi, ""));
-          }
-        });
-
-        if (row) {
-          row.setAttribute("data-replhex", newHex);
-
-          const swNew = row.querySelector(".sw-new");
-          const txt = row.querySelector(".row-text");
-          if (swNew) {
-            swNew.style.background = newHex;
-            swNew.style.borderStyle = "solid";
-          }
-
-          const badgeHost = row.querySelector(".new-badge-host");
-          if (badgeHost) {
-            badgeHost.innerHTML = "";
-            if (newTag) badgeHost.appendChild(makeBadgeCorner(newTag));
-          }
-
-          if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
-
-          // ✅ auto-rename becomes picker tag
-          if (newTag) setRenameForOldHex(selectedOldHex, newTag);
-          else applyTextColors();
-        }
-
+        applyReplacementToOldHex(selectedOldHex, hex, tag, { autoRename: true });
         picker.refreshUsedX();
       },
     });
@@ -994,14 +1183,20 @@
             ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
             : [];
 
+        // suggestion for this oldHex
+        const suggestion = suggestClosestPickerColor(oldHex);
+        const sugHex = norm(suggestion.hex || "");
+        const sugTag = (suggestion.tag || "").toString().trim();
+
         const row = document.createElement("button");
         row.type = "button";
         row.setAttribute("data-oldhex", oldHex);
         row.setAttribute("data-replhex", "");
+        row.setAttribute("data-repltag", "");
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 72px 72px 72px 1fr;
+          grid-template-columns: 72px 72px 72px 72px 1fr; /* +1 suggested box */
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -1069,6 +1264,38 @@
         `;
         boxRename.appendChild(input);
 
+        // Suggested swatch box (click to apply)
+        const boxSug = document.createElement("button");
+        boxSug.type = "button";
+        boxSug.className = "recolor-suggest";
+        boxSug.title = sugTag ? `Sugerido: ${sugTag} — ${sugHex}` : (sugHex ? `Sugerido: ${sugHex}` : "Sin sugerencia");
+        boxSug.style.cssText = `
+          width:72px; height:44px;
+          border-radius:12px;
+          border:1px solid rgba(0,0,0,.18);
+          background:${isHex6(sugHex) ? sugHex : "rgba(0,0,0,.03)"};
+          position:relative;
+          overflow:hidden;
+          cursor:${isHex6(sugHex) ? "pointer" : "not-allowed"};
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          padding:0;
+        `;
+
+        if (sugTag) boxSug.appendChild(makeBadgeCorner(sugTag));
+        else if (sugHex) boxSug.appendChild(makeBadgeCorner("≈"));
+
+        boxSug.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!isHex6(sugHex)) return;
+          // select this row and apply suggestion
+          selectedOldHex = oldHex;
+          applyReplacementToOldHex(oldHex, sugHex, sugTag, { autoRename: true });
+          picker.refreshUsedX();
+          highlightRow(oldHex);
+        });
+
         const stack = document.createElement("div");
         stack.style.cssText = "display:grid; gap:4px;";
 
@@ -1088,21 +1315,19 @@
           const v = input.value;
           labelNodes.forEach((t) => (t.textContent = v));
           applyTextColors();
+          saveAllState();
         });
 
         row.appendChild(boxTag);
         row.appendChild(boxRepl);
         row.appendChild(boxRename);
+        row.appendChild(boxSug);
         row.appendChild(stack);
 
         row.addEventListener("click", () => {
           selectedOldHex = oldHex;
-          Array.from(list.querySelectorAll("button")).forEach((b) => {
-            b.style.outline = "none";
-            b.style.boxShadow = "none";
-          });
-          row.style.outline = "2px solid rgba(0,0,0,.28)";
-          row.style.boxShadow = "0 0 0 4px rgba(0,0,0,.05)";
+          highlightRow(oldHex);
+          saveAllState();
         });
 
         list.appendChild(row);
@@ -1111,6 +1336,60 @@
         renameInputByOldHex.set(oldHex, input);
         labelNodesByOldHex.set(oldHex, labelNodes);
       });
+    }
+
+    function highlightRow(oldHex) {
+      oldHex = norm(oldHex);
+      Array.from(list.querySelectorAll("button")).forEach((b) => {
+        if (b.getAttribute("data-oldhex")) {
+          b.style.outline = "none";
+          b.style.boxShadow = "none";
+        }
+      });
+      const row = rowByOldHex.get(oldHex);
+      if (!row) return;
+      row.style.outline = "2px solid rgba(0,0,0,.28)";
+      row.style.boxShadow = "0 0 0 4px rgba(0,0,0,.05)";
+    }
+
+    // ---------- Restore mappings if same SVG ----------
+    function restoreMappingsIfAny() {
+      const st = loadStored();
+      if (!st || st.svgSig !== sig || !st.mappings) return;
+
+      const mappings = st.mappings || {};
+      for (const oldHex of Object.keys(mappings)) {
+        const m = mappings[oldHex] || {};
+        const row = rowByOldHex.get(norm(oldHex));
+        if (!row) continue;
+
+        const replHex = norm(m.replHex || "");
+        const replTag = (m.replTag || "").toString();
+        const rename = (m.rename || "").toString();
+
+        // Restore rename first (updates labelNodes)
+        if (rename && renameInputByOldHex.get(norm(oldHex))) {
+          const inp = renameInputByOldHex.get(norm(oldHex));
+          inp.value = rename;
+          const nodes = labelNodesByOldHex.get(norm(oldHex)) || [];
+          nodes.forEach((t) => (t.textContent = rename));
+        }
+
+        // Restore replacement (no autoRename: keep stored rename)
+        if (isHex6(replHex)) {
+          applyReplacementToOldHex(oldHex, replHex, replTag, { autoRename: false });
+        }
+      }
+
+      // restore selected row highlight
+      const sel = (st.ui && st.ui.selectedOldHex) ? norm(st.ui.selectedOldHex) : "";
+      if (sel && rowByOldHex.has(sel)) {
+        selectedOldHex = sel;
+        highlightRow(sel);
+      }
+
+      picker.refreshUsedX();
+      applyTextColors();
     }
 
     // ---------- Toggles row ----------
@@ -1131,19 +1410,22 @@
     const togglesLeft = document.createElement("div");
     togglesLeft.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
 
-    const btnColors = makeToggleButton("Colores", true, (on) => {
+    const btnColors = makeToggleButton("Colores", colorsOn, (on) => {
       colorsOn = on;
       setColorFills(recolorSvg, colorsOn);
+      saveAllState();
     });
 
-    const btnBorders = makeToggleButton("Bordes", true, (on) => {
+    const btnBorders = makeToggleButton("Bordes", bordersOn, (on) => {
       bordersOn = on;
       setBorders(recolorSvg, bordersOn);
+      saveAllState();
     });
 
-    const btnTextColor = makeToggleButton("Color textos", false, (on) => {
+    const btnTextColor = makeToggleButton("Color textos", textColorModeOn, (on) => {
       textColorModeOn = on;
-      applyTextColors(); // ✅ always
+      applyTextColors();
+      saveAllState();
     });
 
     const sliderWrap = document.createElement("div");
@@ -1165,19 +1447,20 @@
     slider.type = "range";
     slider.min = "0";
     slider.max = "100";
-    slider.value = "70";
+    slider.value = String(Math.round(textOpacity * 100));
     slider.style.cssText = "width: 180px; cursor: pointer;";
 
     const sliderVal = document.createElement("div");
     sliderVal.style.cssText =
       "font-size:12px; color: rgba(0,0,0,.70); font-weight:900; width:44px; text-align:right;";
-    sliderVal.textContent = "70%";
+    sliderVal.textContent = `${Math.round(textOpacity * 100)}%`;
 
     slider.addEventListener("input", () => {
       const v = Math.max(0, Math.min(100, Number(slider.value || 0)));
       sliderVal.textContent = `${v}%`;
       textOpacity = v / 100;
-      applyTextColors(); // ✅ always (ON or OFF)
+      applyTextColors();
+      saveAllState();
     });
 
     sliderWrap.appendChild(sliderLabel);
@@ -1192,13 +1475,14 @@
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
     hint.textContent =
-      "Textos: OFF=negro con opacidad; ON=hex de reemplazo (si no hay reemplazo, negro). Opacidad siempre aplica. Export bake OK.";
+      "Sugerencia = color del picker más parecido (ΔE Lab). Textos: OFF=negro con opacidad; ON=hex de reemplazo. Opacidad siempre aplica (también en export).";
 
     togglesRow.appendChild(togglesLeft);
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
-    // Init text styling (black with slider opacity)
+    // Init / restore
+    restoreMappingsIfAny();
     applyTextColors();
 
     // ---------- Downloads ----------
@@ -1214,10 +1498,9 @@
     enhanceButton(btnSvg);
 
     btnSvg.addEventListener("click", async () => {
-      // Brief spinner so you feel the click even if instant
       setButtonLoading(btnSvg, true);
       try {
-        applyTextColors(); // ✅ bake before export
+        applyTextColors();
         const svgText = new XMLSerializer().serializeToString(recolorSvg);
         downloadText("paintbynumber_recolored.svg", svgText, "image/svg+xml");
       } finally {
@@ -1235,9 +1518,7 @@
     btnPng.addEventListener("click", async () => {
       setButtonLoading(btnPng, true);
       try {
-        applyTextColors(); // ✅ bake before export
-
-        // ✅ export from clone (avoids “live DOM” edge cases in rasterizers)
+        applyTextColors();
         const svgClone = recolorSvg.cloneNode(true);
         await downloadSvgAsPngHQ(svgClone, "paintbynumber_recolored.png", 10);
       } catch (e) {
