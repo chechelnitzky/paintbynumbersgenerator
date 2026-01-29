@@ -1,69 +1,20 @@
-/* Recolor add-on (v7.1 FIX)
-   - MISMO v7, pero:
-     ✅ findFinalOutputSvg ahora detecta por "peso" del SVG (cantidad de shapes/text), no por bounding rect.
-     ✅ Fallback: captura SVG desde Blob cuando se genera DOWNLOAD SVG (aunque el SVG no esté visible en DOM).
-     ✅ Launcher no depende de MutationObserver agresivo: usa debounce liviano.
+/* Recolor add-on (v7.1 UI tweaks)
+   1) Original colors list sorted by ORIGINAL TAG ascending (0..n)
+   2) "Renombrar labels" panel moved to the right (3rd column) next to the other two panels
+   3) Picker tiles show an X overlay when that hex is already used as replacement (not blocked)
+
+   Keeps prior behavior:
+   - Original swatches show ORIGINAL TAG centered inside
+   - Replacement swatches keep Excel tag badge (corner)
+   - Toggles inject SVG <style> only (no loss of edits)
 */
 
 (function () {
-  if (window.__RECOLOR_V71__) return;
-  window.__RECOLOR_V71__ = true;
-
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
-
-  // ----------------- CAPTURE SVG FROM BLOB (FALLBACK) -----------------
-  // Guarda el último SVG generado como string en window.__RECOLOR_LAST_SVG_TEXT__
-  (function installBlobSvgCapture() {
-    if (window.__RECOLOR_BLOB_HOOK__) return;
-    window.__RECOLOR_BLOB_HOOK__ = true;
-
-    const NativeBlob = window.Blob;
-
-    function tryCaptureSvg(parts, opts) {
-      try {
-        const type = (opts && opts.type ? String(opts.type) : "").toLowerCase();
-        if (!type.includes("svg")) return;
-
-        // parts puede incluir strings, ArrayBuffer, Uint8Array, etc.
-        // Capturamos solo si hay strings (lo normal en generadores SVG).
-        const textParts = (parts || []).filter(p => typeof p === "string");
-        if (!textParts.length) return;
-
-        const txt = textParts.join("");
-        if (txt && txt.trim().startsWith("<svg")) {
-          window.__RECOLOR_LAST_SVG_TEXT__ = txt;
-        }
-      } catch (_) {}
-    }
-
-    // Wrapper seguro que preserva prototype/instanceof lo mejor posible
-    const BlobWrapper = function(parts, opts) {
-      tryCaptureSvg(parts, opts);
-      return new NativeBlob(parts, opts);
-    };
-
-    BlobWrapper.prototype = NativeBlob.prototype;
-    // Copia propiedades estáticas por si el browser las usa
-    Object.getOwnPropertyNames(NativeBlob).forEach((k) => {
-      try { BlobWrapper[k] = NativeBlob[k]; } catch (_) {}
-    });
-
-    window.Blob = BlobWrapper;
-  })();
-
-  function parseSvgTextToElement(svgText) {
-    try {
-      const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
-      const svg = doc.querySelector("svg");
-      return svg ? svg : null;
-    } catch (_) {
-      return null;
-    }
-  }
 
   // ---------- Color helpers ----------
   function rgbToHex(rgb) {
@@ -89,7 +40,7 @@
     if (fAttr && fAttr !== "none" && fAttr !== "transparent") {
       const f = norm(fAttr);
       if (f.startsWith("rgb")) return rgbToHex(f) || null;
-      if (f.startsWith("#") && f.length === 7) return f;
+      if (f.startsWith("#") && f.length === 7) return f.toLowerCase();
     }
 
     const styleAttr = el.getAttribute && el.getAttribute("style");
@@ -98,7 +49,7 @@
       if (m && m[1]) {
         const v = norm(m[1]);
         if (v.startsWith("rgb")) return rgbToHex(v) || null;
-        if (v.startsWith("#") && v.length === 7) return v;
+        if (v.startsWith("#") && v.length === 7) return v.toLowerCase();
       }
     }
 
@@ -107,7 +58,7 @@
       const f = cs && cs.fill ? norm(cs.fill) : "";
       if (!f || f === "none" || f === "transparent") return null;
       if (f.startsWith("rgb")) return rgbToHex(f) || null;
-      if (f.startsWith("#") && f.length === 7) return f;
+      if (f.startsWith("#") && f.length === 7) return f.toLowerCase();
     } catch (_) {}
 
     return null;
@@ -145,37 +96,26 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
-  // ---------- Find main output SVG (FIXED) ----------
-  // Antes: bbox*area => falla cuando el SVG está oculto o su rect da 0
-  // Ahora: score por cantidad de shapes/text
+  // ---------- Find main output SVG ----------
   function findFinalOutputSvg() {
-    // 1) buscar SVGs reales (no icons)
-    const svgs = Array.from(document.querySelectorAll("svg"))
-      .filter(s => !s.closest("#recolor-host"));
+    // keep it simple + robust:
+    // choose the largest visible SVG on screen.
+    const svgs = Array.from(document.querySelectorAll("svg"));
+    if (!svgs.length) return null;
 
     let best = null;
     let bestScore = 0;
 
     for (const s of svgs) {
-      const shapes = s.querySelectorAll("path,polygon,rect,circle,ellipse").length;
-      const texts  = s.querySelectorAll("text").length;
-
-      // descarta icons/chicos
-      if (shapes < 10 && texts < 10) continue;
-
-      const score = shapes * 2 + texts; // prioriza shapes
+      const box = s.getBoundingClientRect();
+      const visible = box.width > 50 && box.height > 50 && box.bottom > 0 && box.right > 0;
+      if (!visible) continue;
+      const score = box.width * box.height;
       if (score > bestScore) {
         bestScore = score;
         best = s;
       }
     }
-
-    // 2) fallback: si no está en DOM, intenta desde el SVG descargable (Blob capturado)
-    if (!best && window.__RECOLOR_LAST_SVG_TEXT__) {
-      const parsed = parseSvgTextToElement(window.__RECOLOR_LAST_SVG_TEXT__);
-      if (parsed) return parsed;
-    }
-
     return best;
   }
 
@@ -333,22 +273,17 @@
       `;
   }
 
-function setColorFills(svg, on) {
-  const style = ensureSvgStyle(svg, "recolor-fills-style");
-  style.textContent = on
-    ? ""
-    : `
-      /* hide paint area fills (leave outlines + labels as-is) */
-      path, polygon, rect, circle, ellipse {
-        fill: none !important;
-      }
-
-      /* IMPORTANT:
-         Do NOT override <text> fill here.
-         Keep whatever the generator set (e.g. #c4c4c4). */
-    `;
-}
-
+  // IMPORTANT: keep text color as-is (do not force black)
+  function setColorFills(svg, on) {
+    const style = ensureSvgStyle(svg, "recolor-fills-style");
+    style.textContent = on
+      ? ""
+      : `
+        path, polygon, rect, circle, ellipse {
+          fill: none !important;
+        }
+      `;
+  }
 
   // ---------- UI components ----------
   function makeBadgeCorner(text) {
@@ -442,7 +377,27 @@ function setColorFills(svg, on) {
     return btn;
   }
 
-  function renderGridPicker(onPick) {
+  function makeUsedXOverlay() {
+    const o = document.createElement("div");
+    o.textContent = "✕";
+    o.style.cssText = `
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:22px;
+      font-weight:1000;
+      color: rgba(0,0,0,.75);
+      text-shadow: 0 1px 0 rgba(255,255,255,.55);
+      pointer-events:none;
+      mix-blend-mode: multiply;
+    `;
+    return o;
+  }
+
+  // We need to update X overlays when replacements change
+  function renderGridPicker(getUsedSet, onPick) {
     const grid = document.createElement("div");
     grid.style.cssText = `
       display:grid;
@@ -457,6 +412,24 @@ function setColorFills(svg, on) {
     `;
 
     const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map(hex => ({tag: "", hex}));
+
+    const tilesByHex = new Map();
+
+    function paintUsed() {
+      const used = getUsedSet(); // Set of lowercased hex
+      for (const [hex, tile] of tilesByHex.entries()) {
+        const has = used.has(hex);
+        tile.dataset.used = has ? "1" : "0";
+        const marker = tile.querySelector(".used-x");
+        if (has && !marker) {
+          const x = makeUsedXOverlay();
+          x.className = "used-x";
+          tile.appendChild(x);
+        } else if (!has && marker) {
+          marker.remove();
+        }
+      }
+    }
 
     items.forEach((it) => {
       const hex = norm(it.hex);
@@ -477,15 +450,21 @@ function setColorFills(svg, on) {
       if (tag) tile.appendChild(makeBadgeCorner(tag));
       tile.addEventListener("click", () => onPick({hex, tag}));
 
+      tilesByHex.set(hex, tile);
       grid.appendChild(tile);
     });
+
+    // Expose a method to refresh X markers
+    grid.__refreshUsed = paintUsed;
+    // initial
+    setTimeout(paintUsed, 0);
 
     return grid;
   }
 
   // ---------- ORIGINAL tag mapping ----------
   function buildOriginalTagByHexFromTopSwatches() {
-    const map = {};
+    const map = {}; // hex -> tagOriginal
 
     const candidates = Array.from(document.querySelectorAll("button, div, span"))
       .filter(el => {
@@ -493,6 +472,7 @@ function setColorFills(svg, on) {
         if (el.closest && el.closest("#recolor-host")) return false;
         const t = (el.textContent || "").trim();
         if (!t) return false;
+
         if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
 
         const r = el.getBoundingClientRect();
@@ -551,7 +531,15 @@ function setColorFills(svg, on) {
     return map;
   }
 
-  // ---------- Editor (MISMO) ----------
+  function parseSortableTag(tag) {
+    // returns { kind: "num"|"str"|"none", val: number|string }
+    const t = (tag || "").toString().trim();
+    if (!t) return { kind: "none", val: Infinity };
+    if (/^\d+$/.test(t)) return { kind: "num", val: Number(t) };
+    return { kind: "str", val: t.toLowerCase() };
+  }
+
+  // ---------- Editor ----------
   function openEditor(originalSvg) {
     const host = ensureHostBelowDownloads();
     host.innerHTML = "";
@@ -571,15 +559,18 @@ function setColorFills(svg, on) {
     makePreview(originalClone);
     makePreview(recolorSvg);
 
+    // Build original tag map (priority: SVG legend > top swatches)
     const topMap = buildOriginalTagByHexFromTopSwatches();
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
     const origTagByHex = { ...topMap, ...legendMap };
 
+    // Defaults
     let colorsOn = true;
     let bordersOn = true;
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
 
+    // Previews
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
 
@@ -613,22 +604,65 @@ function setColorFills(svg, on) {
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
+    // Fill groups
     const fillGroups = collectFillGroups(recolorSvg);
-    const entries = Array.from(fillGroups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
-    const controls = document.createElement("div");
-    controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
-    host.appendChild(controls);
+    // Build entries with tag for sorting
+    let entries = Array.from(fillGroups.entries()).map(([hex, nodes]) => {
+      const tagOriginal = origTagByHex[hex] || "";
+      const sortable = parseSortableTag(tagOriginal);
+      return { hex, nodes, tagOriginal, sortable };
+    });
+
+    // (1) sort by tagOriginal asc (numeric first, then strings), fallback by hex
+    entries.sort((a, b) => {
+      const ak = a.sortable.kind, bk = b.sortable.kind;
+      if (ak === "num" && bk === "num") return a.sortable.val - b.sortable.val;
+      if (ak === "num" && bk !== "num") return -1;
+      if (ak !== "num" && bk === "num") return 1;
+
+      if (ak === "str" && bk === "str") {
+        const cmp = String(a.sortable.val).localeCompare(String(b.sortable.val), "es");
+        if (cmp !== 0) return cmp;
+      } else if (ak === "none" && bk !== "none") return 1;
+      else if (ak !== "none" && bk === "none") return -1;
+
+      return a.hex.localeCompare(b.hex);
+    });
+
+    // Controls layout:
+    // Row 1: two columns (original list + picker)
+    // Row 2: third panel to the right spanning height like your drawing
+    const controlsWrap = document.createElement("div");
+    controlsWrap.style.cssText = `
+      display:grid;
+      grid-template-columns: 1.2fr 1fr 1.1fr;
+      gap: 12px;
+      margin-top: 12px;
+      align-items:start;
+    `;
+    host.appendChild(controlsWrap);
 
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
     left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG original + hex → reemplazo)</div>`;
-    controls.appendChild(left);
+    controlsWrap.appendChild(left);
 
     const right = document.createElement("div");
     right.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
     right.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Picker (grilla con tags del Excel)</div>`;
-    controls.appendChild(right);
+    controlsWrap.appendChild(right);
+
+    // (2) Labels panel as 3rd column
+    const labelPanel = document.createElement("div");
+    labelPanel.style.cssText = `
+      border: 1px solid rgba(0,0,0,.12);
+      border-radius: 12px;
+      padding: 10px;
+      background: white;
+    `;
+    labelPanel.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Renombrar labels (texto dentro del SVG)</div>`;
+    controlsWrap.appendChild(labelPanel);
 
     const info = document.createElement("div");
     info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
@@ -637,12 +671,26 @@ function setColorFills(svg, on) {
 
     let selectedOldHex = null;
 
-    const grid = renderGridPicker(({hex:newHex, tag:newTag}) => {
+    // Track chosen replacements: oldHex -> {hex, tag}
+    const chosenReplacementByOldHex = new Map();
+
+    // helper: compute set of used replacement hexes
+    const getUsedReplacementHexSet = () => {
+      const s = new Set();
+      for (const v of chosenReplacementByOldHex.values()) {
+        if (v && v.hex && isHex6(v.hex)) s.add(norm(v.hex));
+      }
+      return s;
+    };
+
+    // (3) Grid picker with X overlay for used colors
+    const grid = renderGridPicker(getUsedReplacementHexSet, ({hex:newHex, tag:newTag}) => {
       if (!selectedOldHex) {
         alert("Primero selecciona un color original (panel izquierdo).");
         return;
       }
 
+      // apply fill change
       const nodes = fillGroups.get(selectedOldHex) || [];
       nodes.forEach((el) => {
         el.setAttribute("fill", newHex);
@@ -651,6 +699,10 @@ function setColorFills(svg, on) {
         }
       });
 
+      // record chosen replacement
+      chosenReplacementByOldHex.set(selectedOldHex, { hex: newHex, tag: newTag || "" });
+
+      // update row UI
       const row = left.querySelector(`[data-oldhex="${selectedOldHex}"]`);
       if (row) {
         const swNew = row.querySelector(".sw-new");
@@ -666,21 +718,26 @@ function setColorFills(svg, on) {
 
         txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
       }
+
+      // refresh used-X markers
+      if (grid && typeof grid.__refreshUsed === "function") grid.__refreshUsed();
     });
     right.appendChild(grid);
 
+    // Original colors list
     const list = document.createElement("div");
-    list.style.cssText = "display:grid; gap:10px; max-height: 360px; overflow:auto; padding-right: 6px;";
+    list.style.cssText = "display:grid; gap:10px; max-height: 520px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
 
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No detecté fills en el SVG.";
+      empty.textContent = "No detecté fills en el SVG. Si el SVG usa CSS en vez de fill directo, dime y lo adapto.";
       list.appendChild(empty);
     } else {
-      entries.forEach(([oldHex]) => {
-        const tagOriginal = origTagByHex[oldHex] || "";
+      entries.forEach((entry) => {
+        const oldHex = entry.hex;
+        const tagOriginal = entry.tagOriginal || "";
 
         const row = document.createElement("button");
         row.type = "button";
@@ -754,28 +811,18 @@ function setColorFills(svg, on) {
       });
     }
 
-    const labelPanel = document.createElement("div");
-    labelPanel.style.cssText = `
-      border: 1px solid rgba(0,0,0,.12);
-      border-radius: 12px;
-      padding: 10px;
-      background: white;
-      margin-top: 12px;
-    `;
-    labelPanel.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Renombrar labels (texto dentro del SVG)</div>`;
-    host.appendChild(labelPanel);
-
+    // Labels rename panel contents (now right column)
     const textGroups = collectTextGroups(recolorSvg);
     const textEntries = Array.from(textGroups.entries()).sort((a, b) => a[0].localeCompare(b[0], "es"));
 
     if (!textEntries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No encontré <text> en el SVG.";
+      empty.textContent = "No encontré <text> en el SVG. Si el generador tiene 'labels', actívalo y vuelve a generar.";
       labelPanel.appendChild(empty);
     } else {
       const labelList = document.createElement("div");
-      labelList.style.cssText = "display:grid; gap:10px; max-height: 260px; overflow:auto; padding-right:6px;";
+      labelList.style.cssText = "display:grid; gap:10px; max-height: 580px; overflow:auto; padding-right:6px;";
       labelPanel.appendChild(labelList);
 
       for (const [originalText, nodes] of textEntries) {
@@ -801,6 +848,7 @@ function setColorFills(svg, on) {
       }
     }
 
+    // Toggles row
     const togglesRow = document.createElement("div");
     togglesRow.style.cssText = `
       margin-top: 12px;
@@ -839,6 +887,7 @@ function setColorFills(svg, on) {
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
+    // Download buttons (recolored)
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -860,79 +909,46 @@ function setColorFills(svg, on) {
       try {
         await downloadSvgAsPng(recolorSvg, "paintbynumber_recolored.png");
       } catch (e) {
-        alert("No pude exportar PNG.");
+        alert("No pude exportar PNG. Dime qué navegador usas y lo ajusto.");
       }
     });
 
     dl.appendChild(btnSvg);
     dl.appendChild(btnPng);
+
+    // Ensure picker marks are correct if user had prior state
+    if (grid && typeof grid.__refreshUsed === "function") grid.__refreshUsed();
   }
 
-  // ---------- Launcher (FIXED: siempre crea el botón y lo habilita cuando haya SVG) ----------
-  function ensureLauncher() {
+  // ---------- Launcher ----------
+  function addLaunchButtonOnceReady() {
+    const svg = findFinalOutputSvg();
+    if (!svg) return;
+
     const host = ensureHostBelowDownloads();
+    if (document.getElementById("btn-recolor-launch")) return;
 
-    let bar = document.getElementById("recolor-launch-bar");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "recolor-launch-bar";
-      bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-      bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
-      host.appendChild(bar);
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
 
-      const btn = document.createElement("button");
-      btn.id = "btn-recolor-launch";
-      btn.type = "button";
-      btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
-      btn.textContent = "Recolor (esperando output...)";
-      btn.disabled = true;
+    const btn = document.createElement("button");
+    btn.id = "btn-recolor-launch";
+    btn.type = "button";
+    btn.textContent = "Abrir Recolorear";
+    btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+    btn.addEventListener("click", () => openEditor(svg));
 
-      btn.addEventListener("click", () => {
-        const svg = findFinalOutputSvg();
-        if (!svg) {
-          alert("Aún no detecto el SVG. Si tu output está listo, aprieta DOWNLOAD SVG una vez (solo para capturarlo) y vuelve a Abrir Recolorear.");
-          return;
-        }
-        openEditor(svg);
-      });
+    bar.appendChild(btn);
+    host.appendChild(bar);
 
-      bar.appendChild(btn);
-
-      const hint = document.createElement("div");
-      hint.id = "recolor-hint";
-      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-      hint.textContent = "Tip: si el SVG no está en el DOM, lo capturo al descargar DOWNLOAD SVG.";
-      host.appendChild(hint);
-    }
-
-    // actualiza estado
-    const btn = document.getElementById("btn-recolor-launch");
-    const hint = document.getElementById("recolor-hint");
-    const svgNow = findFinalOutputSvg();
-
-    if (svgNow) {
-      btn.disabled = false;
-      btn.textContent = "Abrir Recolorear";
-      hint.textContent = "Listo. (Si no lo encontraba en DOM, también sirve con DOWNLOAD SVG para capturarlo).";
-    } else {
-      btn.disabled = true;
-      btn.textContent = "Recolor (esperando output...)";
-      hint.textContent = "Genera el output. Si no aparece el SVG en DOM, aprieta DOWNLOAD SVG una vez y se captura.";
-    }
+    const hint = document.createElement("div");
+    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+    hint.textContent = "El cuadrito ORIGINAL muestra el tag original (0/1/2/3...). El reemplazo muestra el tag del Excel. En el picker: ✕ = color ya usado (igual se puede seleccionar).";
+    host.appendChild(hint);
   }
 
-  // ---------- Debounce liviano (no cuelga) ----------
-  let scheduled = false;
-  function scheduleEnsure() {
-    if (scheduled) return;
-    scheduled = true;
-    setTimeout(() => {
-      scheduled = false;
-      try { ensureLauncher(); } catch (_) {}
-    }, 250);
-  }
-
-  const observer = new MutationObserver(() => scheduleEnsure());
+  const observer = new MutationObserver(() => addLaunchButtonOnceReady());
   observer.observe(document.documentElement, { subtree: true, childList: true });
-  window.addEventListener("load", () => setTimeout(() => scheduleEnsure(), 300));
+  window.addEventListener("load", () => setTimeout(addLaunchButtonOnceReady, 300));
 })();
