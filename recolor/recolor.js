@@ -1,34 +1,29 @@
-/* Recolor add-on (v8.2) - STABLE + UI fixes
-   - Original list sorted by ORIGINAL TAG numeric asc (0..)
-   - Original swatch shows ORIGINAL TAG centered
-   - Replacement swatch keeps Excel tag badge (corner)
-   - Picker shows an X overlay if that Excel color is already in use (indicator only)
-   - "Renombrar" input is integrated into EACH original-row (same container),
-     small width, and "Renombrar" title appears only in container header.
-   - Toggles do NOT overwrite text fill colors anymore (keeps previously assigned number color)
-   - Prevents infinite loading by throttling observer work + strong guards
+/* Recolor add-on (v8.4 - STABLE + UI FIXES)
+   ✅ Stable launcher (no layout reads, debounced observer) -> no “cargando infinito”
+   ✅ Detects SVG output reliably (best SVG by content)
+   ✅ Original colors list sorted by ORIGINAL TAG ascending (0..n)
+   ✅ Rename input is INSIDE the same original row (3 equal boxes)
+      [TAG original box] [Reemplazo swatch box] [Renombrar input box] + meta
+   ✅ Picker shows an X overlay when a color is already used (indicator only, not blocked)
+   ✅ Colores OFF hides fills but keeps text colors as-is (no forcing #000)
+   ✅ Bordes ON/OFF
 */
 
 (function () {
-  // ------------------- CONFIG / GLOBALS -------------------
+  // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
-  const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map(x => x.hex);
+  const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map((x) => x.hex);
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
 
-  const STATE = {
-    mounted: false,
-    lastSvgSig: "",
-    selectedOldHex: null,
-    oldToNew: new Map(), // oldHex -> {hex:newHex, tag:newTag}
-  };
-
-  // ------------------- HELPERS -------------------
+  // ---------- Color helpers ----------
   function rgbToHex(rgb) {
     const m = (rgb || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
     if (!m) return null;
-    const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
+    const r = Number(m[1]),
+      g = Number(m[2]),
+      b = Number(m[3]);
     const to2 = (n) => n.toString(16).padStart(2, "0");
     return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
   }
@@ -36,10 +31,10 @@
   function textColorForBg(hex) {
     const h = (hex || "").replace("#", "");
     if (h.length !== 6) return "#000";
-    const r = parseInt(h.slice(0,2), 16);
-    const g = parseInt(h.slice(2,4), 16);
-    const b = parseInt(h.slice(4,6), 16);
-    const y = (0.2126*r + 0.7152*g + 0.0722*b);
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     return y > 140 ? "#000" : "#fff";
   }
 
@@ -48,7 +43,7 @@
     if (fAttr && fAttr !== "none" && fAttr !== "transparent") {
       const f = norm(fAttr);
       if (f.startsWith("rgb")) return rgbToHex(f) || null;
-      if (f.startsWith("#") && f.length === 7) return f.toLowerCase();
+      if (f.startsWith("#") && f.length === 7) return f;
     }
 
     const styleAttr = el.getAttribute && el.getAttribute("style");
@@ -57,7 +52,7 @@
       if (m && m[1]) {
         const v = norm(m[1]);
         if (v.startsWith("rgb")) return rgbToHex(v) || null;
-        if (v.startsWith("#") && v.length === 7) return v.toLowerCase();
+        if (v.startsWith("#") && v.length === 7) return v;
       }
     }
 
@@ -66,12 +61,13 @@
       const f = cs && cs.fill ? norm(cs.fill) : "";
       if (!f || f === "none" || f === "transparent") return null;
       if (f.startsWith("rgb")) return rgbToHex(f) || null;
-      if (f.startsWith("#") && f.length === 7) return f.toLowerCase();
+      if (f.startsWith("#") && f.length === 7) return f;
     } catch (_) {}
 
     return null;
   }
 
+  // ---------- SVG sizing ----------
   function ensureViewBox(svg) {
     if (!svg || svg.tagName.toLowerCase() !== "svg") return;
     if (svg.getAttribute("viewBox")) return;
@@ -103,22 +99,19 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
-  // ------------------- FIND OUTPUT SVG (simple + stable) -------------------
-  function isVisible(el) {
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 120 && r.height > 120 && r.bottom > 0 && r.right > 0;
-  }
-
-  function findFinalOutputSvg() {
-    const svgs = Array.from(document.querySelectorAll("svg")).filter(isVisible);
+  // ---------- Find output SVG (STABLE, no layout reads) ----------
+  function findFinalOutputSvgLight() {
+    const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
 
-    // Prefer SVGs inside/near the output area by choosing biggest visible
-    let best = null, bestScore = 0;
+    // Choose the svg with most drawable content
+    let best = null;
+    let bestScore = 0;
     for (const s of svgs) {
-      const box = s.getBoundingClientRect();
-      const score = box.width * box.height;
+      // cheap-ish, no getBoundingClientRect
+      const score =
+        s.querySelectorAll("path,polygon,rect,circle,ellipse").length * 2 +
+        s.querySelectorAll("text").length * 3;
       if (score > bestScore) {
         bestScore = score;
         best = s;
@@ -127,7 +120,7 @@
     return best;
   }
 
-  // ------------------- DOWNLOAD ROW + HOST -------------------
+  // ---------- Locate download row and mount host ----------
   function findDownloadButtonsRow() {
     const btns = Array.from(document.querySelectorAll("button, a"));
     const hits = btns.filter((b) => {
@@ -169,12 +162,12 @@
     return host;
   }
 
-  // ------------------- GROUPS -------------------
+  // ---------- Group fills ----------
   function collectFillGroups(svg) {
     const groups = new Map();
     const nodes = Array.from(svg.querySelectorAll("*"))
       .filter((el) => el instanceof SVGElement)
-      .filter((el) => ["path","polygon","rect","circle","ellipse"].includes(el.tagName.toLowerCase()));
+      .filter((el) => ["path", "polygon", "rect", "circle", "ellipse"].includes(el.tagName.toLowerCase()));
 
     for (const el of nodes) {
       const fill = getElementFill(el);
@@ -187,18 +180,7 @@
     return groups;
   }
 
-  function collectTextGroups(svg) {
-    const groups = new Map();
-    svg.querySelectorAll("text").forEach((t) => {
-      const s = (t.textContent || "").trim();
-      if (!s) return;
-      if (!groups.has(s)) groups.set(s, []);
-      groups.get(s).push(t);
-    });
-    return groups;
-  }
-
-  // ------------------- DOWNLOAD HELPERS -------------------
+  // ---------- Download helpers ----------
   function downloadText(filename, text, mime = "text/plain") {
     const blob = new Blob([text], { type: mime });
     const url = URL.createObjectURL(blob);
@@ -220,7 +202,8 @@
     img.decoding = "async";
 
     const vb = svgEl.getAttribute("viewBox");
-    let w = 1600, h = 1600;
+    let w = 1600,
+      h = 1600;
     if (vb) {
       const parts = vb.split(/\s+/).map(Number);
       if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
@@ -245,19 +228,23 @@
 
     URL.revokeObjectURL(url);
 
-    canvas.toBlob((pngBlob) => {
-      const pngUrl = URL.createObjectURL(pngBlob);
-      const a = document.createElement("a");
-      a.href = pngUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
-    }, "image/png", 1.0);
+    canvas.toBlob(
+      (pngBlob) => {
+        const pngUrl = URL.createObjectURL(pngBlob);
+        const a = document.createElement("a");
+        a.href = pngUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
+      },
+      "image/png",
+      1.0
+    );
   }
 
-  // ------------------- SVG STYLE INJECTION (TOGGLES) -------------------
+  // ---------- SVG style injection (toggles without losing edits) ----------
   function ensureSvgStyle(svg, id) {
     let style = svg.querySelector(`#${id}`);
     if (style) return style;
@@ -281,76 +268,45 @@
       `;
   }
 
-  // IMPORTANT: do NOT force text fill to #000. Keep whatever the SVG has.
   function setColorFills(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-fills-style");
     style.textContent = on
       ? ""
       : `
-        /* hide paint area fills (but do not touch text color) */
+        /* hide paint area fills */
         path, polygon, rect, circle, ellipse {
           fill: none !important;
         }
+        /* IMPORTANT: keep existing text fill (do NOT force black) */
       `;
   }
 
-  // ------------------- UI PIECES -------------------
+  // ---------- UI atoms ----------
   function makeBadgeCorner(text) {
     const b = document.createElement("span");
     b.textContent = text;
-    b.setAttribute("style", `
-      position:absolute !important;
-      left:4px !important;
-      top:4px !important;
-      padding:2px 6px !important;
-      border-radius:999px !important;
-      font-size:11px !important;
-      font-weight:900 !important;
-      background: rgba(255,255,255,.90) !important;
-      border: 1px solid rgba(0,0,0,.12) !important;
-      color: rgba(0,0,0,.85) !important;
-      max-width: calc(100% - 8px) !important;
-      white-space: nowrap !important;
-      overflow:hidden !important;
-      text-overflow: ellipsis !important;
-      pointer-events:none !important;
-      line-height: 1 !important;
-    `.trim());
+    b.setAttribute(
+      "style",
+      `
+        position:absolute !important;
+        left:4px !important;
+        top:4px !important;
+        padding:2px 6px !important;
+        border-radius:999px !important;
+        font-size:11px !important;
+        font-weight:900 !important;
+        background: rgba(255,255,255,.90) !important;
+        border: 1px solid rgba(0,0,0,.12) !important;
+        color: rgba(0,0,0,.85) !important;
+        max-width: calc(100% - 8px) !important;
+        white-space: nowrap !important;
+        overflow:hidden !important;
+        text-overflow: ellipsis !important;
+        pointer-events:none !important;
+        line-height: 1 !important;
+      `.trim()
+    );
     return b;
-  }
-
-  function makeCenteredTag(tag, bgHex) {
-    const d = document.createElement("div");
-    d.textContent = String(tag);
-    d.style.cssText = `
-      position:absolute !important;
-      inset:0 !important;
-      display:flex !important;
-      align-items:center !important;
-      justify-content:center !important;
-      font-weight:900 !important;
-      font-size:20px !important;
-      line-height:1 !important;
-      color:${textColorForBg(bgHex)} !important;
-      pointer-events:none !important;
-      text-shadow: 0 1px 0 rgba(0,0,0,.15);
-    `;
-    return d;
-  }
-
-  function makeSwatchBase(hex, dashed=false) {
-    const box = document.createElement("div");
-    box.setAttribute("style", `
-      width:56px !important;
-      height:44px !important;
-      border-radius:12px !important;
-      border:1px ${dashed ? "dashed" : "solid"} rgba(0,0,0,.20) !important;
-      background:${hex || "transparent"} !important;
-      position:relative !important;
-      overflow:hidden !important;
-      flex: 0 0 auto !important;
-    `.trim());
-    return box;
   }
 
   function makeToggleButton(label, initialOn, onChange) {
@@ -380,9 +336,9 @@
     return btn;
   }
 
-  function makeXOverlay() {
+  function makePickerTileX() {
     const x = document.createElement("div");
-    x.textContent = "✕";
+    x.className = "tile-used-x";
     x.style.cssText = `
       position:absolute;
       inset:0;
@@ -391,14 +347,17 @@
       justify-content:center;
       font-weight:1000;
       font-size:22px;
-      color: rgba(0,0,0,.55);
-      text-shadow: 0 1px 0 rgba(255,255,255,.6);
+      color: rgba(0,0,0,.65);
+      text-shadow: 0 1px 0 rgba(255,255,255,.55);
       pointer-events:none;
+      opacity:0;
+      transition: opacity 120ms ease;
     `;
+    x.textContent = "✕";
     return x;
   }
 
-  function renderGridPicker(onPick, isUsedFn) {
+  function renderGridPicker({ onPick, isUsed }) {
     const grid = document.createElement("div");
     grid.style.cssText = `
       display:grid;
@@ -412,7 +371,9 @@
       background: rgba(0,0,0,.02);
     `;
 
-    const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map(hex => ({tag: "", hex}));
+    const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ tag: "", hex }));
+
+    const tilesByHex = new Map();
 
     items.forEach((it) => {
       const hex = norm(it.hex);
@@ -432,34 +393,50 @@
       `;
 
       if (tag) tile.appendChild(makeBadgeCorner(tag));
-      if (isUsedFn && isUsedFn(hex)) tile.appendChild(makeXOverlay());
 
-      tile.addEventListener("click", () => onPick({hex, tag}));
+      const x = makePickerTileX();
+      tile.appendChild(x);
+
+      tile.addEventListener("click", () => onPick({ hex, tag }));
+
       grid.appendChild(tile);
+      tilesByHex.set(hex, tile);
     });
 
-    return grid;
+    // updater
+    function refreshUsedX() {
+      for (const [hex, tile] of tilesByHex.entries()) {
+        const x = tile.querySelector(".tile-used-x");
+        if (!x) continue;
+        x.style.opacity = isUsed(hex) ? "1" : "0";
+      }
+    }
+
+    refreshUsedX();
+
+    return { grid, refreshUsedX };
   }
 
-  // ------------------- ORIGINAL TAG MAPPING -------------------
+  // ---------- ORIGINAL tag mapping ----------
   function buildOriginalTagByHexFromTopSwatches() {
-    const map = {}; // hex -> originalTag
-    const candidates = Array.from(document.querySelectorAll("button, div, span"))
-      .filter(el => {
-        if (!el || !el.textContent) return false;
-        if (el.closest && el.closest("#recolor-host")) return false;
+    const map = {}; // hex -> tagOriginal
 
-        const t = (el.textContent || "").trim();
-        if (!t) return false;
-        if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
+    const candidates = Array.from(document.querySelectorAll("button, div, span")).filter((el) => {
+      if (!el || !el.textContent) return false;
+      if (el.closest && el.closest("#recolor-host")) return false;
 
-        const r = el.getBoundingClientRect();
-        if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
+      const t = (el.textContent || "").trim();
+      if (!t) return false;
+      if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
 
-        const bg = getComputedStyle(el).backgroundColor;
-        if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
-        return true;
-      });
+      const r = el.getBoundingClientRect();
+      if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
+
+      const bg = getComputedStyle(el).backgroundColor;
+      if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
+
+      return true;
+    });
 
     for (const el of candidates) {
       const tag = (el.textContent || "").trim();
@@ -474,12 +451,11 @@
     const map = {};
     if (!svg) return map;
 
-    const rects = Array.from(svg.querySelectorAll("rect"))
-      .filter(r => {
-        const w = parseFloat(r.getAttribute("width") || "0");
-        const h = parseFloat(r.getAttribute("height") || "0");
-        return w > 6 && h > 6 && w <= 140 && h <= 140;
-      });
+    const rects = Array.from(svg.querySelectorAll("rect")).filter((r) => {
+      const w = parseFloat(r.getAttribute("width") || "0");
+      const h = parseFloat(r.getAttribute("height") || "0");
+      return w > 6 && h > 6 && w <= 140 && h <= 140;
+    });
 
     for (const rect of rects) {
       const fill = (rect.getAttribute("fill") || "").trim();
@@ -495,8 +471,8 @@
       const idx = kids.indexOf(rect);
       if (idx === -1) continue;
 
-      const near = kids.slice(idx + 1, idx + 6).find(n =>
-        n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
+      const near = kids.slice(idx + 1, idx + 6).find(
+        (n) => n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
       );
 
       if (near) {
@@ -507,24 +483,34 @@
     return map;
   }
 
-  function tagSortKey(tag) {
-    const t = (tag || "").toString().trim();
-    if (/^\d+$/.test(t)) return { n: parseInt(t, 10), s: t };
-    // Non-numeric go last
-    return { n: Number.POSITIVE_INFINITY, s: t.toLowerCase() };
+  function isNumericTag(t) {
+    return /^-?\d+(\.\d+)?$/.test((t || "").toString().trim());
   }
 
-  // ------------------- EDITOR -------------------
+  function cmpTagAsc(a, b) {
+    const ta = (a || "").toString().trim();
+    const tb = (b || "").toString().trim();
+    const na = isNumericTag(ta) ? Number(ta) : null;
+    const nb = isNumericTag(tb) ? Number(tb) : null;
+
+    if (na !== null && nb !== null) return na - nb;
+    if (na !== null && nb === null) return -1;
+    if (na === null && nb !== null) return 1;
+    return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
+  }
+
+  // ---------- Editor ----------
   function openEditor(originalSvg) {
     const host = ensureHostBelowDownloads();
     host.innerHTML = "";
 
     const header = document.createElement("div");
-    header.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    header.style.cssText =
+      "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
     header.innerHTML = `
       <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
       <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        Selecciona color original → elige reemplazo → toggles (colores/bordes) → descarga
+        Selecciona color original → elige reemplazo → (renombrar) → toggles (colores/bordes) → descarga
       </div>
     `;
     host.appendChild(header);
@@ -534,7 +520,7 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    // Build original tag map (priority: legend > top swatches)
+    // Build original tag map (priority: SVG legend > top swatches)
     const topMap = buildOriginalTagByHexFromTopSwatches();
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
     const origTagByHex = { ...topMap, ...legendMap };
@@ -582,31 +568,41 @@
     // Fill groups
     const fillGroups = collectFillGroups(recolorSvg);
 
-    // Sort by original tag asc (0..)
-    const entries = Array.from(fillGroups.entries())
-      .map(([oldHex, nodes]) => {
-        const tagOriginal = origTagByHex[oldHex] || "";
-        const key = tagSortKey(tagOriginal);
-        return { oldHex, nodes, tagOriginal, key };
-      })
-      .sort((a, b) => (a.key.n - b.key.n) || a.key.s.localeCompare(b.key.s) || a.oldHex.localeCompare(b.oldHex));
+    // Build entries with tagOriginal, then sort by tagOriginal asc (0..n)
+    const rawEntries = Array.from(fillGroups.entries()).map(([oldHex, nodes]) => {
+      const tagOriginal = origTagByHex[oldHex] || "";
+      return { oldHex, nodes, tagOriginal };
+    });
 
-    // Controls layout (left = originals+rename integrated, right = picker)
+    rawEntries.sort((a, b) => {
+      const ta = a.tagOriginal || "";
+      const tb = b.tagOriginal || "";
+      const hasA = !!ta;
+      const hasB = !!tb;
+
+      if (hasA && hasB) return cmpTagAsc(ta, tb);
+      if (hasA && !hasB) return -1;
+      if (!hasA && hasB) return 1;
+      return a.oldHex.localeCompare(b.oldHex);
+    });
+
+    // Track replacements to show X in picker
+    const usedReplacementHex = new Set(); // newHex values currently chosen
+
+    // Controls layout
     const controls = document.createElement("div");
-    controls.style.cssText = "display:grid; grid-template-columns: 1.25fr 1fr; gap: 12px; margin-top: 12px;";
+    controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
     host.appendChild(controls);
 
     const left = document.createElement("div");
-    left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `
-      <div style="font-weight:800; margin-bottom:8px;">
-        Colores originales (TAG + hex → reemplazo + renombrar)
-      </div>
-    `;
+    left.style.cssText =
+      "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
+    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar)</div>`;
     controls.appendChild(left);
 
     const right = document.createElement("div");
-    right.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
+    right.style.cssText =
+      "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
     right.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Picker (grilla con tags del Excel)</div>`;
     controls.appendChild(right);
 
@@ -615,26 +611,31 @@
     info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
     right.appendChild(info);
 
-    // "Used" checker for X overlay
-    const isPickerHexUsed = (pickerHex) => {
-      const h = norm(pickerHex);
-      for (const v of STATE.oldToNew.values()) {
-        if (v && norm(v.hex) === h) return true;
-      }
-      return false;
-    };
+    let selectedOldHex = null;
 
-    // Grid picker for replacement colors
-    let gridEl = null;
-    const renderPicker = () => {
-      if (gridEl) gridEl.remove();
-      gridEl = renderGridPicker(({hex:newHex, tag:newTag}) => {
-        if (!STATE.selectedOldHex) {
+    const picker = renderGridPicker({
+      isUsed: (hex) => usedReplacementHex.has(norm(hex)),
+      onPick: ({ hex: newHex, tag: newTag }) => {
+        if (!selectedOldHex) {
           alert("Primero selecciona un color original (panel izquierdo).");
           return;
         }
 
-        const nodes = fillGroups.get(STATE.selectedOldHex) || [];
+        newHex = norm(newHex);
+
+        // Update used set:
+        // 1) remove previously assigned replacement for this oldHex (if any)
+        const row = left.querySelector(`[data-oldhex="${selectedOldHex}"]`);
+        if (row) {
+          const prev = row.getAttribute("data-replhex") || "";
+          if (prev) usedReplacementHex.delete(norm(prev));
+        }
+
+        // 2) add new hex to used set (indicator only)
+        usedReplacementHex.add(newHex);
+
+        // Apply fill to SVG nodes
+        const nodes = fillGroups.get(selectedOldHex) || [];
         nodes.forEach((el) => {
           el.setAttribute("fill", newHex);
           if (el.hasAttribute("style")) {
@@ -642,16 +643,16 @@
           }
         });
 
-        // Save mapping (for X indicator)
-        STATE.oldToNew.set(STATE.selectedOldHex, { hex: newHex, tag: newTag });
-
         // Update row UI
-        const row = left.querySelector(`[data-oldhex="${STATE.selectedOldHex}"]`);
         if (row) {
+          row.setAttribute("data-replhex", newHex);
+
           const swNew = row.querySelector(".sw-new");
           const txt = row.querySelector(".row-text");
-          swNew.style.background = newHex;
-          swNew.style.borderStyle = "solid";
+          if (swNew) {
+            swNew.style.background = newHex;
+            swNew.style.borderStyle = "solid";
+          }
 
           const badgeHost = row.querySelector(".new-badge-host");
           if (badgeHost) {
@@ -659,42 +660,41 @@
             if (newTag) badgeHost.appendChild(makeBadgeCorner(newTag));
           }
 
-          txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
+          if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
         }
 
-        // Re-render picker to show X overlays
-        renderPicker();
-      }, isPickerHexUsed);
+        picker.refreshUsedX();
+      },
+    });
 
-      right.appendChild(gridEl);
-    };
-    renderPicker();
+    right.appendChild(picker.grid);
 
-    // Original colors list (with integrated rename inputs)
+    // Original colors list
     const list = document.createElement("div");
-    list.style.cssText = "display:grid; gap:10px; max-height: 520px; overflow:auto; padding-right: 6px;";
+    list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
 
-    if (!entries.length) {
+    if (!rawEntries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
       empty.textContent = "No detecté fills en el SVG.";
       list.appendChild(empty);
     } else {
-      // Prepare text groups once (for rename mapping)
-      const textGroups = collectTextGroups(recolorSvg); // textContent -> nodes
-      const textKeySet = new Set(Array.from(textGroups.keys()).map(s => s.trim()));
-      // For numeric tags, we rename matching text keys (e.g., "0", "1", "10"...)
-      const getNodesForLabel = (label) => textGroups.get(String(label)) || [];
+      rawEntries.forEach(({ oldHex, tagOriginal }) => {
+        // Collect label nodes for THIS tag now (stable reference)
+        const labelNodes =
+          tagOriginal && tagOriginal.trim()
+            ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
+            : [];
 
-      entries.forEach(({ oldHex, tagOriginal }) => {
         const row = document.createElement("button");
         row.type = "button";
         row.setAttribute("data-oldhex", oldHex);
+        row.setAttribute("data-replhex", "");
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 170px 1fr 140px; /* swatches | meta | rename input */
+          grid-template-columns: 72px 72px 72px 1fr; /* 3 equal boxes */
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -704,28 +704,68 @@
           cursor: pointer;
         `;
 
-        const swWrap = document.createElement("div");
-        swWrap.style.cssText = "display:flex; gap:8px; align-items:center;";
+        // BOX 1: Original tag box
+        const boxTag = document.createElement("div");
+        boxTag.style.cssText = `
+          width:72px; height:44px;
+          border-radius:12px;
+          border:1px solid rgba(0,0,0,.20);
+          background:${oldHex};
+          position:relative;
+          overflow:hidden;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          font-weight:900;
+          font-size:18px;
+          color:${textColorForBg(oldHex)};
+        `;
+        boxTag.textContent = tagOriginal || "";
 
-        const swOld = makeSwatchBase(oldHex, false);
-        if (tagOriginal) swOld.appendChild(makeCenteredTag(tagOriginal, oldHex));
-
-        const arrow = document.createElement("div");
-        arrow.textContent = "→";
-        arrow.style.cssText = "font-weight:900; color: rgba(0,0,0,.55);";
-
-        const swNew = makeSwatchBase("transparent", true);
-        swNew.className = "sw-new";
-
+        // BOX 2: Replacement swatch
+        const boxRepl = document.createElement("div");
+        boxRepl.className = "sw-new";
+        boxRepl.style.cssText = `
+          width:72px; height:44px;
+          border-radius:12px;
+          border:1px dashed rgba(0,0,0,.20);
+          background:transparent;
+          position:relative;
+          overflow:hidden;
+        `;
         const newBadgeHost = document.createElement("div");
         newBadgeHost.className = "new-badge-host";
-        newBadgeHost.setAttribute("style", "position:absolute !important; inset:0 !important;");
-        swNew.appendChild(newBadgeHost);
+        newBadgeHost.style.cssText = "position:absolute; inset:0;";
+        boxRepl.appendChild(newBadgeHost);
 
-        swWrap.appendChild(swOld);
-        swWrap.appendChild(arrow);
-        swWrap.appendChild(swNew);
+        // BOX 3: Rename input (same exact size)
+        const boxRename = document.createElement("div");
+        boxRename.style.cssText = `
+          width:72px; height:44px;
+          border-radius:12px;
+          border:1px solid rgba(0,0,0,.22);
+          background:white;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          padding:0 6px;
+        `;
 
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = tagOriginal || "";
+        input.style.cssText = `
+          width:100%;
+          height:28px;
+          border:0;
+          outline:none;
+          text-align:center;
+          font-size:13px;
+          background:transparent;
+        `;
+        boxRename.appendChild(input);
+
+        // Meta stack
         const stack = document.createElement("div");
         stack.style.cssText = "display:grid; gap:4px;";
 
@@ -743,46 +783,19 @@
         stack.appendChild(meta);
         stack.appendChild(repl);
 
-        // Rename input (small, not stretched)
-        const renameWrap = document.createElement("div");
-        renameWrap.style.cssText = "display:grid; gap:6px; align-items:start;";
-
-        const input = document.createElement("input");
-        input.type = "text";
-        input.placeholder = "Renombrar";
-        input.value = tagOriginal || ""; // default = same label
-        input.style.cssText = `
-          width: 100%;
-          max-width: 140px;
-          padding: 8px 10px;
-          border-radius: 10px;
-          border:1px solid rgba(0,0,0,.22);
-          font-size: 13px;
-        `;
-
-        // Only rename if there are text nodes matching the original label
-        // (e.g., label "0" exists in SVG). If not, typing just does nothing.
+        // Rename behavior: update ONLY the nodes that belonged to original tag
         input.addEventListener("input", () => {
-          const oldLabel = (tagOriginal || "").toString().trim();
-          if (!oldLabel) return;
-          if (!textKeySet.has(oldLabel)) return;
-
-          const nodes = getNodesForLabel(oldLabel);
           const v = input.value;
-          nodes.forEach((t) => (t.textContent = v));
+          labelNodes.forEach((t) => (t.textContent = v));
         });
 
-        renameWrap.appendChild(input);
-
-        row.appendChild(swWrap);
+        row.appendChild(boxTag);
+        row.appendChild(boxRepl);
+        row.appendChild(boxRename);
         row.appendChild(stack);
-        row.appendChild(renameWrap);
 
-        row.addEventListener("click", (e) => {
-          // If user clicked inside input, don't change selection style weirdly
-          if (e && e.target && (e.target.tagName || "").toLowerCase() === "input") return;
-
-          STATE.selectedOldHex = oldHex;
+        row.addEventListener("click", () => {
+          selectedOldHex = oldHex;
           Array.from(list.querySelectorAll("button")).forEach((b) => {
             b.style.outline = "none";
             b.style.boxShadow = "none";
@@ -842,7 +855,8 @@
     const btnSvg = document.createElement("button");
     btnSvg.type = "button";
     btnSvg.textContent = "DOWNLOAD RECOLORED SVG";
-    btnSvg.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+    btnSvg.style.cssText =
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
     btnSvg.addEventListener("click", () => {
       const svgText = new XMLSerializer().serializeToString(recolorSvg);
       downloadText("paintbynumber_recolored.svg", svgText, "image/svg+xml");
@@ -851,12 +865,13 @@
     const btnPng = document.createElement("button");
     btnPng.type = "button";
     btnPng.textContent = "DOWNLOAD RECOLORED PNG";
-    btnPng.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+    btnPng.style.cssText =
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
     btnPng.addEventListener("click", async () => {
       try {
         await downloadSvgAsPng(recolorSvg, "paintbynumber_recolored.png");
       } catch (e) {
-        alert("No pude exportar PNG. Revisa CORS o dime navegador.");
+        alert("No pude exportar PNG. Revisa si el navegador bloqueó el canvas.");
       }
     });
 
@@ -864,77 +879,66 @@
     dl.appendChild(btnPng);
   }
 
-  // ------------------- LAUNCHER (STABLE, NO INFINITE LOAD) -------------------
-  function svgSignature(svg) {
-    if (!svg) return "";
-    // A lightweight signature that changes when a new output appears
-    const vb = svg.getAttribute("viewBox") || "";
-    const childCount = svg.querySelectorAll("*").length;
-    const tCount = svg.querySelectorAll("text").length;
-    return `${vb}|${childCount}|${tCount}`;
-  }
+  // ------------------- LAUNCHER (ANTI-FREEZE) -------------------
+  let scheduled = false;
+  let launcherInjected = false;
 
-  function ensureLauncher(svg) {
+  function ensureLauncher() {
+    const svg = findFinalOutputSvgLight();
+    if (!svg) return;
+
     const host = ensureHostBelowDownloads();
     if (!host) return;
 
-    let bar = host.querySelector("#recolor-launchbar");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "recolor-launchbar";
-      bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-      bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
-      host.appendChild(bar);
-
-      const btn = document.createElement("button");
-      btn.id = "btn-recolor-launch";
-      btn.type = "button";
-      btn.textContent = "Abrir Recolorear";
-      btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
-      btn.addEventListener("click", () => {
-        const current = findFinalOutputSvg();
-        if (!current) {
-          alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera el output.");
-          return;
-        }
-        openEditor(current);
-      });
-      bar.appendChild(btn);
-
-      const hint = document.createElement("div");
-      hint.id = "recolor-hint";
-      hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-      hint.textContent = "Original: tag centrado. Reemplazo: tag Excel en esquina. Renombrar: input a la derecha.";
-      host.appendChild(hint);
+    if (document.getElementById("btn-recolor-launch")) {
+      launcherInjected = true;
+      return;
     }
 
-    // Update signature (not strictly needed, but helps avoid weird state)
-    STATE.lastSvgSig = svgSignature(svg);
+    const bar = document.createElement("div");
+    bar.id = "recolor-launchbar";
+    bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
+
+    const btn = document.createElement("button");
+    btn.id = "btn-recolor-launch";
+    btn.type = "button";
+    btn.textContent = "Abrir Recolorear";
+    btn.style.cssText =
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+    btn.addEventListener("click", () => {
+      const current = findFinalOutputSvgLight();
+      if (!current) return alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera el output.");
+      openEditor(current);
+    });
+
+    bar.appendChild(btn);
+    host.appendChild(bar);
+
+    const hint = document.createElement("div");
+    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
+    hint.textContent = "Lista ordenada por tag. 3 cajas iguales: tag / reemplazo / renombrar. Picker marca X si el color ya está usado.";
+    host.appendChild(hint);
+
+    launcherInjected = true;
   }
 
-  // Throttled observer to avoid “page never finishes”
-  let scheduled = false;
   function scheduleCheck() {
     if (scheduled) return;
     scheduled = true;
+
+    // big debounce to avoid fighting the generator
     setTimeout(() => {
       scheduled = false;
-      const svg = findFinalOutputSvg();
-      if (!svg) return;
-
-      const sig = svgSignature(svg);
-      // Only ensure launcher when new output appears OR first time
-      if (!STATE.mounted || sig !== STATE.lastSvgSig) {
-        STATE.mounted = true;
-        ensureLauncher(svg);
-      }
-    }, 120);
+      if (!launcherInjected) ensureLauncher();
+    }, 600);
   }
 
   const observer = new MutationObserver(() => scheduleCheck());
-  observer.observe(document.documentElement, { subtree: true, childList: true });
+  observer.observe(document.body, { subtree: true, childList: true });
 
-  window.addEventListener("load", () => setTimeout(scheduleCheck, 300));
-  // initial kick
-  scheduleCheck();
+  window.addEventListener("load", () => {
+    setTimeout(ensureLauncher, 300);
+    setTimeout(ensureLauncher, 1200);
+  });
 })();
