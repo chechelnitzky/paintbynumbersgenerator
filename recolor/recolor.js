@@ -1,14 +1,9 @@
-/* Recolor add-on (v8.5 - FIX LOAD ISSUE, keeps UI exactly as you want)
-   ✅ FIX: removes global MutationObserver + avoids inserting host into <body> before downloads exist
-      -> stops the “ruedita / carga infinita” side effects + restores example thumbnails (small/medium)
-   ✅ Launcher now appears ONLY when the generator has the download row / output area
-      (polls lightly after load + after clicking PROCESS IMAGE / DOWNLOAD SVG)
-   ✅ Keeps all your current UI fixes:
-      - Sorted by original TAG asc (0..n)
-      - Rename input INSIDE the same row, 3 equal boxes
-      - Picker shows X when a color is already used (indicator only)
-      - Colores OFF hides fills but keeps text colors as-is
-      - Bordes ON/OFF
+/* Recolor add-on (v8.6 - HARD RELOAD SAFE + AUTO-FILL RENAME)
+   ✅ FIX hard reload: NO DOM insertion inside generator tree (no host under downloads)
+      -> avoids hydration / render loops -> restores thumbnails small/medium + stops “ruedita”
+   ✅ Launcher is a floating button (outside app DOM). Editor opens in modal overlay.
+   ✅ Rename input stays editable, BUT when picking a palette color it auto-fills with that color TAG/number.
+   ✅ Keeps your UI layout inside editor: 2 previews + left list 3 equal boxes + picker X indicator + toggles + download.
 */
 
 (function () {
@@ -23,9 +18,7 @@
   function rgbToHex(rgb) {
     const m = (rgb || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
     if (!m) return null;
-    const r = Number(m[1]),
-      g = Number(m[2]),
-      b = Number(m[3]);
+    const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
     const to2 = (n) => n.toString(16).padStart(2, "0");
     return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
   }
@@ -101,7 +94,7 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
-  // ---------- Find output SVG (no layout reads) ----------
+  // ---------- Find output SVG ----------
   function findFinalOutputSvgLight() {
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
@@ -120,7 +113,7 @@
     return best;
   }
 
-  // ---------- Locate download row and mount host ----------
+  // ---------- Detect readiness (downloads row exists) ----------
   function findDownloadButtonsRow() {
     const btns = Array.from(document.querySelectorAll("button, a"));
     const hits = btns.filter((b) => {
@@ -138,28 +131,8 @@
     return hits[0].parentElement || null;
   }
 
-  // ✅ FIX: DO NOT append host to body early.
-  // Only create host when download row exists (i.e., when generator output area is ready).
-  function ensureHostBelowDownloads() {
-    let host = document.getElementById("recolor-host");
-    if (host) return host;
-
-    const downloadsRow = findDownloadButtonsRow();
-    if (!downloadsRow || !downloadsRow.parentElement) return null;
-
-    host = document.createElement("div");
-    host.id = "recolor-host";
-    host.style.cssText = `
-      margin-top: 14px;
-      padding: 14px;
-      border: 1px solid rgba(0,0,0,.12);
-      border-radius: 12px;
-      background: rgba(255,255,255,.96);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    `;
-
-    downloadsRow.parentElement.insertBefore(host, downloadsRow.nextSibling);
-    return host;
+  function isGeneratorReady() {
+    return !!findDownloadButtonsRow() && !!findFinalOutputSvgLight();
   }
 
   // ---------- Group fills ----------
@@ -202,8 +175,7 @@
     img.decoding = "async";
 
     const vb = svgEl.getAttribute("viewBox");
-    let w = 1600,
-      h = 1600;
+    let w = 1600, h = 1600;
     if (vb) {
       const parts = vb.split(/\s+/).map(Number);
       if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
@@ -244,7 +216,7 @@
     );
   }
 
-  // ---------- SVG style injection (toggles without losing edits) ----------
+  // ---------- SVG style injection (toggles) ----------
   function ensureSvgStyle(svg, id) {
     let style = svg.querySelector(`#${id}`);
     if (style) return style;
@@ -273,11 +245,9 @@
     style.textContent = on
       ? ""
       : `
-        /* hide paint area fills */
         path, polygon, rect, circle, ellipse {
           fill: none !important;
         }
-        /* IMPORTANT: keep existing text fill (do NOT force black) */
       `;
   }
 
@@ -415,35 +385,6 @@
   }
 
   // ---------- ORIGINAL tag mapping ----------
-  function buildOriginalTagByHexFromTopSwatches() {
-    const map = {}; // hex -> tagOriginal
-
-    const candidates = Array.from(document.querySelectorAll("button, div, span")).filter((el) => {
-      if (!el || !el.textContent) return false;
-      if (el.closest && el.closest("#recolor-host")) return false;
-
-      const t = (el.textContent || "").trim();
-      if (!t) return false;
-      if (!/^[a-z0-9]{1,6}$/i.test(t)) return false;
-
-      const r = el.getBoundingClientRect();
-      if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
-
-      const bg = getComputedStyle(el).backgroundColor;
-      if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
-
-      return true;
-    });
-
-    for (const el of candidates) {
-      const tag = (el.textContent || "").trim();
-      const bg = getComputedStyle(el).backgroundColor;
-      const hex = rgbToHex(bg);
-      if (hex && !map[hex]) map[hex] = tag;
-    }
-    return map;
-  }
-
   function buildOriginalTagByHexFromSvgLegend(svg) {
     const map = {};
     if (!svg) return map;
@@ -496,10 +437,86 @@
     return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
   }
 
+  // ---------- Modal host (SAFE: outside generator tree) ----------
+  function openModal() {
+    const existing = document.getElementById("recolor-modal");
+    if (existing) existing.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "recolor-modal";
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.28);
+      z-index: 2147483647;
+      overflow: auto;
+      padding: 22px;
+    `;
+
+    const card = document.createElement("div");
+    card.style.cssText = `
+      max-width: 1200px;
+      margin: 0 auto;
+      background: rgba(255,255,255,.98);
+      border: 1px solid rgba(0,0,0,.14);
+      border-radius: 16px;
+      box-shadow: 0 24px 80px rgba(0,0,0,.25);
+      padding: 14px;
+    `;
+
+    const topbar = document.createElement("div");
+    topbar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+
+    const title = document.createElement("div");
+    title.style.cssText = "font-weight:900;";
+    title.textContent = `Recoloreo (paleta ${PALETTE.length})`;
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "Cerrar";
+    close.style.cssText =
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+    close.addEventListener("click", () => overlay.remove());
+
+    topbar.appendChild(title);
+    topbar.appendChild(close);
+
+    card.appendChild(topbar);
+
+    const host = document.createElement("div");
+    host.id = "recolor-host";
+    host.style.cssText = `
+      margin-top: 10px;
+      padding: 14px;
+      border: 1px solid rgba(0,0,0,.12);
+      border-radius: 12px;
+      background: rgba(255,255,255,.96);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    `;
+    card.appendChild(host);
+
+    overlay.appendChild(card);
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+    document.addEventListener(
+      "keydown",
+      function onEsc(e) {
+        if (e.key === "Escape") {
+          overlay.remove();
+          document.removeEventListener("keydown", onEsc);
+        }
+      },
+      { once: true }
+    );
+
+    document.body.appendChild(overlay);
+    return host;
+  }
+
   // ---------- Editor ----------
   function openEditor(originalSvg) {
-    const host = ensureHostBelowDownloads();
-    if (!host) return alert("Aún no está listo el output. Genera el SVG (PROCESS IMAGE) y vuelve a intentar.");
+    const host = openModal();
     host.innerHTML = "";
 
     const header = document.createElement("div");
@@ -518,9 +535,9 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    const topMap = buildOriginalTagByHexFromTopSwatches();
+    // Build tag map (prefer SVG legend = fast & reliable)
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
-    const origTagByHex = { ...topMap, ...legendMap };
+    const origTagByHex = { ...legendMap };
 
     let colorsOn = true;
     let bordersOn = true;
@@ -646,6 +663,16 @@
           }
 
           if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
+
+          // ✅ FIX #2: auto-fill rename input with picked TAG (but stays editable)
+          if (newTag) {
+            const renameInput = row.querySelector('input[data-role="rename"]');
+            if (renameInput) {
+              renameInput.value = newTag;
+              // Trigger same path that updates SVG text nodes
+              renameInput.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
         }
 
         picker.refreshUsedX();
@@ -734,6 +761,7 @@
         const input = document.createElement("input");
         input.type = "text";
         input.value = tagOriginal || "";
+        input.setAttribute("data-role", "rename"); // ✅ used by auto-fill
         input.style.cssText = `
           width:100%;
           height:28px;
@@ -853,87 +881,87 @@
     dl.appendChild(btnPng);
   }
 
-  // ------------------- LAUNCHER (LIGHT POLL, NO OBSERVER) -------------------
-  let launcherInjected = false;
-  let polling = false;
+  // ---------- Floating launcher (outside generator tree) ----------
+  function ensureFab() {
+    let fab = document.getElementById("recolor-fab");
+    if (fab) return fab;
 
-  function ensureLauncher() {
-    if (launcherInjected) return true;
-
-    const host = ensureHostBelowDownloads();
-    if (!host) return false;
-
-    if (document.getElementById("btn-recolor-launch")) {
-      launcherInjected = true;
-      return true;
-    }
-
-    const svg = findFinalOutputSvgLight();
-    if (!svg) return false;
-
-    const bar = document.createElement("div");
-    bar.id = "recolor-launchbar";
-    bar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-    bar.innerHTML = `<div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>`;
+    fab = document.createElement("div");
+    fab.id = "recolor-fab";
+    fab.style.cssText = `
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 2147483646;
+      display: none;
+      gap: 8px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.96);
+      border: 1px solid rgba(0,0,0,.14);
+      box-shadow: 0 12px 40px rgba(0,0,0,.18);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    `;
 
     const btn = document.createElement("button");
-    btn.id = "btn-recolor-launch";
     btn.type = "button";
     btn.textContent = "Abrir Recolorear";
     btn.style.cssText =
       "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+
     btn.addEventListener("click", () => {
       const current = findFinalOutputSvgLight();
       if (!current) return alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera el output.");
       openEditor(current);
     });
 
-    bar.appendChild(btn);
-    host.appendChild(bar);
+    const status = document.createElement("div");
+    status.id = "recolor-fab-status";
+    status.style.cssText = "font-size: 12px; color: rgba(0,0,0,.65); white-space:nowrap;";
+    status.textContent = "Esperando output…";
 
-    const hint = document.createElement("div");
-    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-top: 6px;";
-    hint.textContent =
-      "Lista ordenada por tag. 3 cajas iguales: tag / reemplazo / renombrar. Picker marca X si el color ya está usado.";
-    host.appendChild(hint);
+    fab.appendChild(btn);
+    fab.appendChild(status);
+    document.body.appendChild(fab);
 
-    launcherInjected = true;
-    return true;
+    return fab;
   }
 
-  function startPoll() {
-    if (polling || launcherInjected) return;
-    polling = true;
-
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries++;
-      const ok = ensureLauncher();
-      if (ok || tries >= 40) {
-        clearInterval(timer);
-        polling = false;
-      }
-    }, 250);
+  function updateFab() {
+    const fab = ensureFab();
+    const status = document.getElementById("recolor-fab-status");
+    const ready = isGeneratorReady();
+    fab.style.display = ready ? "flex" : "none";
+    if (status) status.textContent = ready ? "Output detectado" : "Esperando output…";
   }
 
-  // Run a light poll on load (won’t touch DOM until downloads exist)
+  // Minimal checks only (no interval spam)
+  function scheduleUpdate() {
+    setTimeout(updateFab, 120);
+  }
+
   window.addEventListener("load", () => {
-    setTimeout(startPoll, 250);
-    setTimeout(startPoll, 1200);
+    setTimeout(updateFab, 650);
+    setTimeout(updateFab, 1600);
   });
 
-  // Also poll after user actions that create output
   document.addEventListener(
     "click",
     (e) => {
       const el = e.target && e.target.closest ? e.target.closest("button, a") : null;
       if (!el) return;
-
       const t = norm(el.textContent);
       if (t.includes("process image") || t.includes("download svg") || t.includes("download png") || t.includes("output")) {
-        setTimeout(startPoll, 50);
+        scheduleUpdate();
+        setTimeout(updateFab, 600);
       }
     },
     true
   );
+
+  // First paint
+  try {
+    updateFab();
+  } catch (_) {}
 })();
