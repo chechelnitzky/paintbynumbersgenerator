@@ -1,10 +1,13 @@
-/* Recolor add-on (v8.8 - FIX ORIGINAL TAG READ + RENAME WORKS)
-   ✅ Reads ORIGINAL tags directly from SVG numbers (0/1/2/...) by sampling underlying fill via elementFromPoint
-      -> works even when there is NO legend
-   ✅ Renombrar now correctly updates those SVG <text> nodes
-   ✅ On picker selection: rename input becomes picked TAG (WG7/43/etc) immediately + still editable
-   ✅ Text Color mode: ON/OFF + opacity slider colors each <text> using its replacement hex
-   ✅ Hard reload safe: floating FAB + modal overlay (no insertion into generator tree)
+/* Recolor add-on (v8.9 - RESTORE ORIGINAL TAGS + SORT + RENAME FIX)
+   ✅ Restores ORIGINAL tag detection (0..n) like before:
+      1) From top swatches/labels in generator UI (works best for your frog case)
+      2) From SVG legend (if present)
+      3) Fallback: from SVG geometry proximity (no elementFromPoint, so overlay-safe)
+   ✅ Sorts rows by ORIGINAL TAG asc again
+   ✅ Renombrar edits the correct SVG <text> nodes again
+   ✅ Auto-rename on pick (rename box becomes picker tag) + editable
+   ✅ Color textos ON/OFF + opacity slider uses replacement hex
+   ✅ Hard reload safe: floating FAB + modal overlay
 */
 
 (function () {
@@ -383,90 +386,140 @@
     return { grid, refreshUsedX };
   }
 
-  // ---------- NEW: ORIGINAL tag mapping from SVG numbers ----------
-  // Reads each <text> tag (0/1/2/...) and samples the underlying shape fill by screen point.
-  function buildOriginalTagByHexFromSvgNumbers(svgInDom) {
-    const map = {}; // oldHex -> tagOriginal
-    if (!svgInDom) return map;
+  // ---------- ORIGINAL TAG MAPPING (restored) ----------
+  // 1) Best: read from generator UI swatches/labels (this is what gave you correct 0..n before)
+  function buildOriginalTagByHexFromTopSwatches() {
+    const map = {}; // hex -> tag
 
-    const texts = Array.from(svgInDom.querySelectorAll("text")).filter((t) => {
-      const s = (t.textContent || "").toString().trim();
-      return s && isTagLike(s);
+    // Heuristic: small square-ish colored chips with a short tag text over it
+    const candidates = Array.from(document.querySelectorAll("button, div, span"))
+      .filter((el) => el && el.textContent && !el.closest("#recolor-modal") && !el.closest("#recolor-fab"))
+      .filter((el) => {
+        const t = (el.textContent || "").trim();
+        if (!t || !isTagLike(t)) return false;
+
+        const r = el.getBoundingClientRect();
+        if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
+
+        const bg = getComputedStyle(el).backgroundColor;
+        if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
+
+        return true;
+      });
+
+    for (const el of candidates) {
+      const tag = (el.textContent || "").trim();
+      const bg = getComputedStyle(el).backgroundColor;
+      const hex = rgbToHex(bg);
+      if (hex && !map[hex]) map[hex] = tag;
+    }
+    return map;
+  }
+
+  // 2) Legend inside SVG (if present)
+  function buildOriginalTagByHexFromSvgLegend(svg) {
+    const map = {};
+    if (!svg) return map;
+
+    const rects = Array.from(svg.querySelectorAll("rect")).filter((r) => {
+      const w = parseFloat(r.getAttribute("width") || "0");
+      const h = parseFloat(r.getAttribute("height") || "0");
+      return w > 6 && h > 6 && w <= 140 && h <= 140;
     });
+
+    for (const rect of rects) {
+      const fill = (rect.getAttribute("fill") || "").trim();
+      let hex = "";
+      if (fill.startsWith("#") && fill.length === 7) hex = fill.toLowerCase();
+      else if (fill.startsWith("rgb")) hex = rgbToHex(fill) || "";
+      if (!hex) continue;
+
+      const parent = rect.parentElement;
+      if (!parent) continue;
+
+      const kids = Array.from(parent.children);
+      const idx = kids.indexOf(rect);
+      if (idx === -1) continue;
+
+      const near = kids.slice(idx + 1, idx + 6).find(
+        (n) => n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
+      );
+
+      if (near) {
+        const tag = (near.textContent || "").trim();
+        if (tag && isTagLike(tag) && !map[hex]) map[hex] = tag;
+      }
+    }
+    return map;
+  }
+
+  // 3) Overlay-safe fallback: assign each fill hex the nearest tag text inside the SVG (proximity)
+  function buildOriginalTagByHexFromSvgProximity(svg, fillGroups) {
+    const map = {};
+    if (!svg || !fillGroups || !fillGroups.size) return map;
+
+    const texts = Array.from(svg.querySelectorAll("text"))
+      .map((t) => {
+        const tag = (t.textContent || "").toString().trim();
+        if (!tag || !isTagLike(tag)) return null;
+        let bb;
+        try { bb = t.getBBox(); } catch (_) { return null; }
+        if (!bb) return null;
+        return { tag, cx: bb.x + bb.width / 2, cy: bb.y + bb.height / 2 };
+      })
+      .filter(Boolean);
 
     if (!texts.length) return map;
 
-    // Temporarily disable pointer events for text so elementFromPoint hits the shape below
-    const prevPE = [];
-    texts.forEach((t, i) => {
-      prevPE[i] = t.style.pointerEvents;
-      t.style.pointerEvents = "none";
-    });
+    // For each fill group, approximate its center from a sample of nodes
+    for (const [hex, nodes] of fillGroups.entries()) {
+      let sumX = 0, sumY = 0, count = 0;
 
-    try {
-      const svg = svgInDom;
-      const ctm = svg.getScreenCTM && svg.getScreenCTM();
-      if (!ctm) return map;
-
-      const pt = svg.createSVGPoint();
-
-      for (const t of texts) {
+      const sample = nodes.slice(0, 40); // keep light
+      for (const el of sample) {
         let bb;
-        try {
-          bb = t.getBBox();
-        } catch (_) {
-          continue;
-        }
-        if (!bb || !(bb.width > 0) || !(bb.height > 0)) continue;
-
-        const tag = (t.textContent || "").toString().trim();
-
-        // center of the text bbox in SVG coords
-        pt.x = bb.x + bb.width / 2;
-        pt.y = bb.y + bb.height / 2;
-
-        const sp = pt.matrixTransform(ctm);
-        const el = document.elementFromPoint(sp.x, sp.y);
-
-        if (!el) continue;
-
-        // If still hits SVG <text> or <tspan>, try small offset points
-        const candidates = [el];
-        const offsets = [
-          [0, 0],
-          [2, 2],
-          [-2, 2],
-          [2, -2],
-          [-2, -2],
-        ];
-        let hit = null;
-        for (const [dx, dy] of offsets) {
-          const e2 = document.elementFromPoint(sp.x + dx, sp.y + dy);
-          if (!e2) continue;
-          const name = (e2.tagName || "").toLowerCase();
-          if (name !== "text" && name !== "tspan") {
-            hit = e2;
-            break;
-          }
-        }
-        if (!hit) hit = candidates[0];
-
-        const fill = getElementFill(hit);
-        if (!fill) continue;
-        const hex = norm(fill);
-        if (!isHex6(hex)) continue;
-
-        // Only set first time (stable)
-        if (!map[hex]) map[hex] = tag;
+        try { bb = el.getBBox(); } catch (_) { continue; }
+        if (!bb) continue;
+        sumX += bb.x + bb.width / 2;
+        sumY += bb.y + bb.height / 2;
+        count++;
       }
-    } finally {
-      // restore pointer events
-      texts.forEach((t, i) => {
-        t.style.pointerEvents = prevPE[i] || "";
-      });
+      if (!count) continue;
+
+      const cx = sumX / count;
+      const cy = sumY / count;
+
+      let best = null;
+      let bestD = Infinity;
+      for (const t of texts) {
+        const dx = t.cx - cx;
+        const dy = t.cy - cy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = t;
+        }
+      }
+      if (best && !map[hex]) map[hex] = best.tag;
     }
 
     return map;
+  }
+
+  function isNumericTag(t) {
+    return /^-?\d+(\.\d+)?$/.test((t || "").toString().trim());
+  }
+
+  function cmpTagAsc(a, b) {
+    const ta = (a || "").toString().trim();
+    const tb = (b || "").toString().trim();
+    const na = isNumericTag(ta) ? Number(ta) : null;
+    const nb = isNumericTag(tb) ? Number(tb) : null;
+
+    if (na !== null && nb !== null) return na - nb;
+    if (na !== null && nb === null) return -1;
+    if (na === null && nb !== null) return 1;
+    return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
   }
 
   // ---------- Modal host ----------
@@ -552,6 +605,11 @@
     const host = openModal();
     host.innerHTML = "";
 
+    const originalClone = originalSvg.cloneNode(true);
+    const recolorSvg = originalSvg.cloneNode(true);
+    makePreview(originalClone);
+    makePreview(recolorSvg);
+
     const header = document.createElement("div");
     header.style.cssText =
       "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
@@ -563,14 +621,8 @@
     `;
     host.appendChild(header);
 
-    const originalClone = originalSvg.cloneNode(true);
-    const recolorSvg = originalSvg.cloneNode(true);
-    makePreview(originalClone);
-    makePreview(recolorSvg);
-
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
-
     const panel = (title, node) => {
       const wrap = document.createElement("div");
       wrap.style.cssText = `
@@ -596,56 +648,27 @@
       wrap.appendChild(viewport);
       return wrap;
     };
-
     previews.appendChild(panel("Original", originalClone));
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
-    // Toggles state
-    let colorsOn = true;
-    let bordersOn = true;
-    let textColorModeOn = false;
-    let textOpacity = 0.7;
-
-    setColorFills(recolorSvg, colorsOn);
-    setBorders(recolorSvg, bordersOn);
-
+    // Build fills
     const fillGroups = collectFillGroups(recolorSvg);
 
-    // ✅ CRITICAL FIX: map oldHex -> original tag from the actual SVG numbers
-    // Needs SVG to be in DOM -> run after one frame
-    const origTagByHex = {};
+    // ✅ RESTORED: build original tag map BEFORE building rows
+    const topMap = buildOriginalTagByHexFromTopSwatches();          // hex -> tag
+    const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg); // hex -> tag
+    const proxMap = buildOriginalTagByHexFromSvgProximity(recolorSvg, fillGroups); // hex -> tag
 
-    function computeOrigTagMap() {
-      const fromNumbers = buildOriginalTagByHexFromSvgNumbers(originalClone);
-      Object.assign(origTagByHex, fromNumbers);
-    }
-    // immediate + next frame for safety
-    computeOrigTagMap();
-    requestAnimationFrame(computeOrigTagMap);
+    // Merge priority: top > legend > proximity
+    const tagByHex = { ...proxMap, ...legendMap, ...topMap };
 
-    // Build entries AFTER map is ready (but also safe if partial)
+    // Entries
     const rawEntries = Array.from(fillGroups.entries()).map(([oldHex, nodes]) => {
       const hex = norm(oldHex);
-      const tagOriginal = origTagByHex[hex] || "";
+      const tagOriginal = tagByHex[hex] || "";
       return { oldHex: hex, nodes, tagOriginal };
     });
-
-    // Sort by tag if possible
-    function isNumericTag(t) {
-      return /^-?\d+(\.\d+)?$/.test((t || "").toString().trim());
-    }
-    function cmpTagAsc(a, b) {
-      const ta = (a || "").toString().trim();
-      const tb = (b || "").toString().trim();
-      const na = isNumericTag(ta) ? Number(ta) : null;
-      const nb = isNumericTag(tb) ? Number(tb) : null;
-
-      if (na !== null && nb !== null) return na - nb;
-      if (na !== null && nb === null) return -1;
-      if (na === null && nb !== null) return 1;
-      return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
-    }
 
     rawEntries.sort((a, b) => {
       const ta = a.tagOriginal || "";
@@ -659,8 +682,19 @@
       return a.oldHex.localeCompare(b.oldHex);
     });
 
+    // Toggles state
+    let colorsOn = true;
+    let bordersOn = true;
+    let textColorModeOn = false;
+    let textOpacity = 0.7;
+
+    setColorFills(recolorSvg, colorsOn);
+    setBorders(recolorSvg, bordersOn);
+
+    // Used replacement tracker
     const usedReplacementHex = new Set();
 
+    // Layout
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
     host.appendChild(controls);
@@ -686,6 +720,7 @@
     list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
 
+    // Selection
     let selectedOldHex = null;
 
     // Row state maps
@@ -693,6 +728,7 @@
     const renameInputByOldHex = new Map();
     const labelNodesByOldHex = new Map();
 
+    // Text color mode helpers
     function snapshotTextOriginal(textEl) {
       if (!textEl || !textEl.dataset) return;
       if (textEl.dataset.recolorOrigFill === undefined) {
@@ -762,6 +798,7 @@
       if (textColorModeOn) applyTextColors();
     }
 
+    // Picker
     const picker = renderGridPicker({
       isUsed: (hex) => usedReplacementHex.has(norm(hex)),
       onPick: ({ hex: newHex, tag: newTag }) => {
@@ -806,7 +843,7 @@
 
           if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
 
-          // ✅ EXACT REQUEST: rename becomes picker tag immediately
+          // ✅ EXACT: rename becomes picker tag immediately
           if (newTag) setRenameForOldHex(selectedOldHex, newTag);
         }
 
@@ -817,9 +854,9 @@
 
     right.appendChild(picker.grid);
 
-    // Build rows
+    // Rows
     rawEntries.forEach(({ oldHex, tagOriginal }) => {
-      // IMPORTANT: find text nodes by original tag (0/1/2/3)
+      // Find label nodes by original tag (this is what makes renombrar work)
       const labelNodes =
         tagOriginal && tagOriginal.trim()
           ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
@@ -888,8 +925,7 @@
 
       const input = document.createElement("input");
       input.type = "text";
-      input.value = tagOriginal || ""; // ✅ should be 0/1/2/3 now
-      input.setAttribute("data-role", "rename");
+      input.value = tagOriginal || ""; // ✅ restored original tag prefill (0..n)
       input.style.cssText = `
         width:100%;
         height:28px;
@@ -906,7 +942,9 @@
 
       const meta = document.createElement("div");
       meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
-      meta.textContent = tagOriginal ? `Tag original: ${tagOriginal} | Color: ${oldHex}` : `Color: ${oldHex}`;
+      meta.textContent = tagOriginal
+        ? `Tag original: ${tagOriginal} | Color: ${oldHex}`
+        : `Color: ${oldHex}`;
 
       const repl = document.createElement("div");
       repl.className = "row-text";
@@ -1027,7 +1065,7 @@
 
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-    hint.textContent = "Renombrar ahora edita los tags reales (0/1/2/...). Color textos usa el HEX del reemplazo + opacidad.";
+    hint.textContent = "Orden y tags originales (0..n) restaurados. Renombrar vuelve a editar los textos reales.";
 
     togglesRow.appendChild(togglesLeft);
     togglesRow.appendChild(hint);
@@ -1063,26 +1101,6 @@
 
     dl.appendChild(btnSvg);
     dl.appendChild(btnPng);
-
-    // ✅ After one more frame, recompute tag map and refresh rows if needed (covers first render timing)
-    requestAnimationFrame(() => {
-      const map2 = buildOriginalTagByHexFromSvgNumbers(originalClone);
-      let changed = false;
-
-      for (const [oldHex, row] of rowByOldHex.entries()) {
-        const current = renameInputByOldHex.get(oldHex)?.value || "";
-        const wanted = map2[oldHex] || "";
-        // Only fix if current is empty OR clearly wrong (e.g., comes from picker tags earlier)
-        if (wanted && current !== wanted && (current === "" || !/^\d+$/.test(current))) {
-          // don’t clobber if user already typed; this is only for initial wrong prefills
-          setRenameForOldHex(oldHex, wanted);
-          const box = row.querySelector("div");
-          if (box) box.textContent = wanted;
-          changed = true;
-        }
-      }
-      if (changed && textColorModeOn) applyTextColors();
-    });
   }
 
   // ---------- Floating launcher ----------
@@ -1128,6 +1146,7 @@
     fab.appendChild(btn);
     fab.appendChild(status);
     document.body.appendChild(fab);
+
     return fab;
   }
 
