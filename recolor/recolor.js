@@ -1,28 +1,23 @@
-/* Recolor add-on (v11.0 - GLOBAL 1:1 SUGGESTIONS + ΔE00 ENGINE + ALL FIXES)
-   ✅ Hard reload safe: FAB + modal overlay
-   ✅ ORIGINAL tag detection restored + sort asc
-   ✅ Rename works on real SVG text nodes
-   ✅ Auto-rename on pick: rename input becomes picker tag (still editable)
-   ✅ Picker shows X when a color is already used (indicator only)
-   ✅ Colores ON/OFF, Bordes ON/OFF
-   ✅ Color textos toggle + Opacity slider ALWAYS applies (ON or OFF, color or black)
-   ✅ EXPORT FIX: text opacity is “baked” before SVG/PNG export
-   ✅ PNG download fixed + HQ export (scale 10x default) + robust download
-   ✅ Buttons: press feedback + loading spinner while exporting
-   ✅ Memory: persists mappings + UI between close/reopen, resets only on new output signature
-
-   🆕 SUGGESTION ENGINE (FIX REQUESTED):
-      - ΔE00 base + PBN neutral penalty (GAMMA) + anti-dark (tie) already available
-      - GLOBAL 1:1 assignment (no repeats) with Hungarian + L* rank preservation + hue coherence
-      - Refinement by swaps to preserve gradients/transitions (graph KNN, ITER)
-      - UI toggle: “Sugerencia 1:1 (sin repetir) + Preservar escala” (default ON)
-
-   Parameters default:
-     ALPHA=1.2, BETA=0.15, GAMMA=0.08, DELTA=0.35,
-     C_NEUTRAL=6.0, K=3, ITER=800, EPS_TIE=0.35
+/* Recolor add-on (v11.2.0)
+   ✅ Versioned addon (ADDON_VERSION always present)
+   ✅ Page small version title injected above "Paint by number generator"
+   ✅ Text color fix: OFF uses ORIGINAL SVG text fill (not forced black). Slider always applies.
+   ✅ Suggestion modes selector:
+        1) OFF (Closest) [DEFAULT]
+        2) SOFT (recommended)
+        3) HARD (experimental)
+   ✅ SOFT optimization: context + reuse penalty + dark/neutral penalties + highlight/shadow filtering
+   ✅ HARD: Hungarian 1:1 over scoreBase (no repeats) + N>167 handling
+   ✅ UI preserved (picker, renombrar, toggles, downloads)
 */
 
 (function () {
+  // =====================================================================
+  // VERSION (FIX #2: always have a version number)
+  // =====================================================================
+  const ADDON_VERSION = "11.2.0";
+  const ADDON_NAME = `Recolor ${ADDON_VERSION}`;
+
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map((x) => x.hex);
@@ -31,8 +26,36 @@
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
   const isTagLike = (t) => /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim());
 
+  // =====================================================================
+  // FIX #1: inject small version title above the page title
+  // =====================================================================
+  function injectVersionTitleAboveH1() {
+    // Find the main H1 that says "Paint by number generator"
+    const h1 = Array.from(document.querySelectorAll("h1, h2, .title, header h1"))
+      .find((el) => /paint by number generator/i.test((el.textContent || "").trim()));
+    if (!h1) return;
+
+    // Avoid duplicates
+    if (document.getElementById("pbn-addon-version-title")) return;
+
+    const small = document.createElement("div");
+    small.id = "pbn-addon-version-title";
+    small.textContent = ADDON_NAME;
+    small.style.cssText = `
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .02em;
+      color: rgba(220, 38, 38, .95); /* red-ish, subtle */
+      margin: 2px 0 6px 0;
+      line-height: 1.1;
+    `;
+
+    // Insert above the title
+    h1.parentNode.insertBefore(small, h1);
+  }
+
   // ---------- Memory ----------
-  const STORAGE_KEY = "recolor_state_v110";
+  const STORAGE_KEY = "recolor_state_v1120";
   let saveTimer = null;
 
   function safeJsonParse(s) {
@@ -70,6 +93,9 @@
       .recolor-suggest { transition: transform 80ms ease, box-shadow 120ms ease; }
       .recolor-suggest:hover { box-shadow: 0 10px 18px rgba(0,0,0,.12); }
       .recolor-suggest:active { transform: translateY(1px) scale(.99); }
+      .recolor-seg { display:inline-flex; border:1px solid rgba(0,0,0,.18); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.88); }
+      .recolor-seg button { border:0; background:transparent; padding:10px 12px; font-weight:900; cursor:pointer; font-size:12px; }
+      .recolor-seg button.active { background:white; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
     `;
     document.head.appendChild(st);
   }
@@ -145,15 +171,11 @@
     return null;
   }
 
-  // ========================================================================
-  //  COLOR SCIENCE ENGINE (ΔE00 + GLOBAL 1:1 SUGGESTIONS)
-  // ========================================================================
+  // =====================================================================
+  //  COLOR SCIENCE ENGINE (ΔE00 + SOFT/HARD suggestion modes)
+  // =====================================================================
 
-  // --- sRGB -> linear ---
-  function srgbToLinear(u) {
-    return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4);
-  }
-  // --- linear -> XYZ D65 ---
+  function srgbToLinear(u) { return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4); }
   function rgb01ToXyzD65(r, g, b) {
     const R = srgbToLinear(r), G = srgbToLinear(g), B = srgbToLinear(b);
     return {
@@ -163,14 +185,11 @@
     };
   }
   function fLab(t) { return t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16 / 116); }
-  // --- XYZ -> Lab (D65) ---
   function xyzToLabD65(x, y, z) {
     const Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
     const fx = fLab(x / Xn), fy = fLab(y / Yn), fz = fLab(z / Zn);
     return { L: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
   }
-
-  // hex -> Lab + C/h
   function hexToLab(hex) {
     const h = (hex || "").replace("#", "").trim();
     if (h.length !== 6) return null;
@@ -186,8 +205,6 @@
     if (hDeg < 0) hDeg += 360;
     return { L: lab.L, a: lab.a, b: lab.b, C, h: hDeg };
   }
-
-  // ΔE00 standard (kL=kC=kH=1)
   function deltaE00(lab1, lab2) {
     const L1 = lab1.L, a1 = lab1.a, b1 = lab1.b;
     const L2 = lab2.L, a2 = lab2.a, b2 = lab2.b;
@@ -251,19 +268,18 @@
 
     return Math.sqrt(
       Math.pow(dLp / (kL * SL), 2) +
-        Math.pow(dCp / (kC * SC), 2) +
-        Math.pow(dHp / (kH * SH), 2) +
-        RT * (dCp / (kC * SC)) * (dHp / (kH * SH))
+      Math.pow(dCp / (kC * SC), 2) +
+      Math.pow(dHp / (kH * SH), 2) +
+      RT * (dCp / (kC * SC)) * (dHp / (kH * SH))
     );
   }
 
-  function hueDistDeg(h1, h2) {
-    const d = Math.abs(h1 - h2);
-    return Math.min(d, 360 - d); // 0..180
-  }
+  // ================================================================
+  // REQUIRED DELIVERY FUNCTIONS (as requested)
+  // ================================================================
 
-  // ---------- Phase 0: caches ----------
-  function buildPaletteCache(paletteItemsOrHexes) {
+  // 0) Precompute palette cache (once)
+  function computePaletteCache(paletteItemsOrHexes) {
     const items = Array.isArray(paletteItemsOrHexes)
       ? paletteItemsOrHexes.map((x) => (typeof x === "string" ? { hex: x, tag: "" } : x))
       : [];
@@ -278,109 +294,191 @@
         idx: i,
         hex,
         tag: (items[i].tag || "").toString().trim(),
-        L: lab.L,
-        a: lab.a,
-        b: lab.b,
-        C: lab.C,
-        h: lab.h,
+        L: lab.L, a: lab.a, b: lab.b, C: lab.C, h: lab.h,
         lab,
-        rankL_pal: 0,
       });
     }
-    // rankL_pal: order by L* ascending (dark->light) gives stable "scale"
-    const sorted = cache.slice().sort((p, q) => p.L - q.L || p.idx - q.idx);
-    sorted.forEach((p, r) => (p.rankL_pal = r));
     return cache;
   }
 
-  function buildOriginalCache(originalItems) {
-    // originalItems: [{tag, oldHex, weight}]
-    const cache = [];
-    for (let i = 0; i < originalItems.length; i++) {
-      const it = originalItems[i];
-      const hex = norm(it.oldHex);
-      if (!isHex6(hex)) continue;
-      const lab = hexToLab(hex);
-      if (!lab) continue;
-      cache.push({
-        i,
-        tag: (it.tag || "").toString().trim(),
-        oldHex: hex,
-        weight: Number.isFinite(it.weight) ? it.weight : 1,
-        L: lab.L,
-        a: lab.a,
-        b: lab.b,
-        C: lab.C,
-        h: lab.h,
-        lab,
-        rankL_orig: 0,
-      });
+  // 2) Top-K candidates per tag with scoreBase and highlight/shadow filtering
+  // scoreBase = ΔE00 + darkPenalty + neutralPenalty
+  // darkPenalty = wDark * max(0, (Lo - Lp) - 4)^2
+  // neutralPenalty = (C_orig < 6) ? wNeu * max(0, C_pal - C_orig) : 0
+  function computeTopKCandidates(tags, paletteCache, params) {
+    const K = params.K ?? 10;
+    const wDark = params.wDark ?? 0.04;
+    const wNeu = params.wNeu ?? 0.08;
+
+    const topK = new Array(tags.length);
+    const allScores = new Array(tags.length);
+
+    for (let i = 0; i < tags.length; i++) {
+      const t = tags[i];
+      const Lo = t.L;
+      const Co = t.C;
+      const labO = t.lab;
+
+      const scores = new Float64Array(paletteCache.length);
+
+      const raw = [];
+      for (let p = 0; p < paletteCache.length; p++) {
+        const pal = paletteCache[p];
+        const dE = deltaE00(labO, pal.lab);
+
+        const darkOver = Math.max(0, (Lo - pal.L) - 4);
+        const darkPenalty = wDark * (darkOver * darkOver);
+
+        const neutralPenalty = (Co < 6) ? (wNeu * Math.max(0, pal.C - Co)) : 0;
+
+        const scoreBase = dE + darkPenalty + neutralPenalty;
+
+        scores[p] = scoreBase;
+
+        raw.push({
+          palIdx: p,
+          hex: pal.hex,
+          tag: pal.tag,
+          L: pal.L, C: pal.C, h: pal.h,
+          dE,
+          darkPenalty,
+          neutralPenalty,
+          scoreBase,
+        });
+      }
+
+      // Highlight/shadow filters
+      let filtered = raw;
+      if (Lo > 75) {
+        const f = raw.filter((c) => c.L >= 65);
+        if (f.length >= Math.min(K, 5)) filtered = f; // only apply if enough candidates survive
+      } else if (Lo < 25) {
+        const f = raw.filter((c) => c.L <= 40);
+        if (f.length >= Math.min(K, 5)) filtered = f;
+      }
+
+      filtered.sort((a, b) => a.scoreBase - b.scoreBase || a.palIdx - b.palIdx);
+      topK[i] = filtered.slice(0, K);
+
+      allScores[i] = scores;
     }
-    const sorted = cache.slice().sort((p, q) => p.L - q.L || p.i - q.i);
-    sorted.forEach((o, r) => (o.rankL_orig = r));
-    return cache;
+
+    return { topK, allScores };
   }
 
-  function buildKNNGraph(originalCache, K) {
-    const n = originalCache.length;
+  // 3) Neighbor	bt/context:
+  // Preferred: proximity graph from SVG geometry (bbox distances between color groups)
+  // Fallback: KNN in Lab (K=3)
+  function buildNeighborGraphFromSVG(svgEl, rawEntries, tags, params) {
+    const K = params.ctxK ?? 3;
+    const n = tags.length;
     const graph = Array.from({ length: n }, () => []);
-    if (n <= 1) return graph;
 
-    // For KNN selection use ΔE76 (fast) (still good for neighbor structure)
-    function d76(l1, l2) {
-      const dL = l1.L - l2.L;
-      const da = l1.a - l2.a;
-      const db = l1.b - l2.b;
-      return Math.sqrt(dL * dL + da * da + db * db);
+    // Helper: bbox union for a color group
+    function groupBBox(nodes) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let ok = false;
+      const sample = nodes.slice(0, 60);
+      for (const el of sample) {
+        try {
+          const bb = el.getBBox();
+          if (!bb || !Number.isFinite(bb.x)) continue;
+          ok = true;
+          minX = Math.min(minX, bb.x);
+          minY = Math.min(minY, bb.y);
+          maxX = Math.max(maxX, bb.x + bb.width);
+          maxY = Math.max(maxY, bb.y + bb.height);
+        } catch (_) {}
+      }
+      if (!ok) return null;
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      return { minX, minY, maxX, maxY, cx, cy };
     }
 
+    // bbox distance (0 if overlapping)
+    function bboxDist(a, b) {
+      const dx = (a.maxX < b.minX) ? (b.minX - a.maxX) : (b.maxX < a.minX) ? (a.minX - b.maxX) : 0;
+      const dy = (a.maxY < b.minY) ? (b.minY - a.maxY) : (b.maxY < a.minY) ? (a.minY - b.maxY) : 0;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Precompute bboxes
+    const bboxes = new Array(n);
+    let anyBBox = false;
     for (let i = 0; i < n; i++) {
-      const li = originalCache[i].lab;
+      const nodes = rawEntries[i]?.nodes || [];
+      const bb = groupBBox(nodes);
+      bboxes[i] = bb;
+      if (bb) anyBBox = true;
+    }
+
+    // If bbox is available: build proximity KNN by bbox distance
+    if (anyBBox) {
+      for (let i = 0; i < n; i++) {
+        if (!bboxes[i]) continue;
+        const arr = [];
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          if (!bboxes[j]) continue;
+          const dGeom = bboxDist(bboxes[i], bboxes[j]);
+          arr.push({ j, dGeom });
+        }
+        arr.sort((a, b) => a.dGeom - b.dGeom);
+        const knn = arr.slice(0, Math.max(0, K));
+        for (const e of knn) {
+          const dOrig = deltaE00(tags[i].lab, tags[e.j].lab);
+          graph[i].push({ j: e.j, dOrig });
+        }
+      }
+
+      // If too sparse (some nodes have no neighbors), fill with Lab KNN fallback for those nodes
+      for (let i = 0; i < n; i++) {
+        if (graph[i].length) continue;
+        const arr = [];
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          const d = deltaE00(tags[i].lab, tags[j].lab);
+          arr.push({ j, d });
+        }
+        arr.sort((a, b) => a.d - b.d);
+        const knn = arr.slice(0, Math.max(0, K));
+        for (const e of knn) graph[i].push({ j: e.j, dOrig: e.d });
+      }
+
+      return graph;
+    }
+
+    // Fallback: Lab KNN (K=3)
+    for (let i = 0; i < n; i++) {
       const arr = [];
       for (let j = 0; j < n; j++) {
         if (i === j) continue;
-        arr.push({ j, d: d76(li, originalCache[j].lab) });
+        const d = deltaE00(tags[i].lab, tags[j].lab);
+        arr.push({ j, d });
       }
       arr.sort((a, b) => a.d - b.d);
       const knn = arr.slice(0, Math.max(0, K));
-      // store with dOrig00 (needed by phase2)
-      for (const e of knn) {
-        const d00 = deltaE00(originalCache[i].lab, originalCache[e.j].lab);
-        graph[i].push({ j: e.j, dOrig: d00 });
-      }
+      for (const e of knn) graph[i].push({ j: e.j, dOrig: e.d });
     }
     return graph;
   }
 
-  function buildCostMatrix(originalCache, paletteCache, weights, params) {
-    const {
-      ALPHA = 1.2,
-      BETA = 0.15,
-      GAMMA = 0.08,
-      C_NEUTRAL = 6.0,
-    } = params || {};
-
-    const n = originalCache.length;
-    const m = paletteCache.length;
-    const C = Array.from({ length: n }, () => new Float64Array(m));
-
-    for (let i = 0; i < n; i++) {
-      const o = originalCache[i];
-      const w = (weights && Number.isFinite(weights[i]) ? weights[i] : o.weight) || 1;
-      const oNeutral = o.C < C_NEUTRAL;
-
-      for (let j = 0; j < m; j++) {
-        const p = paletteCache[j];
-
-        const base = deltaE00(o.lab, p.lab);
-        const scale = ALPHA * Math.abs(o.rankL_orig - p.rankL_pal);
-        const hue = BETA * hueDistDeg(o.h, p.h);
-        const neutral = oNeutral ? GAMMA * Math.max(0, p.C - o.C) : 0;
-
-        C[i][j] = w * (base + scale + hue + neutral);
+  // 4) Mode OFF (Closest): choose candidate #1 per tag by scoreBase (repeats allowed)
+  function suggestClosest(tags, paletteCache, allScores) {
+    const mapping = new Map();
+    for (let i = 0; i < tags.length; i++) {
+      const scores = allScores[i];
+      let best = 0;
+      let bestV = scores[0];
+      for (let p = 1; p < scores.length; p++) {
+        const v = scores[p];
+        if (v < bestV) { bestV = v; best = p; }
       }
+      const pal = paletteCache[best];
+      mapping.set(tags[i].hex, { hex: pal.hex, tag: pal.tag, palIdx: best, mode: "OFF" });
     }
-    return C;
+    return mapping;
   }
 
   // Hungarian for rectangular n<=m (min cost). Returns array assign[i]=j
@@ -388,8 +486,6 @@
     const n = costMatrix.length;
     const m = costMatrix[0].length;
     if (n === 0) return [];
-
-    // 1-indexed classic implementation (u,v potentials), O(n*m)
     const u = new Float64Array(n + 1);
     const v = new Float64Array(m + 1);
     const p = new Int32Array(m + 1);
@@ -420,7 +516,6 @@
         j0 = j1;
       } while (p[j0] !== 0);
 
-      // augmenting
       do {
         const j1 = way[j0];
         p[j0] = p[j1];
@@ -429,24 +524,84 @@
     }
 
     const assign = new Int32Array(n);
-    for (let j = 1; j <= m; j++) {
-      if (p[j] > 0) assign[p[j] - 1] = j - 1;
-    }
+    for (let j = 1; j <= m; j++) if (p[j] > 0) assign[p[j] - 1] = j - 1;
     return Array.from(assign);
   }
 
-  // Phase 2: refine by swaps (gradient preservation)
-  function refineBySwaps(assign, originalCache, paletteCache, graph, params) {
-    const {
-      DELTA = 0.35,
-      ITER = 800,
-    } = params || {};
-
-    const n = originalCache.length;
+  // 5) Mode HARD (experimental): Hungarian 1:1 over scoreBase, no repeats.
+  // If N > 167: assign 1:1 to top 167 by weight, rest closest.
+  function suggestHardHungarian(tags, paletteCache, allScores, params) {
     const m = paletteCache.length;
-    if (n <= 1) return assign;
+    const N = tags.length;
 
-    // Precompute palette-palette ΔE00 (167x167)
+    // Select active set
+    let activeIdx = tags.map((_, i) => i);
+    if (N > m) {
+      activeIdx = tags
+        .map((t, i) => ({ i, w: t.weight || 1 }))
+        .sort((a, b) => b.w - a.w || a.i - b.i)
+        .slice(0, m)
+        .map((x) => x.i);
+    }
+
+    const active = activeIdx.map((i) => tags[i]);
+
+    // Build cost matrix for active: n<=m, each row is scoreBase across all palette
+    const cost = active.map((t, k) => {
+      const scores = allScores[activeIdx[k]];
+      // Copy into a Float64Array for speed
+      const row = new Float64Array(m);
+      for (let j = 0; j < m; j++) row[j] = scores[j];
+      return row;
+    });
+
+    const assign = hungarianAssign(cost);
+
+    const used = new Set(assign);
+
+    const mapping = new Map();
+
+    // active unique assignments
+    for (let k = 0; k < active.length; k++) {
+      const i = activeIdx[k];
+      const j = assign[k];
+      const pal = paletteCache[j];
+      mapping.set(tags[i].hex, { hex: pal.hex, tag: pal.tag, palIdx: j, mode: "HARD" });
+    }
+
+    // remaining tags: closest among USED palette colors
+    function closestAmongUsed(lab) {
+      let bestJ = -1, bestD = Infinity;
+      for (const j of used) {
+        const d = deltaE00(lab, paletteCache[j].lab);
+        if (d < bestD) { bestD = d; bestJ = j; }
+      }
+      return bestJ;
+    }
+
+    if (N > m) {
+      for (let i = 0; i < N; i++) {
+        if (mapping.has(tags[i].hex)) continue;
+        const j = closestAmongUsed(tags[i].lab);
+        const pal = j >= 0 ? paletteCache[j] : null;
+        mapping.set(tags[i].hex, { hex: pal ? pal.hex : "", tag: pal ? pal.tag : "", palIdx: j, mode: "HARD_closestUsed" });
+      }
+    }
+
+    return mapping;
+  }
+
+  // 6) Mode SOFT (RECOMMENDED): iterative optimization with reuse+context penalties.
+  // E = Σ scoreBase(i, ai) + wCtx Σ_edges |dOrig - dPal(ai,aj)| + wReuse Σ_c count[c]^2
+  function suggestSoftOptimize(tags, paletteCache, topK, neighborGraph, params) {
+    const wCtx = params.wCtx ?? 0.25;
+    const wReuse = params.wReuse ?? 0.8;
+    const ITER = params.ITER ?? 800;
+
+    const n = tags.length;
+    const m = paletteCache.length;
+
+    // Precompute palette-palette ΔE00 matrix once (167x167)
     const palDE = Array.from({ length: m }, () => new Float64Array(m));
     for (let i = 0; i < m; i++) {
       palDE[i][i] = 0;
@@ -457,202 +612,119 @@
       }
     }
 
-    // We also want quick per-i cost access: rebuild cost matrix for selected originals only once
-    const weights = originalCache.map((o) => o.weight);
-    const baseCost = buildCostMatrix(originalCache, paletteCache, weights, params);
+    // init assign to candidate #1
+    const assign = new Int32Array(n);
+    const baseScore = new Float64Array(n);
+    const counts = new Int32Array(m);
 
-    // Helper edge cost between i and neighbor j
-    function edgeCost(i, j) {
-      const ai = assign[i];
-      const aj = assign[j];
-      const dPal = palDE[ai][aj];
-      const dOrig = graph[i].find((e) => e.j === j)?.dOrig;
-      const dO = Number.isFinite(dOrig) ? dOrig : deltaE00(originalCache[i].lab, originalCache[j].lab);
-      return DELTA * Math.abs(dO - dPal);
+    for (let i = 0; i < n; i++) {
+      const c0 = topK[i][0];
+      assign[i] = c0.palIdx;
+      baseScore[i] = c0.scoreBase;
+      counts[c0.palIdx] += 1;
     }
 
-    // For delta calculation on swap only incident edges
-    function incidentDelta(i, oldPal, newPal, otherAssign, neighbors) {
-      let delta = 0;
-      for (const e of neighbors) {
+    // Helper: reuse delta when moving i from old->new
+    function deltaReuse(oldIdx, newIdx) {
+      if (oldIdx === newIdx) return 0;
+      const cOld = counts[oldIdx];
+      const cNew = counts[newIdx];
+      // before: cOld^2 + cNew^2
+      // after:  (cOld-1)^2 + (cNew+1)^2
+      return wReuse * (((cOld - 1) * (cOld - 1) + (cNew + 1) * (cNew + 1)) - (cOld * cOld + cNew * cNew));
+    }
+
+    // Context delta: only incident edges to i
+    function deltaCtx(i, oldPal, newPal) {
+      if (oldPal === newPal) return 0;
+      const edges = neighborGraph[i] || [];
+      let d = 0;
+      for (const e of edges) {
         const j = e.j;
-        const aj = otherAssign[j];
-        const dOld = DELTA * Math.abs(e.dOrig - palDE[oldPal][aj]);
-        const dNew = DELTA * Math.abs(e.dOrig - palDE[newPal][aj]);
-        delta += (dNew - dOld);
+        const aj = assign[j];
+        const dOrig = e.dOrig;
+        const oldTerm = Math.abs(dOrig - palDE[oldPal][aj]);
+        const newTerm = Math.abs(dOrig - palDE[newPal][aj]);
+        d += (newTerm - oldTerm);
       }
-      return delta;
+      return wCtx * d;
     }
 
-    const randInt = (max) => (Math.random() * max) | 0;
+    // "Problematic" selection: bias to high base score and high reuse
+    function pickProblematic() {
+      // sample a few random indices and pick worst
+      let bestI = 0;
+      let bestVal = -Infinity;
+      const S = Math.min(18, n);
+      for (let s = 0; s < S; s++) {
+        const i = (Math.random() * n) | 0;
+        const ai = assign[i];
+        const reusePressure = counts[ai]; // higher => more repeated
+        const val = baseScore[i] + 0.35 * reusePressure;
+        if (val > bestVal) { bestVal = val; bestI = i; }
+      }
+      return bestI;
+    }
 
     for (let it = 0; it < ITER; it++) {
-      const i1 = randInt(n);
-      let i2 = randInt(n);
-      if (i2 === i1) i2 = (i2 + 1) % n;
+      const i = pickProblematic();
+      const oldPal = assign[i];
+      const oldBase = baseScore[i];
 
-      const a1 = assign[i1];
-      const a2 = assign[i2];
-      if (a1 === a2) continue;
+      let bestDelta = 0;
+      let bestNew = oldPal;
+      let bestNewBase = oldBase;
 
-      // base term delta
-      const dBase =
-        (baseCost[i1][a2] + baseCost[i2][a1]) -
-        (baseCost[i1][a1] + baseCost[i2][a2]);
+      const cands = topK[i];
+      for (let k = 0; k < cands.length; k++) {
+        const cand = cands[k];
+        const newPal = cand.palIdx;
+        if (newPal === oldPal) continue;
 
-      // gradient term delta (only edges incident to i1 or i2)
-      const n1 = graph[i1] || [];
-      const n2 = graph[i2] || [];
+        const dBase = cand.scoreBase - oldBase;
+        const dC = deltaCtx(i, oldPal, newPal);
+        const dR = deltaReuse(oldPal, newPal);
 
-      let dGrad = 0;
-      dGrad += incidentDelta(i1, a1, a2, assign, n1);
-      dGrad += incidentDelta(i2, a2, a1, assign, n2);
+        const dTotal = dBase + dC + dR;
 
-      const dTotal = dBase + dGrad;
+        if (dTotal < bestDelta) {
+          bestDelta = dTotal;
+          bestNew = newPal;
+          bestNewBase = cand.scoreBase;
+        }
+      }
 
-      if (dTotal < 0) {
-        assign[i1] = a2;
-        assign[i2] = a1;
+      if (bestNew !== oldPal) {
+        // apply
+        counts[oldPal] -= 1;
+        counts[bestNew] += 1;
+        assign[i] = bestNew;
+        baseScore[i] = bestNewBase;
       }
     }
 
-    return assign;
-  }
-
-  // High-level suggestion mapping 1:1
-  function suggestOneToOneMapping(originalColorsUsed, paletteCache, params) {
-    const p = params || {};
-    const m = paletteCache.length;
-    const items = originalColorsUsed.slice();
-
-    // weights: if area not available, use node count as proxy (more shapes => more area)
-    const originals = buildOriginalCache(
-      items.map((x) => ({ tag: x.tag, oldHex: x.oldHex, weight: x.weight }))
-    );
-
-    const N = originals.length;
-    if (!N) return { mapping: new Map(), meta: { mode: "empty" } };
-
-    // If N > m: assign 1:1 only to top m by weight, rest map to closest assigned (can repeat)
-    let activeIdx = originals.map((_, i) => i);
-    if (N > m) {
-      activeIdx = originals
-        .map((o, i) => ({ i, w: o.weight }))
-        .sort((a, b) => b.w - a.w || a.i - b.i)
-        .slice(0, m)
-        .map((x) => x.i);
-    }
-
-    const act = activeIdx.map((i) => originals[i]);
-    const weights = act.map((o) => o.weight);
-
-    // build cost matrix for active
-    const C = buildCostMatrix(act, paletteCache, weights, p);
-
-    // Hungarian (n<=m guaranteed)
-    let assign = hungarianAssign(C);
-
-    // Phase 2: swaps for gradients
-    const graph = buildKNNGraph(act, p.K || 3);
-    assign = refineBySwaps(assign, act, paletteCache, graph, p);
-
-    const usedPalSet = new Set(assign);
-
-    // For non-active (if any): map to closest among USED palette colors (not necessarily unique)
-    function closestAmongUsed(origLab) {
-      let bestJ = -1;
-      let bestD = Infinity;
-      for (const j of usedPalSet) {
-        const d = deltaE00(origLab, paletteCache[j].lab);
-        if (d < bestD) { bestD = d; bestJ = j; }
-      }
-      return bestJ;
-    }
-
-    const mapping = new Map(); // oldHex -> {hex, tag, meta}
-
-    // Active mappings (1:1)
-    for (let k = 0; k < act.length; k++) {
-      const o = act[k];
-      const j = assign[k];
+    // Build mapping
+    const mapping = new Map();
+    for (let i = 0; i < n; i++) {
+      const j = assign[i];
       const pal = paletteCache[j];
-      mapping.set(o.oldHex, {
-        hex: pal.hex,
-        tag: pal.tag,
-        meta: { mode: "1to1", palIdx: j },
-      });
+      mapping.set(tags[i].hex, { hex: pal.hex, tag: pal.tag, palIdx: j, mode: "SOFT" });
     }
-
-    // Inactive mappings
-    if (N > m) {
-      for (let i = 0; i < originals.length; i++) {
-        const o = originals[i];
-        if (mapping.has(o.oldHex)) continue;
-        const j = closestAmongUsed(o.lab);
-        const pal = j >= 0 ? paletteCache[j] : null;
-        mapping.set(o.oldHex, {
-          hex: pal ? pal.hex : "",
-          tag: pal ? pal.tag : "",
-          meta: { mode: "closestUsed", palIdx: j },
-        });
-      }
-    }
-
-    return { mapping, meta: { mode: N <= m ? "1to1" : "1to1_top167_plus_closest" } };
+    return mapping;
   }
 
-  // ---------- Legacy local suggestion (kept as fallback) ----------
-  const LOCAL_MATCH_CFG = { C_NEUTRAL: 6.0, W_NEUTRAL: 0.08, EPS_TIE: 0.35, EPS_L: 0.05 };
-  function matchToPaletteColorLocal(targetLab, paletteCache) {
-    const Ct = targetLab.C;
-    const targetIsNeutral = Ct < LOCAL_MATCH_CFG.C_NEUTRAL;
-
-    let best = null;
-    let second = null;
-
-    for (let i = 0; i < paletteCache.length; i++) {
-      const p = paletteCache[i];
-      const dBase = deltaE00(targetLab, p.lab);
-      let dFinal = dBase;
-      let neutralBiasApplied = false;
-
-      if (targetIsNeutral) {
-        const penalty = LOCAL_MATCH_CFG.W_NEUTRAL * Math.max(0, (p.C - Ct));
-        if (penalty > 0) { dFinal += penalty; neutralBiasApplied = true; }
-      }
-
-      const cand = { idx: p.idx, hex: p.hex, tag: p.tag, L: p.L, dBase, dFinal, neutralBiasApplied };
-
-      if (!best || cand.dFinal < best.dFinal || (cand.dFinal === best.dFinal && cand.idx < best.idx)) {
-        second = best; best = cand;
-      } else if (!second || cand.dFinal < second.dFinal || (cand.dFinal === second.dFinal && cand.idx < second.idx)) {
-        second = cand;
-      }
-    }
-
-    let tieBreakApplied = false;
-    if (best && second && (second.dFinal - best.dFinal) < LOCAL_MATCH_CFG.EPS_TIE) {
-      if (second.L > best.L + LOCAL_MATCH_CFG.EPS_L) {
-        const tmp = best; best = second; second = tmp; tieBreakApplied = true;
-      } else if (Math.abs(second.L - best.L) <= LOCAL_MATCH_CFG.EPS_L) {
-        if (second.idx < best.idx) { const tmp = best; best = second; second = tmp; tieBreakApplied = true; }
-      } else tieBreakApplied = true;
-    }
-
-    if (!best) return { hex: "", tag: "", meta: null };
-    return {
-      hex: best.hex,
-      tag: best.tag,
-      meta: { d_final: best.dFinal, d_base: best.dBase, target_neutral: targetIsNeutral, neutral_bias_applied: best.neutralBiasApplied, tie_break_applied: tieBreakApplied, idx: best.idx, L: best.L },
-    };
+  // Unified entry: suggestMapping(mode)
+  function suggestMapping(mode, ctx) {
+    if (mode === "OFF") return suggestClosest(ctx.tags, ctx.paletteCache, ctx.allScores);
+    if (mode === "HARD") return suggestHardHungarian(ctx.tags, ctx.paletteCache, ctx.allScores, ctx.params);
+    if (mode === "SOFT") return suggestSoftOptimize(ctx.tags, ctx.paletteCache, ctx.topK, ctx.neighborGraph, ctx.params);
+    return suggestClosest(ctx.tags, ctx.paletteCache, ctx.allScores);
   }
 
-  // ---------- Build palette cache ONCE ----------
-  const PALETTE_CACHE = buildPaletteCache(
-    PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ hex, tag: "" }))
-  );
+  // =====================================================================
+  // SVG sizing / selection
+  // =====================================================================
 
-  // ---------- SVG sizing ----------
   function ensureViewBox(svg) {
     if (!svg || svg.tagName.toLowerCase() !== "svg") return;
     if (svg.getAttribute("viewBox")) return;
@@ -691,7 +763,6 @@
     return { w: 1600, h: 1600 };
   }
 
-  // ---------- Find output SVG ----------
   function findFinalOutputSvgLight() {
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
@@ -705,7 +776,6 @@
     return best;
   }
 
-  // ---------- Detect readiness ----------
   function findDownloadButtonsRow() {
     const btns = Array.from(document.querySelectorAll("button, a"));
     const hits = btns.filter((b) => {
@@ -796,53 +866,45 @@
       ctx.drawImage(bitmap, 0, 0, outW, outH);
 
       const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
-      if (pngBlob) { forceDownloadBlob(pngBlob, filename); return; }
+      if (pngBlob) { forceDownloadBlob(pngBlob, filename); return;_toggle }
+    } catch (_) {}
 
-      const dataUrl = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      return;
-    } catch (_) {
-      const url = URL.createObjectURL(svgBlob);
-      const img = new Image();
-      img.decoding = "async";
-      img.crossOrigin = "anonymous";
+    // fallback via <img>
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.decoding = "async";
+    img.crossOrigin = "anonymous";
 
-      await new Promise((res, rej) => {
-        img.onload = () => res();
-        img.onerror = (e) => rej(e);
-        img.src = url;
-      });
+    await new Promise((res, rej) => {
+      img.onload = () => res();
+      img.onerror = (e) => rej(e);
+      img.src = url;
+    });
 
-      const canvas = document.createElement("canvas");
-      canvas.width = outW;
-      canvas.height = outH;
+    const canvas = document.createElement("canvas");
+    canvas.width = outW;
+    canvas.height = outH;
 
-      const ctx = canvas.getContext("2d", { alpha: false });
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, outW, outH);
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outW, outH);
 
-      ctx.imageSmoothingEnabled = true;
-      ctx.setTransform(outW / baseW, 0, 0, outH / baseH, 0, 0);
-      ctx.drawImage(img, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.setTransform(outW / baseW, 0, 0, outH / baseH, 0, 0);
+    ctx.drawImage(img, 0, 0);
 
-      URL.revokeObjectURL(url);
+    URL.revokeObjectURL(url);
 
-      const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
-      if (pngBlob) { forceDownloadBlob(pngBlob, filename); return; }
+    const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
+    if (pngBlob) { forceDownloadBlob(pngBlob, filename); return; }
 
-      const dataUrl = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }
+    const dataUrl = canvas.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   // ---------- SVG style injection (toggles) ----------
@@ -1101,9 +1163,16 @@
     const topbar = document.createElement("div");
     topbar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
 
+    const titleWrap = document.createElement("div");
+    titleWrap.style.cssText = "display:flex; flex-direction:column; gap:2px;";
+    const vBadge = document.createElement("div");
+    vBadge.textContent = ADDON_NAME;
+    vBadge.style.cssText = "font-weight:900; font-size:12px; color: rgba(220,38,38,.95);";
     const title = document.createElement("div");
     title.style.cssText = "font-weight:900;";
     title.textContent = `Recoloreo (paleta ${PALETTE.length})`;
+    titleWrap.appendChild(vBadge);
+    titleWrap.appendChild(title);
 
     const close = document.createElement("button");
     close.type = "button";
@@ -1112,7 +1181,7 @@
     enhanceButton(close);
     close.addEventListener("click", () => overlay.remove());
 
-    topbar.appendChild(title);
+    topbar.appendChild(titleWrap);
     topbar.appendChild(close);
     card.appendChild(topbar);
 
@@ -1207,12 +1276,12 @@
     // ---- State ----
     let colorsOn = true;
     let bordersOn = true;
-    let textColorModeOn = false; // OFF => now uses ORIGINAL text fill (FIX)
+    let textColorModeOn = false; // OFF => original svg text fill
     let textOpacity = 0.7; // ALWAYS applied
     let selectedOldHex = null;
 
-    // 🆕 Suggestion toggle state (default ON)
-    let suggestOneToOneOn = true;
+    // FIX #3 UX: default suggestion mode OFF
+    let suggestMode = "OFF"; // "OFF" | "SOFT" | "HARD"
 
     const storedNow = loadStored();
     const savedUi = storedNow && storedNow.svgSig === sig && storedNow.ui ? storedNow.ui : {};
@@ -1221,7 +1290,11 @@
     if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
     if (typeof savedUi.textOpacity === "number") textOpacity = Math.max(0, Math.min(1, savedUi.textOpacity));
     if (typeof savedUi.selectedOldHex === "string") selectedOldHex = savedUi.selectedOldHex;
-    if (typeof savedUi.suggestOneToOneOn === "boolean") suggestOneToOneOn = savedUi.suggestOneToOneOn;
+    if (typeof savedUi.suggestMode === "string" && ["OFF", "SOFT", "HARD"].includes(savedUi.suggestMode)) {
+      suggestMode = savedUi.suggestMode;
+    } else {
+      suggestMode = "OFF"; // enforce default OFF if not present
+    }
 
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
@@ -1254,564 +1327,5 @@
     const suggestBtnByOldHex = new Map();
 
     function buildTagToReplacementHexMap() {
-      const map = new Map(); // tagLower -> hex
-      for (const [oldHex, row] of rowByOldHex.entries()) {
-        const replHex = norm(row.getAttribute("data-replhex") || "");
-        const inp = renameInputByOldHex.get(oldHex);
-        const tag = inp ? (inp.value || "").toString().trim() : "";
-        if (!tag || !isTagLike(tag)) continue;
-        if (!replHex || !isHex6(replHex)) continue;
-        map.set(norm(tag), replHex);
-      }
-      return map;
-    }
-
-    function stripStyleProps(styleStr, props) {
-      if (!styleStr) return "";
-      let s = styleStr;
-      props.forEach((p) => {
-        const re = new RegExp(`\\b${p}\\s*:\\s*[^;]+;?`, "gi");
-        s = s.replace(re, "");
-      });
-      s = s.replace(/;;+/g, ";").trim();
-      return s;
-    }
-
-    // ---------------- FIX: default text color should be ORIGINAL from SVG, not forced black ----------------
-    function applyTextColors() {
-      const map = buildTagToReplacementHexMap();
-      const texts = Array.from(recolorSvg.querySelectorAll("text"));
-      const op = String(Math.max(0, Math.min(1, textOpacity)));
-
-      texts.forEach((t) => {
-        const raw = (t.textContent || "").toString().trim();
-        if (!raw || !isTagLike(raw)) return;
-
-        // Cache original fill ONCE so toggling OFF returns to true original (not the last applied)
-        if (!t.hasAttribute("data-origfill")) {
-          const orig = getElementFill(t) || null;
-          const safe = isHex6(norm(orig || "")) ? norm(orig) : "#000000";
-          t.setAttribute("data-origfill", safe);
-        }
-
-        const key = norm(raw);
-        const origHex = norm(t.getAttribute("data-origfill") || "");
-        const safeOrig = isHex6(origHex) ? origHex : "#000000";
-
-        // ON  => replacement color by tag (fallback original)
-        // OFF => original SVG text color (fallback black)
-        const hex = textColorModeOn ? (map.get(key) || safeOrig) : safeOrig;
-
-        t.setAttribute("fill", hex);
-        t.setAttribute("fill-opacity", op);
-        t.setAttribute("opacity", op);
-
-        const prev = t.getAttribute("style") || "";
-        const cleaned = stripStyleProps(prev, ["fill", "fill-opacity", "opacity"]);
-        const prefix = cleaned ? (cleaned.trim().endsWith(";") ? cleaned : cleaned + ";") : "";
-        t.setAttribute("style", `${prefix}fill:${hex};fill-opacity:${op};opacity:${op};`);
-      });
-    }
-    // ------------------------------------------------------------------------------------------------------
-
-    function queueSaveState(buildStateFn) {
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => {
-        const current = loadStored() || { svgSig: sig, mappings: {}, ui: {} };
-        if (current.svgSig !== sig) return;
-        const next = buildStateFn(current);
-        writeStored(next);
-      }, 80);
-    }
-
-    function saveAllState() {
-      queueSaveState((cur) => {
-        const mappings = {};
-        for (const [oldHex, row] of rowByOldHex.entries()) {
-          const replHex = norm(row.getAttribute("data-replhex") || "");
-          const replTag = (row.getAttribute("data-repltag") || "").toString();
-          const inp = renameInputByOldHex.get(oldHex);
-          const rename = inp ? (inp.value || "").toString() : "";
-          if (replHex || rename || replTag) mappings[oldHex] = { replHex, replTag, rename };
-        }
-        cur.mappings = mappings;
-        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "", suggestOneToOneOn };
-        return cur;
-      });
-    }
-
-    function setRenameForOldHex(oldHex, newLabel) {
-      oldHex = norm(oldHex);
-      const inp = renameInputByOldHex.get(oldHex);
-      const nodes = labelNodesByOldHex.get(oldHex) || [];
-      if (!inp) return;
-
-      inp.value = (newLabel || "").toString();
-      nodes.forEach((t) => (t.textContent = inp.value));
-      applyTextColors();
-      saveAllState();
-    }
-
-    function applyReplacementToOldHex(oldHex, newHex, newTag, { autoRename = true } = {}) {
-      oldHex = norm(oldHex);
-      newHex = norm(newHex);
-      newTag = (newTag || "").toString().trim();
-      if (!isHex6(newHex)) return;
-
-      const row = rowByOldHex.get(oldHex);
-      if (!row) return;
-
-      const prev = row.getAttribute("data-replhex") || "";
-      if (prev) usedReplacementHex.delete(norm(prev));
-      usedReplacementHex.add(newHex);
-
-      const nodes = fillGroups.get(oldHex) || [];
-      nodes.forEach((el) => {
-        el.setAttribute("fill", newHex);
-        if (el.hasAttribute("style")) el.setAttribute("style", el.getAttribute("style").replace(/fill:\s*[^;]+;?/gi, ""));
-      });
-
-      row.setAttribute("data-replhex", newHex);
-      row.setAttribute("data-repltag", newTag);
-
-      const swNew = row.querySelector(".sw-new");
-      const txt = row.querySelector(".row-text");
-      if (swNew) { swNew.style.background = newHex; swNew.style.borderStyle = "solid"; }
-
-      const badgeHost = row.querySelector(".new-badge-host");
-      if (badgeHost) {
-        badgeHost.innerHTML = "";
-        if (newTag) badgeHost.appendChild(makeBadgeCorner(newTag));
-      }
-      if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
-
-      if (autoRename && newTag) setRenameForOldHex(oldHex, newTag);
-      else { applyTextColors(); saveAllState(); }
-    }
-
-    const picker = renderGridPicker({
-      isUsed: (hex) => usedReplacementHex.has(norm(hex)),
-      onPick: ({ hex, tag }) => {
-        if (!selectedOldHex) { alert("Primero selecciona un color original (panel izquierdo)."); return; }
-        applyReplacementToOldHex(selectedOldHex, hex, tag, { autoRename: true });
-        picker.refreshUsedX();
-      },
-    });
-    right.appendChild(picker.grid);
-
-    const list = document.createElement("div");
-    list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
-    left.appendChild(list);
-
-    function highlightRow(oldHex) {
-      oldHex = norm(oldHex);
-      Array.from(list.querySelectorAll("button")).forEach((b) => {
-        if (b.getAttribute("data-oldhex")) { b.style.outline = "none"; b.style.boxShadow = "none"; }
-      });
-      const row = rowByOldHex.get(oldHex);
-      if (!row) return;
-      row.style.outline = "2px solid rgba(0,0,0,.28)";
-      row.style.boxShadow = "0 0 0 4px rgba(0,0,0,.05)";
-    }
-
-    // ---- Global suggestion mapping (computed once per open, recomputed if toggle changes) ----
-    const PARAMS_1TO1 = {
-      ALPHA: 1.2,
-      BETA: 0.15,
-      GAMMA: 0.08,
-      DELTA: 0.35,
-      C_NEUTRAL: 6.0,
-      K: 3,
-      ITER: 800,
-      EPS_TIE: 0.35,
-    };
-
-    function computeSuggestionsMapOneToOne() {
-      const originalsUsed = rawEntries.map((e) => ({
-        oldHex: e.oldHex,
-        tag: e.tagOriginal,
-        // proxy weight by node count (if you later have real area, plug it here)
-        weight: (e.nodes && e.nodes.length) ? e.nodes.length : 1,
-      }));
-      return suggestOneToOneMapping(originalsUsed, PALETTE_CACHE, PARAMS_1TO1).mapping;
-    }
-
-    function computeSuggestionLocal(oldHex) {
-      const labT = hexToLab(oldHex);
-      if (!labT) return { hex: "", tag: "", meta: null };
-      return matchToPaletteColorLocal(labT, PALETTE_CACHE);
-    }
-
-    let oneToOneMap = null;
-    if (suggestOneToOneOn) oneToOneMap = computeSuggestionsMapOneToOne();
-
-    function getSuggestionForOldHex(oldHex) {
-      const key = norm(oldHex);
-      if (suggestOneToOneOn && oneToOneMap && oneToOneMap.has(key)) {
-        const v = oneToOneMap.get(key);
-        return { hex: v.hex, tag: v.tag, meta: v.meta || null };
-      }
-      return computeSuggestionLocal(key);
-    }
-
-    function updateSuggestionTile(oldHex) {
-      oldHex = norm(oldHex);
-      const btn = suggestBtnByOldHex.get(oldHex);
-      if (!btn) return;
-
-      const s = getSuggestionForOldHex(oldHex);
-      const sugHex = norm(s.hex || "");
-      const sugTag = (s.tag || "").toString().trim();
-
-      btn.style.background = isHex6(sugHex) ? sugHex : "rgba(0,0,0,.03)";
-      btn.style.cursor = isHex6(sugHex) ? "pointer" : "not-allowed";
-      btn.title = sugTag ? `Sugerido: ${sugTag} — ${sugHex}` : (sugHex ? `Sugerido: ${sugHex}` : "Sin sugerencia");
-
-      btn.innerHTML = "";
-      if (sugTag) btn.appendChild(makeBadgeCorner(sugTag));
-      else if (sugHex) btn.appendChild(makeBadgeCorner("≈"));
-
-      btn.setAttribute("data-sughex", sugHex);
-      btn.setAttribute("data-sugtag", sugTag);
-    }
-
-    function updateAllSuggestionTiles() {
-      if (suggestOneToOneOn) oneToOneMap = computeSuggestionsMapOneToOne();
-      else oneToOneMap = null;
-      for (const e of rawEntries) updateSuggestionTile(e.oldHex);
-    }
-
-    // ---- Build list rows ----
-    if (!rawEntries.length) {
-      const empty = document.createElement("div");
-      empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-      empty.textContent = "No detecté fills en el SVG.";
-      list.appendChild(empty);
-    } else {
-      rawEntries.forEach(({ oldHex, tagOriginal }) => {
-        const labelNodes =
-          tagOriginal && tagOriginal.trim()
-            ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
-            : [];
-
-        const suggestion = getSuggestionForOldHex(oldHex);
-        const sugHex = norm(suggestion.hex || "");
-        const sugTag = (suggestion.tag || "").toString().trim();
-
-        const row = document.createElement("button");
-        row.type = "button";
-        row.setAttribute("data-oldhex", oldHex);
-        row.setAttribute("data-replhex", "");
-        row.setAttribute("data-repltag", "");
-        row.style.cssText = `
-          text-align:left; display:grid; grid-template-columns: 72px 72px 72px 72px 1fr;
-          gap: 10px; align-items:center; padding: 10px; border-radius: 12px;
-          border: 1px solid rgba(0,0,0,.12); background: white; cursor: pointer;
-        `;
-
-        const boxTag = document.createElement("div");
-        boxTag.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.20);
-          background:${oldHex}; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center;
-          font-weight:900; font-size:18px; color:${textColorForBg(oldHex)};
-        `;
-        boxTag.textContent = tagOriginal || "";
-
-        const boxRepl = document.createElement("div");
-        boxRepl.className = "sw-new";
-        boxRepl.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px dashed rgba(0,0,0,.20);
-          background:transparent; position:relative; overflow:hidden;
-        `;
-        const newBadgeHost = document.createElement("div");
-        newBadgeHost.className = "new-badge-host";
-        newBadgeHost.style.cssText = "position:absolute; inset:0;";
-        boxRepl.appendChild(newBadgeHost);
-
-        const boxRename = document.createElement("div");
-        boxRename.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.22);
-          background:white; display:flex; align-items:center; justify-content:center; padding:0 6px;
-        `;
-        const input = document.createElement("input");
-        input.type = "text";
-        input.value = tagOriginal || "";
-        input.style.cssText = `width:100%; height:28px; border:0; outline:none; text-align:center; font-size:13px; background:transparent;`;
-        boxRename.appendChild(input);
-
-        const boxSug = document.createElement("button");
-        boxSug.type = "button";
-        boxSug.className = "recolor-suggest";
-        boxSug.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.18);
-          background:${isHex6(sugHex) ? sugHex : "rgba(0,0,0,.03)"}; position:relative; overflow:hidden;
-          cursor:${isHex6(sugHex) ? "pointer" : "not-allowed"}; display:flex; align-items:center; justify-content:center; padding:0;
-        `;
-        if (sugTag) boxSug.appendChild(makeBadgeCorner(sugTag));
-        else if (sugHex) boxSug.appendChild(makeBadgeCorner("≈"));
-        boxSug.setAttribute("data-sughex", sugHex);
-        boxSug.setAttribute("data-sugtag", sugTag);
-        boxSug.title = sugTag ? `Sugerido: ${sugTag} — ${sugHex}` : (sugHex ? `Sugerido: ${sugHex}` : "Sin sugerencia");
-
-        boxSug.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const sh = norm(boxSug.getAttribute("data-sughex") || "");
-          const st = (boxSug.getAttribute("data-sugtag") || "").toString().trim();
-          if (!isHex6(sh)) return;
-          selectedOldHex = oldHex;
-          applyReplacementToOldHex(oldHex, sh, st, { autoRename: true });
-          picker.refreshUsedX();
-          highlightRow(oldHex);
-        });
-
-        const stack = document.createElement("div");
-        stack.style.cssText = "display:grid; gap:4px;";
-        const meta = document.createElement("div");
-        meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
-        meta.textContent = tagOriginal ? `Tag original: ${tagOriginal} | Color: ${oldHex}` : `Color: ${oldHex}`;
-        const repl = document.createElement("div");
-        repl.className = "row-text";
-        repl.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
-        repl.textContent = "Reemplazo: —";
-        stack.appendChild(meta);
-        stack.appendChild(repl);
-
-        input.addEventListener("input", () => {
-          const v = input.value;
-          labelNodes.forEach((t) => (t.textContent = v));
-          applyTextColors();
-          saveAllState();
-        });
-
-        row.appendChild(boxTag);
-        row.appendChild(boxRepl);
-        row.appendChild(boxRename);
-        row.appendChild(boxSug);
-        row.appendChild(stack);
-
-        row.addEventListener("click", () => {
-          selectedOldHex = oldHex;
-          highlightRow(oldHex);
-          saveAllState();
-        });
-
-        list.appendChild(row);
-
-        rowByOldHex.set(oldHex, row);
-        renameInputByOldHex.set(oldHex, input);
-        labelNodesByOldHex.set(oldHex, labelNodes);
-        suggestBtnByOldHex.set(oldHex, boxSug);
-      });
-    }
-
-    // Restore mappings if same SVG
-    function restoreMappingsIfAny() {
-      const st = loadStored();
-      if (!st || st.svgSig !== sig || !st.mappings) return;
-
-      const mappings = st.mappings || {};
-      for (const oldHex of Object.keys(mappings)) {
-        const m = mappings[oldHex] || {};
-        const row = rowByOldHex.get(norm(oldHex));
-        if (!row) continue;
-
-        const replHex = norm(m.replHex || "");
-        const replTag = (m.replTag || "").toString();
-        const rename = (m.rename || "").toString();
-
-        if (rename && renameInputByOldHex.get(norm(oldHex))) {
-          const inp = renameInputByOldHex.get(norm(oldHex));
-          inp.value = rename;
-          const nodes = labelNodesByOldHex.get(norm(oldHex)) || [];
-          nodes.forEach((t) => (t.textContent = rename));
-        }
-
-        if (isHex6(replHex)) applyReplacementToOldHex(oldHex, replHex, replTag, { autoRename: false });
-      }
-
-      const sel = st.ui && st.ui.selectedOldHex ? norm(st.ui.selectedOldHex) : "";
-      if (sel && rowByOldHex.has(sel)) { selectedOldHex = sel; highlightRow(sel); }
-
-      picker.refreshUsedX();
-      applyTextColors();
-    }
-
-    // ---------- Toggles row ----------
-    const togglesRow = document.createElement("div");
-    togglesRow.style.cssText = `
-      margin-top: 12px; display:flex; align-items:center; justify-content: space-between;
-      gap: 10px; flex-wrap: wrap; padding: 10px;
-      border: 1px solid rgba(0,0,0,.10); border-radius: 12px; background: rgba(0,0,0,.02);
-    `;
-
-    const togglesLeft = document.createElement("div");
-    togglesLeft.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
-
-    const btnColors = makeToggleButton("Colores", colorsOn, (on) => { colorsOn = on; setColorFills(recolorSvg, colorsOn); saveAllState(); });
-    const btnBorders = makeToggleButton("Bordes", bordersOn, (on) => { bordersOn = on; setBorders(recolorSvg, bordersOn); saveAllState(); });
-    const btnTextColor = makeToggleButton("Color textos", textColorModeOn, (on) => { textColorModeOn = on; applyTextColors(); saveAllState(); });
-
-    // 🆕 Suggestion toggle
-    const btnSug = makeToggleButton("Sugerencia 1:1 (sin repetir) + Preservar escala", suggestOneToOneOn, (on) => {
-      suggestOneToOneOn = on;
-      updateAllSuggestionTiles();
-      saveAllState();
-    });
-
-    const sliderWrap = document.createElement("div");
-    sliderWrap.style.cssText = `
-      display:flex; align-items:center; gap:8px; padding: 8px 10px;
-      border-radius: 12px; border: 1px solid rgba(0,0,0,.12); background: rgba(255,255,255,.9);
-    `;
-    const sliderLabel = document.createElement("div");
-    sliderLabel.style.cssText = "font-size:12px; color: rgba(0,0,0,.70); font-weight:800;";
-    sliderLabel.textContent = "Opacidad texto";
-    const slider = document.createElement("input");
-    slider.type = "range"; slider.min = "0"; slider.max = "100";
-    slider.value = String(Math.round(textOpacity * 100));
-    slider.style.cssText = "width: 180px; cursor: pointer;";
-    const sliderVal = document.createElement("div");
-    sliderVal.style.cssText = "font-size:12px; color: rgba(0,0,0,.70); font-weight:900; width:44px; text-align:right;";
-    sliderVal.textContent = `${Math.round(textOpacity * 100)}%`;
-    slider.addEventListener("input", () => {
-      const v = Math.max(0, Math.min(100, Number(slider.value || 0)));
-      sliderVal.textContent = `${v}%`;
-      textOpacity = v / 100;
-      applyTextColors();
-      saveAllState();
-    });
-    sliderWrap.appendChild(sliderLabel);
-    sliderWrap.appendChild(slider);
-    sliderWrap.appendChild(sliderVal);
-
-    togglesLeft.appendChild(btnColors);
-    togglesLeft.appendChild(btnBorders);
-    togglesLeft.appendChild(btnTextColor);
-    togglesLeft.appendChild(btnSug);
-    togglesLeft.appendChild(sliderWrap);
-
-    const hint = document.createElement("div");
-    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-    hint.textContent =
-      "Sugerencia 1:1 usa Hungarian + rank L* + hue + neutral + refinamiento por swaps (gradientes). OFF vuelve a sugerencia local (ΔE00). Textos: OFF=mantiene color original del SVG; ON=hex del reemplazo. Opacidad siempre aplica (también en export).";
-
-    togglesRow.appendChild(togglesLeft);
-    togglesRow.appendChild(hint);
-    host.appendChild(togglesRow);
-
-    // Apply initial suggestion updates (in case toggle loaded from memory)
-    updateAllSuggestionTiles();
-
-    restoreMappingsIfAny();
-    applyTextColors();
-
-    // ---------- Downloads ----------
-    const dl = document.createElement("div");
-    dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
-    host.appendChild(dl);
-
-    const btnSvg = document.createElement("button");
-    btnSvg.type = "button";
-    btnSvg.textContent = "DOWNLOAD RECOLORED SVG";
-    btnSvg.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
-    enhanceButton(btnSvg);
-    btnSvg.addEventListener("click", async () => {
-      setButtonLoading(btnSvg, true);
-      try {
-        applyTextColors();
-        const svgText = new XMLSerializer().serializeToString(recolorSvg);
-        downloadText("paintbynumber_recolored.svg", svgText, "image/svg+xml");
-      } finally {
-        setTimeout(() => setButtonLoading(btnSvg, false), 220);
-      }
-    });
-
-    const btnPng = document.createElement("button");
-    btnPng.type = "button";
-    btnPng.textContent = "DOWNLOAD RECOLORED PNG";
-    btnPng.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
-    enhanceButton(btnPng);
-    btnPng.addEventListener("click", async () => {
-      setButtonLoading(btnPng, true);
-      try {
-        applyTextColors();
-        const svgClone = recolorSvg.cloneNode(true);
-        await downloadSvgAsPngHQ(svgClone, "paintbynumber_recolored.png", 10);
-      } catch (e) {
-        console.error(e);
-        alert("No pude exportar PNG. Revisa si el navegador bloqueó el canvas.");
-      } finally {
-        setButtonLoading(btnPng, false);
-      }
-    });
-
-    dl.appendChild(btnSvg);
-    dl.appendChild(btnPng);
-  }
-
-  // ---------- Floating launcher ----------
-  function ensureFab() {
-    let fab = document.getElementById("recolor-fab");
-    if (fab) return fab;
-
-    fab = document.createElement("div");
-    fab.id = "recolor-fab";
-    fab.style.cssText = `
-      position: fixed; right: 18px; bottom: 18px; z-index: 2147483646;
-      display: none; gap: 8px; align-items: center; padding: 10px; border-radius: 14px;
-      background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.14);
-      box-shadow: 0 12px 40px rgba(0,0,0,.18);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    `;
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = "Abrir Recolorear";
-    btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
-    enhanceButton(btn);
-    btn.addEventListener("click", () => {
-      const current = findFinalOutputSvgLight();
-      if (!current) return alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera el output.");
-      openEditor(current);
-    });
-
-    const status = document.createElement("div");
-    status.id = "recolor-fab-status";
-    status.style.cssText = "font-size: 12px; color: rgba(0,0,0,.65); white-space:nowrap;";
-    status.textContent = "Esperando output…";
-
-    fab.appendChild(btn);
-    fab.appendChild(status);
-    document.body.appendChild(fab);
-    return fab;
-  }
-
-  function updateFab() {
-    const fab = ensureFab();
-    const status = document.getElementById("recolor-fab-status");
-    const ready = isGeneratorReady();
-    fab.style.display = ready ? "flex" : "none";
-    if (status) status.textContent = ready ? "Output detectado" : "Esperando output…";
-  }
-
-  window.addEventListener("load", () => {
-    setTimeout(updateFab, 650);
-    setTimeout(updateFab, 1600);
-  });
-
-  document.addEventListener(
-    "click",
-    (e) => {
-      const el = e.target && e.target.closest ? e.target.closest("button, a") : null;
-      if (!el) return;
-      const t = norm(el.textContent);
-      if (t.includes("process image") || t.includes("download svg") || t.includes("download png") || t.includes("output")) {
-        setTimeout(updateFab, 120);
-        setTimeout(updateFab, 600);
-      }
-    },
-    true
-  );
-
-  try { updateFab(); } catch (_) {}
-})();
+      const map = new Map(); // tagLower ->uterto1
+::contentReference[oaicite:0]{index=0}
