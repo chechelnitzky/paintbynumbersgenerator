@@ -1,9 +1,12 @@
-/* Recolor add-on (v8.6 - HARD RELOAD SAFE + AUTO-FILL RENAME)
-   ✅ FIX hard reload: NO DOM insertion inside generator tree (no host under downloads)
-      -> avoids hydration / render loops -> restores thumbnails small/medium + stops “ruedita”
-   ✅ Launcher is a floating button (outside app DOM). Editor opens in modal overlay.
-   ✅ Rename input stays editable, BUT when picking a palette color it auto-fills with that color TAG/number.
-   ✅ Keeps your UI layout inside editor: 2 previews + left list 3 equal boxes + picker X indicator + toggles + download.
+/* Recolor add-on (v8.7 - AUTO RENAME ON PICK + TEXT COLOR MODE)
+   ✅ Hard reload safe: floating FAB + modal (no DOM insertion in generator tree)
+   ✅ Rename input is prefilled with original tag (0..n)
+   ✅ On picker selection: rename input AUTO changes to picked TAG (WG7/43/etc) + updates SVG texts
+      (still editable)
+   ✅ NEW: "Color textos" toggle + opacity slider (0-100%)
+      - ON: each tag text gets the replacement hex color with chosen opacity
+      - OFF: restores original generator text color
+   ✅ Keeps: 3 equal boxes, used-X indicator, Colores/Bordes toggles, downloads
 */
 
 (function () {
@@ -13,6 +16,7 @@
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
+  const isTagLike = (t) => /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim());
 
   // ---------- Color helpers ----------
   function rgbToHex(rgb) {
@@ -67,10 +71,8 @@
     if (!svg || svg.tagName.toLowerCase() !== "svg") return;
     if (svg.getAttribute("viewBox")) return;
 
-    const wAttr = svg.getAttribute("width");
-    const hAttr = svg.getAttribute("height");
-    const w = parseFloat(wAttr);
-    const h = parseFloat(hAttr);
+    const w = parseFloat(svg.getAttribute("width"));
+    const h = parseFloat(svg.getAttribute("height"));
 
     if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
       svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
@@ -113,7 +115,7 @@
     return best;
   }
 
-  // ---------- Detect readiness (downloads row exists) ----------
+  // ---------- Detect readiness ----------
   function findDownloadButtonsRow() {
     const btns = Array.from(document.querySelectorAll("button, a"));
     const hits = btns.filter((b) => {
@@ -384,7 +386,7 @@
     return { grid, refreshUsedX };
   }
 
-  // ---------- ORIGINAL tag mapping ----------
+  // ---------- ORIGINAL tag mapping (SVG legend) ----------
   function buildOriginalTagByHexFromSvgLegend(svg) {
     const map = {};
     if (!svg) return map;
@@ -415,7 +417,7 @@
 
       if (near) {
         const tag = (near.textContent || "").trim();
-        if (tag && /^[a-z0-9]{1,6}$/i.test(tag) && !map[hex]) map[hex] = tag;
+        if (tag && isTagLike(tag) && !map[hex]) map[hex] = tag;
       }
     }
     return map;
@@ -437,7 +439,7 @@
     return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
   }
 
-  // ---------- Modal host (SAFE: outside generator tree) ----------
+  // ---------- Modal host ----------
   function openModal() {
     const existing = document.getElementById("recolor-modal");
     if (existing) existing.remove();
@@ -499,6 +501,7 @@
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) overlay.remove();
     });
+
     document.addEventListener(
       "keydown",
       function onEsc(e) {
@@ -525,7 +528,7 @@
     header.innerHTML = `
       <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
       <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        Selecciona color original → elige reemplazo → (renombrar) → toggles (colores/bordes) → descarga
+        Selecciona color original → elige reemplazo → (renombrar) → toggles → descarga
       </div>
     `;
     host.appendChild(header);
@@ -535,12 +538,16 @@
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    // Build tag map (prefer SVG legend = fast & reliable)
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
     const origTagByHex = { ...legendMap };
 
     let colorsOn = true;
     let bordersOn = true;
+
+    // NEW: text color mode
+    let textColorModeOn = false;
+    let textOpacity = 0.7; // default 70%
+
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
 
@@ -581,7 +588,7 @@
 
     const rawEntries = Array.from(fillGroups.entries()).map(([oldHex, nodes]) => {
       const tagOriginal = origTagByHex[oldHex] || "";
-      return { oldHex, nodes, tagOriginal };
+      return { oldHex: norm(oldHex), nodes, tagOriginal };
     });
 
     rawEntries.sort((a, b) => {
@@ -619,7 +626,89 @@
     info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
     right.appendChild(info);
 
+    const list = document.createElement("div");
+    list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
+    left.appendChild(list);
+
     let selectedOldHex = null;
+
+    // Row state maps for bulletproof updates
+    const rowByOldHex = new Map();
+    const renameInputByOldHex = new Map();
+    const labelNodesByOldHex = new Map();
+
+    function setRenameForOldHex(oldHex, newLabel) {
+      oldHex = norm(oldHex);
+      const inp = renameInputByOldHex.get(oldHex);
+      const nodes = labelNodesByOldHex.get(oldHex) || [];
+      if (!inp) return;
+
+      inp.value = (newLabel || "").toString();
+      // update the actual SVG texts directly (do not rely on input event)
+      nodes.forEach((t) => (t.textContent = inp.value));
+
+      // If text-color mode is ON, re-apply mapping (because key changed)
+      if (textColorModeOn) applyTextColors();
+    }
+
+    function buildTagToReplacementHexMap() {
+      const map = new Map(); // tagLower -> hex
+      for (const [oldHex, row] of rowByOldHex.entries()) {
+        const replHex = norm(row.getAttribute("data-replhex") || "");
+        const inp = renameInputByOldHex.get(oldHex);
+        const tag = inp ? (inp.value || "").toString().trim() : "";
+        if (!tag || !isTagLike(tag)) continue;
+        if (!replHex || !isHex6(replHex)) continue;
+        map.set(norm(tag), replHex);
+      }
+      return map;
+    }
+
+    function snapshotTextOriginal(textEl) {
+      if (!textEl || !(textEl instanceof SVGElement)) return;
+      if (!textEl.dataset) return;
+      if (textEl.dataset.recolorOrigFill === undefined) {
+        const fill = textEl.getAttribute("fill");
+        const fo = textEl.getAttribute("fill-opacity");
+        textEl.dataset.recolorOrigFill = fill !== null ? fill : "";
+        textEl.dataset.recolorOrigFillOpacity = fo !== null ? fo : "";
+      }
+    }
+
+    function restoreTextOriginal(textEl) {
+      if (!textEl || !textEl.dataset) return;
+      const f = textEl.dataset.recolorOrigFill;
+      const fo = textEl.dataset.recolorOrigFillOpacity;
+
+      if (f === "") textEl.removeAttribute("fill");
+      else textEl.setAttribute("fill", f);
+
+      if (fo === "") textEl.removeAttribute("fill-opacity");
+      else textEl.setAttribute("fill-opacity", fo);
+    }
+
+    function applyTextColors() {
+      const map = buildTagToReplacementHexMap();
+      const texts = Array.from(recolorSvg.querySelectorAll("text"));
+
+      texts.forEach((t) => {
+        const raw = (t.textContent || "").toString().trim();
+        if (!raw || !isTagLike(raw)) return;
+
+        snapshotTextOriginal(t);
+
+        const key = norm(raw);
+        const hex = map.get(key);
+
+        if (!textColorModeOn || !hex) {
+          restoreTextOriginal(t);
+          return;
+        }
+
+        t.setAttribute("fill", hex);
+        t.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, textOpacity))));
+      });
+    }
 
     const picker = renderGridPicker({
       isUsed: (hex) => usedReplacementHex.has(norm(hex)),
@@ -630,15 +719,16 @@
         }
 
         newHex = norm(newHex);
+        newTag = (newTag || "").toString().trim();
 
-        const row = left.querySelector(`[data-oldhex="${selectedOldHex}"]`);
+        const row = rowByOldHex.get(norm(selectedOldHex));
         if (row) {
           const prev = row.getAttribute("data-replhex") || "";
           if (prev) usedReplacementHex.delete(norm(prev));
         }
         usedReplacementHex.add(newHex);
 
-        const nodes = fillGroups.get(selectedOldHex) || [];
+        const nodes = fillGroups.get(norm(selectedOldHex)) || [];
         nodes.forEach((el) => {
           el.setAttribute("fill", newHex);
           if (el.hasAttribute("style")) {
@@ -664,26 +754,18 @@
 
           if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
 
-          // ✅ FIX #2: auto-fill rename input with picked TAG (but stays editable)
-          if (newTag) {
-            const renameInput = row.querySelector('input[data-role="rename"]');
-            if (renameInput) {
-              renameInput.value = newTag;
-              // Trigger same path that updates SVG text nodes
-              renameInput.dispatchEvent(new Event("input", { bubbles: true }));
-            }
-          }
+          // ✅ EXACT REQUEST: rename box becomes picker tag immediately (still editable)
+          if (newTag) setRenameForOldHex(selectedOldHex, newTag);
         }
 
         picker.refreshUsedX();
+
+        // If text-color mode is ON, recolor texts now too (because replHex changed)
+        if (textColorModeOn) applyTextColors();
       },
     });
 
     right.appendChild(picker.grid);
-
-    const list = document.createElement("div");
-    list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
-    left.appendChild(list);
 
     if (!rawEntries.length) {
       const empty = document.createElement("div");
@@ -692,6 +774,7 @@
       list.appendChild(empty);
     } else {
       rawEntries.forEach(({ oldHex, tagOriginal }) => {
+        // capture label nodes by original tag, then we keep references forever
         const labelNodes =
           tagOriginal && tagOriginal.trim()
             ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
@@ -704,7 +787,7 @@
         row.style.cssText = `
           text-align:left;
           display:grid;
-          grid-template-columns: 72px 72px 72px 1fr; /* 3 equal boxes */
+          grid-template-columns: 72px 72px 72px 1fr;
           gap: 10px;
           align-items:center;
           padding: 10px;
@@ -760,8 +843,8 @@
 
         const input = document.createElement("input");
         input.type = "text";
-        input.value = tagOriginal || "";
-        input.setAttribute("data-role", "rename"); // ✅ used by auto-fill
+        input.value = tagOriginal || ""; // ✅ prefilled with original tag (0..n)
+        input.setAttribute("data-role", "rename");
         input.style.cssText = `
           width:100%;
           height:28px;
@@ -791,6 +874,7 @@
         input.addEventListener("input", () => {
           const v = input.value;
           labelNodes.forEach((t) => (t.textContent = v));
+          if (textColorModeOn) applyTextColors();
         });
 
         row.appendChild(boxTag);
@@ -799,7 +883,7 @@
         row.appendChild(stack);
 
         row.addEventListener("click", () => {
-          selectedOldHex = oldHex;
+          selectedOldHex = norm(oldHex);
           Array.from(list.querySelectorAll("button")).forEach((b) => {
             b.style.outline = "none";
             b.style.boxShadow = "none";
@@ -809,9 +893,15 @@
         });
 
         list.appendChild(row);
+
+        // register row state
+        rowByOldHex.set(norm(oldHex), row);
+        renameInputByOldHex.set(norm(oldHex), input);
+        labelNodesByOldHex.set(norm(oldHex), labelNodes);
       });
     }
 
+    // ---------- Toggles row (now includes Text Color Mode) ----------
     const togglesRow = document.createElement("div");
     togglesRow.style.cssText = `
       margin-top: 12px;
@@ -832,6 +922,7 @@
     const btnColors = makeToggleButton("Colores", true, (on) => {
       colorsOn = on;
       setColorFills(recolorSvg, colorsOn);
+      // text mode unaffected (it controls only <text>)
     });
 
     const btnBorders = makeToggleButton("Bordes", true, (on) => {
@@ -839,17 +930,68 @@
       setBorders(recolorSvg, bordersOn);
     });
 
+    // NEW: Text color mode toggle + slider
+    const textControls = document.createElement("div");
+    textControls.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
+
+    const btnTextColor = makeToggleButton("Color textos", false, (on) => {
+      textColorModeOn = on;
+      applyTextColors();
+    });
+
+    const sliderWrap = document.createElement("div");
+    sliderWrap.style.cssText = `
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,.12);
+      background: rgba(255,255,255,.9);
+    `;
+
+    const sliderLabel = document.createElement("div");
+    sliderLabel.style.cssText = "font-size:12px; color: rgba(0,0,0,.70); font-weight:800;";
+    sliderLabel.textContent = "Opacidad texto";
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "100";
+    slider.value = "70";
+    slider.style.cssText = "width: 180px; cursor: pointer;";
+
+    const sliderVal = document.createElement("div");
+    sliderVal.style.cssText = "font-size:12px; color: rgba(0,0,0,.70); font-weight:900; width:44px; text-align:right;";
+    sliderVal.textContent = "70%";
+
+    slider.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(100, Number(slider.value || 0)));
+      sliderVal.textContent = `${v}%`;
+      textOpacity = v / 100;
+      if (textColorModeOn) applyTextColors();
+    });
+
+    sliderWrap.appendChild(sliderLabel);
+    sliderWrap.appendChild(slider);
+    sliderWrap.appendChild(sliderVal);
+
+    textControls.appendChild(btnTextColor);
+    textControls.appendChild(sliderWrap);
+
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-    hint.textContent = "Colores OFF = descarga solo bordes + números (mantiene color de texto actual).";
+    hint.textContent = "Colores OFF = descarga solo bordes + números. Color textos usa el HEX del reemplazo + opacidad.";
 
     togglesLeft.appendChild(btnColors);
     togglesLeft.appendChild(btnBorders);
+    togglesLeft.appendChild(textControls);
 
     togglesRow.appendChild(togglesLeft);
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
+    // ---------- Downloads ----------
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
@@ -881,7 +1023,7 @@
     dl.appendChild(btnPng);
   }
 
-  // ---------- Floating launcher (outside generator tree) ----------
+  // ---------- Floating launcher ----------
   function ensureFab() {
     let fab = document.getElementById("recolor-fab");
     if (fab) return fab;
@@ -936,7 +1078,6 @@
     if (status) status.textContent = ready ? "Output detectado" : "Esperando output…";
   }
 
-  // Minimal checks only (no interval spam)
   function scheduleUpdate() {
     setTimeout(updateFab, 120);
   }
@@ -960,7 +1101,6 @@
     true
   );
 
-  // First paint
   try {
     updateFab();
   } catch (_) {}
