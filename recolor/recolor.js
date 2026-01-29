@@ -147,14 +147,6 @@
 
   // ========================================================================
   //  COLOR SCIENCE ENGINE (ΔE00 + GLOBAL 1:1 SUGGESTIONS)
-  //  Deliverables requested:
-  //   - buildPaletteCache(paletteHexes)
-  //   - buildOriginalCache(originalHexesOrTags)
-  //   - buildKNNGraph(originalCache, K)
-  //   - buildCostMatrix(originalCache, paletteCache, weights, params)
-  //   - hungarianAssign(costMatrix)
-  //   - refineBySwaps(assign, originalCache, paletteCache, graph, params)
-  //   - suggestOneToOneMapping(originalColorsUsed) -> mapping oldHex -> {hex,tag,meta}
   // ========================================================================
 
   // --- sRGB -> linear ---
@@ -513,8 +505,6 @@
       const n2 = graph[i2] || [];
 
       let dGrad = 0;
-
-      // i1 edges (avoid double-count with i2 handled below; still fine, but keep stable)
       dGrad += incidentDelta(i1, a1, a2, assign, n1);
       dGrad += incidentDelta(i2, a2, a1, assign, n2);
 
@@ -1217,7 +1207,7 @@
     // ---- State ----
     let colorsOn = true;
     let bordersOn = true;
-    let textColorModeOn = false; // OFF => black
+    let textColorModeOn = false; // OFF => now uses ORIGINAL text fill (FIX)
     let textOpacity = 0.7; // ALWAYS applied
     let selectedOldHex = null;
 
@@ -1287,6 +1277,7 @@
       return s;
     }
 
+    // ---------------- FIX: default text color should be ORIGINAL from SVG, not forced black ----------------
     function applyTextColors() {
       const map = buildTagToReplacementHexMap();
       const texts = Array.from(recolorSvg.querySelectorAll("text"));
@@ -1296,8 +1287,20 @@
         const raw = (t.textContent || "").toString().trim();
         if (!raw || !isTagLike(raw)) return;
 
+        // Cache original fill ONCE so toggling OFF returns to true original (not the last applied)
+        if (!t.hasAttribute("data-origfill")) {
+          const orig = getElementFill(t) || null;
+          const safe = isHex6(norm(orig || "")) ? norm(orig) : "#000000";
+          t.setAttribute("data-origfill", safe);
+        }
+
         const key = norm(raw);
-        const hex = textColorModeOn ? map.get(key) || "#000000" : "#000000";
+        const origHex = norm(t.getAttribute("data-origfill") || "");
+        const safeOrig = isHex6(origHex) ? origHex : "#000000";
+
+        // ON  => replacement color by tag (fallback original)
+        // OFF => original SVG text color (fallback black)
+        const hex = textColorModeOn ? (map.get(key) || safeOrig) : safeOrig;
 
         t.setAttribute("fill", hex);
         t.setAttribute("fill-opacity", op);
@@ -1309,6 +1312,7 @@
         t.setAttribute("style", `${prefix}fill:${hex};fill-opacity:${op};opacity:${op};`);
       });
     }
+    // ------------------------------------------------------------------------------------------------------
 
     function queueSaveState(buildStateFn) {
       clearTimeout(saveTimer);
@@ -1689,7 +1693,7 @@
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
     hint.textContent =
-      "Sugerencia 1:1 usa Hungarian + rank L* + hue + neutral + refinamiento por swaps (gradientes). OFF vuelve a sugerencia local (ΔE00). Textos: OFF=negro con opacidad; ON=hex del reemplazo. Opacidad siempre aplica (también en export).";
+      "Sugerencia 1:1 usa Hungarian + rank L* + hue + neutral + refinamiento por swaps (gradientes). OFF vuelve a sugerencia local (ΔE00). Textos: OFF=mantiene color original del SVG; ON=hex del reemplazo. Opacidad siempre aplica (también en export).";
 
     togglesRow.appendChild(togglesLeft);
     togglesRow.appendChild(hint);
