@@ -1,17 +1,17 @@
-/* Recolor add-on (v9.0 - ALL FIXES INCORPORATED)
+/* Recolor add-on (v9.1 - ALL FIXES + EXPORT OPACITY + BUTTON FEEDBACK)
    ✅ Hard reload safe: FAB + modal overlay (no early DOM injection)
-   ✅ Restores ORIGINAL tag detection (0..n) + sort asc + renombrar edits real SVG texts
+   ✅ ORIGINAL tag detection restored (top swatches + svg legend + proximity) + sort asc
+   ✅ Rename works on real SVG text nodes
    ✅ Auto-rename on pick: rename input becomes picker tag (still editable)
    ✅ Picker shows X when a color is already used (indicator only)
    ✅ Colores ON/OFF, Bordes ON/OFF
    ✅ Color textos toggle:
-        - ON  => text fill = replacement hex (by tag) else black
+        - ON  => text fill = replacement hex (by current text tag), else black
         - OFF => text fill = black
       Opacity slider ALWAYS applies (ON or OFF, color or black)
-   ✅ PNG download fixed + HQ export:
-        - Reads real SVG size (viewBox/attrs/bbox)
-        - Exports at scale 10x by default (capped to avoid memory blowups)
-        - Robust download (blob + dataURL fallback)
+   ✅ EXPORT FIX: text opacity is “baked” (fill + fill-opacity + opacity inline) before SVG/PNG export
+   ✅ PNG download fixed + HQ export (scale 10x default) + robust download
+   ✅ Download buttons: press feedback + loading spinner while preparing (PNG) + brief spinner on SVG
 */
 
 (function () {
@@ -22,6 +22,66 @@
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
   const isTagLike = (t) => /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim());
+
+  // ---------- Global UI CSS (spinner + button feedback) ----------
+  function ensureUiStyle() {
+    if (document.getElementById("recolor-ui-style")) return;
+    const st = document.createElement("style");
+    st.id = "recolor-ui-style";
+    st.textContent = `
+      @keyframes recolorSpin { to { transform: rotate(360deg); } }
+      .recolor-btn {
+        transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease, opacity 120ms ease;
+        box-shadow: 0 10px 24px rgba(0,0,0,.10);
+      }
+      .recolor-btn:hover { box-shadow: 0 14px 30px rgba(0,0,0,.14); }
+      .recolor-btn.is-pressed { transform: translateY(1px) scale(.99); box-shadow: 0 6px 14px rgba(0,0,0,.10); }
+      .recolor-btn.is-loading { opacity: .85; cursor: progress !important; }
+      .recolor-spinner {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        border: 2px solid rgba(0,0,0,.22);
+        border-top-color: rgba(0,0,0,.65);
+        animation: recolorSpin .7s linear infinite;
+        display: inline-block;
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function enhanceButton(btn) {
+    ensureUiStyle();
+    btn.classList.add("recolor-btn");
+    btn.addEventListener("pointerdown", () => btn.classList.add("is-pressed"));
+    const up = () => btn.classList.remove("is-pressed");
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointercancel", up);
+    btn.addEventListener("mouseleave", up);
+  }
+
+  function setButtonLoading(btn, on) {
+    ensureUiStyle();
+    if (on) {
+      btn.classList.add("is-loading");
+      btn.disabled = true;
+
+      if (!btn._spinner) {
+        const sp = document.createElement("span");
+        sp.className = "recolor-spinner";
+        sp.style.marginLeft = "10px";
+        btn._spinner = sp;
+        btn.appendChild(sp);
+      }
+    } else {
+      btn.classList.remove("is-loading");
+      btn.disabled = false;
+      if (btn._spinner) {
+        btn._spinner.remove();
+        btn._spinner = null;
+      }
+    }
+  }
 
   // ---------- Color helpers ----------
   function rgbToHex(rgb) {
@@ -184,11 +244,6 @@
   }
 
   // ---------- Download helpers ----------
-  function downloadText(filename, text, mime = "text/plain") {
-    const blob = new Blob([text], { type: mime });
-    forceDownloadBlob(blob, filename);
-  }
-
   function forceDownloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -200,6 +255,11 @@
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  function downloadText(filename, text, mime = "text/plain") {
+    const blob = new Blob([text], { type: mime });
+    forceDownloadBlob(blob, filename);
   }
 
   async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
@@ -230,6 +290,7 @@
     // Try createImageBitmap first
     try {
       const bitmap = await createImageBitmap(svgBlob);
+
       const canvas = document.createElement("canvas");
       canvas.width = outW;
       canvas.height = outH;
@@ -274,8 +335,8 @@
       const canvas = document.createElement("canvas");
       canvas.width = outW;
       canvas.height = outH;
-      const ctx = canvas.getContext("2d", { alpha: false });
 
+      const ctx = canvas.getContext("2d", { alpha: false });
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, outW, outH);
 
@@ -371,19 +432,22 @@
     let on = !!initialOn;
     const btn = document.createElement("button");
     btn.type = "button";
+    btn.style.cssText = `
+      padding:10px 14px;
+      border-radius:12px;
+      border:1px solid rgba(0,0,0,.22);
+      background:${on ? "white" : "rgba(0,0,0,.06)"};
+      cursor:pointer;
+      font-weight:900;
+    `;
 
     const paint = () => {
       btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
-      btn.style.cssText = `
-        padding:10px 14px;
-        border-radius:12px;
-        border:1px solid rgba(0,0,0,.22);
-        background:${on ? "white" : "rgba(0,0,0,.06)"};
-        cursor:pointer;
-        font-weight:900;
-      `;
+      btn.style.background = on ? "white" : "rgba(0,0,0,.06)";
     };
+
     paint();
+    enhanceButton(btn);
 
     btn.addEventListener("click", () => {
       on = !on;
@@ -553,7 +617,6 @@
 
     for (const [hex, nodes] of fillGroups.entries()) {
       let sumX = 0, sumY = 0, count = 0;
-
       const sample = nodes.slice(0, 40);
       for (const el of sample) {
         let bb;
@@ -639,6 +702,7 @@
     close.textContent = "Cerrar";
     close.style.cssText =
       "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+    enhanceButton(close);
     close.addEventListener("click", () => overlay.remove());
 
     topbar.appendChild(title);
@@ -809,10 +873,24 @@
       return map;
     }
 
+    // --- Export-stable text styling ("baked") ---
+    function stripStyleProps(styleStr, props) {
+      if (!styleStr) return "";
+      let s = styleStr;
+      props.forEach((p) => {
+        const re = new RegExp(`\\b${p}\\s*:\\s*[^;]+;?`, "gi");
+        s = s.replace(re, "");
+      });
+      s = s.replace(/;;+/g, ";").trim();
+      return s;
+    }
+
     // ✅ Slider must apply always; OFF => black, ON => replacement hex (else black)
+    // ✅ Export stability: set fill + fill-opacity + opacity AND bake inline style
     function applyTextColors() {
       const map = buildTagToReplacementHexMap();
       const texts = Array.from(recolorSvg.querySelectorAll("text"));
+      const op = String(Math.max(0, Math.min(1, textOpacity)));
 
       texts.forEach((t) => {
         const raw = (t.textContent || "").toString().trim();
@@ -821,8 +899,16 @@
         const key = norm(raw);
         const hex = textColorModeOn ? (map.get(key) || "#000000") : "#000000";
 
+        // attrs
         t.setAttribute("fill", hex);
-        t.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, textOpacity))));
+        t.setAttribute("fill-opacity", op);
+        t.setAttribute("opacity", op);
+
+        // inline bake (wins over generator rules in export rasterizers)
+        const prev = t.getAttribute("style") || "";
+        const cleaned = stripStyleProps(prev, ["fill", "fill-opacity", "opacity"]);
+        const prefix = cleaned ? (cleaned.trim().endsWith(";") ? cleaned : cleaned + ";") : "";
+        t.setAttribute("style", `${prefix}fill:${hex};fill-opacity:${op};opacity:${op};`);
       });
     }
 
@@ -1106,7 +1192,7 @@
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
     hint.textContent =
-      "Textos: OFF=negro con opacidad; ON=hex de reemplazo (si no hay reemplazo, negro). Opacidad siempre aplica.";
+      "Textos: OFF=negro con opacidad; ON=hex de reemplazo (si no hay reemplazo, negro). Opacidad siempre aplica. Export bake OK.";
 
     togglesRow.appendChild(togglesLeft);
     togglesRow.appendChild(hint);
@@ -1124,23 +1210,41 @@
     btnSvg.type = "button";
     btnSvg.textContent = "DOWNLOAD RECOLORED SVG";
     btnSvg.style.cssText =
-      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
-    btnSvg.addEventListener("click", () => {
-      const svgText = new XMLSerializer().serializeToString(recolorSvg);
-      downloadText("paintbynumber_recolored.svg", svgText, "image/svg+xml");
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnSvg);
+
+    btnSvg.addEventListener("click", async () => {
+      // Brief spinner so you feel the click even if instant
+      setButtonLoading(btnSvg, true);
+      try {
+        applyTextColors(); // ✅ bake before export
+        const svgText = new XMLSerializer().serializeToString(recolorSvg);
+        downloadText("paintbynumber_recolored.svg", svgText, "image/svg+xml");
+      } finally {
+        setTimeout(() => setButtonLoading(btnSvg, false), 220);
+      }
     });
 
     const btnPng = document.createElement("button");
     btnPng.type = "button";
     btnPng.textContent = "DOWNLOAD RECOLORED PNG";
     btnPng.style.cssText =
-      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnPng);
+
     btnPng.addEventListener("click", async () => {
+      setButtonLoading(btnPng, true);
       try {
-        await downloadSvgAsPngHQ(recolorSvg, "paintbynumber_recolored.png", 10);
+        applyTextColors(); // ✅ bake before export
+
+        // ✅ export from clone (avoids “live DOM” edge cases in rasterizers)
+        const svgClone = recolorSvg.cloneNode(true);
+        await downloadSvgAsPngHQ(svgClone, "paintbynumber_recolored.png", 10);
       } catch (e) {
         console.error(e);
         alert("No pude exportar PNG. Revisa si el navegador bloqueó el canvas.");
+      } finally {
+        setButtonLoading(btnPng, false);
       }
     });
 
@@ -1175,7 +1279,8 @@
     btn.type = "button";
     btn.textContent = "Abrir Recolorear";
     btn.style.cssText =
-      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
+      "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btn);
 
     btn.addEventListener("click", () => {
       const current = findFinalOutputSvgLight();
