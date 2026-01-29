@@ -1,51 +1,107 @@
-/* Recolor add-on (v9.3.2 - FIX LAUNCHER ALWAYS VISIBLE + MODAL HOST)
-   ✅ FAB flotante "Abrir Recolorear" (no depende de fila de downloads)
-   ✅ Modal overlay para UI (no depende del DOM del generador)
-   ✅ Mantiene todo lo anterior: ΔE00, sugerencia 1:1, memoria, export hi-res, opacidad textos, etc.
+/* Recolor add-on (v11.0 - GLOBAL 1:1 SUGGESTIONS + ΔE00 ENGINE + ALL FIXES)
+   ✅ Hard reload safe: FAB + modal overlay
+   ✅ ORIGINAL tag detection restored + sort asc
+   ✅ Rename works on real SVG text nodes
+   ✅ Auto-rename on pick: rename input becomes picker tag (still editable)
+   ✅ Picker shows X when a color is already used (indicator only)
+   ✅ Colores ON/OFF, Bordes ON/OFF
+   ✅ Color textos toggle + Opacity slider ALWAYS applies (ON or OFF, color or black)
+   ✅ EXPORT FIX: text opacity is “baked” before SVG/PNG export
+   ✅ PNG download fixed + HQ export (scale 10x default) + robust download
+   ✅ Buttons: press feedback + loading spinner while exporting
+   ✅ Memory: persists mappings + UI between close/reopen, resets only on new output signature
+
+   🆕 SUGGESTION ENGINE (FIX REQUESTED):
+      - ΔE00 base + PBN neutral penalty (GAMMA) + anti-dark (tie) already available
+      - GLOBAL 1:1 assignment (no repeats) with Hungarian + L* rank preservation + hue coherence
+      - Refinement by swaps to preserve gradients/transitions (graph KNN, ITER)
+      - UI toggle: “Sugerencia 1:1 (sin repetir) + Preservar escala” (default ON)
+
+   Parameters default:
+     ALPHA=1.2, BETA=0.15, GAMMA=0.08, DELTA=0.35,
+     C_NEUTRAL=6.0, K=3, ITER=800, EPS_TIE=0.35
 */
 
 (function () {
-  // ---------------- CONFIG ----------------
+  // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map((x) => x.hex);
-  const PALETTE_LIST = (PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ tag: "", hex })))
-    .map((it, idx) => ({
-      idx,
-      tag: (it.tag || "").toString().trim(),
-      hex: normHex(it.hex),
-    }))
-    .filter((it) => isHex6(it.hex));
-
-  const PARAMS_DEFAULT = {
-    ALPHA: 1.2,
-    BETA: 0.15,
-    GAMMA: 0.08,
-    DELTA: 0.35,
-    C_NEUTRAL: 6.0,
-    K: 3,
-    ITER: 800,
-    EPS_TIE: 0.35,
-  };
-
-  const PNG_MAX_SCALE = 10;
-  const CANVAS_MAX_DIM = 16384;
-
-  const STORAGE_KEY = "pbn_recolor_state_v9";
-  const FAB_ID = "recolor-fab-v9";
-  const MODAL_ID = "recolor-modal-v9";
-  const SPIN_STYLE_ID = "recolor-spin-style";
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
+  const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
+  const isTagLike = (t) => /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim());
 
-  function normHex(v) {
-    const s = (v || "").toString().trim().toLowerCase();
-    if (!s) return "";
-    if (s[0] !== "#") return s.startsWith("rgb") ? (rgbToHex(s) || "") : "";
-    return s;
+  // ---------- Memory ----------
+  const STORAGE_KEY = "recolor_state_v110";
+  let saveTimer = null;
+
+  function safeJsonParse(s) {
+    try { return JSON.parse(s); } catch { return null; }
   }
-  const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test((s || "").trim());
+  function hashDjb2(str) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
+    return (h >>> 0).toString(16);
+  }
+  function svgSignature(svgEl) {
+    try {
+      const s = new XMLSerializer().serializeToString(svgEl);
+      const compact = s.replace(/\s+/g, " ").slice(0, 40000);
+      return hashDjb2(`${compact.length}|${compact}`);
+    } catch {
+      return String(Date.now());
+    }
+  }
+  function loadStored() { return safeJsonParse(localStorage.getItem(STORAGE_KEY)) || null; }
+  function writeStored(obj) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
 
-  // ---------------- COLOR HELPERS ----------------
+  // ---------- Global UI CSS ----------
+  function ensureUiStyle() {
+    if (document.getElementById("recolor-ui-style")) return;
+    const st = document.createElement("style");
+    st.id = "recolor-ui-style";
+    st.textContent = `
+      @keyframes recolorSpin { to { transform: rotate(360deg); } }
+      .recolor-btn { transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease, opacity 120ms ease; box-shadow: 0 10px 24px rgba(0,0,0,.10); }
+      .recolor-btn:hover { box-shadow: 0 14px 30px rgba(0,0,0,.14); }
+      .recolor-btn.is-pressed { transform: translateY(1px) scale(.99); box-shadow: 0 6px 14px rgba(0,0,0,.10); }
+      .recolor-btn.is-loading { opacity: .85; cursor: progress !important; }
+      .recolor-spinner { width: 14px; height: 14px; border-radius: 999px; border: 2px solid rgba(0,0,0,.22); border-top-color: rgba(0,0,0,.65); animation: recolorSpin .7s linear infinite; display: inline-block; }
+      .recolor-suggest { transition: transform 80ms ease, box-shadow 120ms ease; }
+      .recolor-suggest:hover { box-shadow: 0 10px 18px rgba(0,0,0,.12); }
+      .recolor-suggest:active { transform: translateY(1px) scale(.99); }
+    `;
+    document.head.appendChild(st);
+  }
+  function enhanceButton(btn) {
+    ensureUiStyle();
+    btn.classList.add("recolor-btn");
+    btn.addEventListener("pointerdown", () => btn.classList.add("is-pressed"));
+    const up = () => btn.classList.remove("is-pressed");
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointercancel", up);
+    btn.addEventListener("mouseleave", up);
+  }
+  function setButtonLoading(btn, on) {
+    ensureUiStyle();
+    if (on) {
+      btn.classList.add("is-loading");
+      btn.disabled = true;
+      if (!btn._spinner) {
+        const sp = document.createElement("span");
+        sp.className = "recolor-spinner";
+        sp.style.marginLeft = "10px";
+        btn._spinner = sp;
+        btn.appendChild(sp);
+      }
+    } else {
+      btn.classList.remove("is-loading");
+      btn.disabled = false;
+      if (btn._spinner) { btn._spinner.remove(); btn._spinner = null; }
+    }
+  }
+
+  // ---------- Color helpers ----------
   function rgbToHex(rgb) {
     const m = (rgb || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
     if (!m) return null;
@@ -53,7 +109,6 @@
     const to2 = (n) => n.toString(16).padStart(2, "0");
     return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
   }
-
   function textColorForBg(hex) {
     const h = (hex || "").replace("#", "");
     if (h.length !== 6) return "#000";
@@ -71,7 +126,6 @@
       if (f.startsWith("rgb")) return rgbToHex(f) || null;
       if (f.startsWith("#") && f.length === 7) return f;
     }
-
     const styleAttr = el.getAttribute && el.getAttribute("style");
     if (styleAttr && /fill\s*:/i.test(styleAttr)) {
       const m = styleAttr.match(/fill:\s*([^;]+)/i);
@@ -81,7 +135,6 @@
         if (v.startsWith("#") && v.length === 7) return v;
       }
     }
-
     try {
       const cs = window.getComputedStyle(el);
       const f = cs && cs.fill ? norm(cs.fill) : "";
@@ -89,59 +142,540 @@
       if (f.startsWith("rgb")) return rgbToHex(f) || null;
       if (f.startsWith("#") && f.length === 7) return f;
     } catch (_) {}
-
     return null;
   }
 
-  function getTextFillHex(textEl) {
-    const fAttr = textEl.getAttribute && textEl.getAttribute("fill");
-    if (fAttr && fAttr !== "none" && fAttr !== "transparent") {
-      const f = norm(fAttr);
-      if (f.startsWith("rgb")) return rgbToHex(f) || null;
-      if (f.startsWith("#") && f.length === 7) return f;
+  // ========================================================================
+  //  COLOR SCIENCE ENGINE (ΔE00 + GLOBAL 1:1 SUGGESTIONS)
+  //  Deliverables requested:
+  //   - buildPaletteCache(paletteHexes)
+  //   - buildOriginalCache(originalHexesOrTags)
+  //   - buildKNNGraph(originalCache, K)
+  //   - buildCostMatrix(originalCache, paletteCache, weights, params)
+  //   - hungarianAssign(costMatrix)
+  //   - refineBySwaps(assign, originalCache, paletteCache, graph, params)
+  //   - suggestOneToOneMapping(originalColorsUsed) -> mapping oldHex -> {hex,tag,meta}
+  // ========================================================================
+
+  // --- sRGB -> linear ---
+  function srgbToLinear(u) {
+    return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4);
+  }
+  // --- linear -> XYZ D65 ---
+  function rgb01ToXyzD65(r, g, b) {
+    const R = srgbToLinear(r), G = srgbToLinear(g), B = srgbToLinear(b);
+    return {
+      x: R * 0.4124564 + G * 0.3575761 + B * 0.1804375,
+      y: R * 0.2126729 + G * 0.7151522 + B * 0.0721750,
+      z: R * 0.0193339 + G * 0.1191920 + B * 0.9503041,
+    };
+  }
+  function fLab(t) { return t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16 / 116); }
+  // --- XYZ -> Lab (D65) ---
+  function xyzToLabD65(x, y, z) {
+    const Xn = 0.95047, Yn = 1.0, Zn = 1.08883;
+    const fx = fLab(x / Xn), fy = fLab(y / Yn), fz = fLab(z / Zn);
+    return { L: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
+  }
+
+  // hex -> Lab + C/h
+  function hexToLab(hex) {
+    const h = (hex || "").replace("#", "").trim();
+    if (h.length !== 6) return null;
+    const r8 = parseInt(h.slice(0, 2), 16);
+    const g8 = parseInt(h.slice(2, 4), 16);
+    const b8 = parseInt(h.slice(4, 6), 16);
+    if (!Number.isFinite(r8) || !Number.isFinite(g8) || !Number.isFinite(b8)) return null;
+    const r = r8 / 255, g = g8 / 255, b = b8 / 255;
+    const { x, y, z } = rgb01ToXyzD65(r, g, b);
+    const lab = xyzToLabD65(x, y, z);
+    const C = Math.sqrt(lab.a * lab.a + lab.b * lab.b);
+    let hDeg = (Math.atan2(lab.b, lab.a) * 180) / Math.PI;
+    if (hDeg < 0) hDeg += 360;
+    return { L: lab.L, a: lab.a, b: lab.b, C, h: hDeg };
+  }
+
+  // ΔE00 standard (kL=kC=kH=1)
+  function deltaE00(lab1, lab2) {
+    const L1 = lab1.L, a1 = lab1.a, b1 = lab1.b;
+    const L2 = lab2.L, a2 = lab2.a, b2 = lab2.b;
+    const kL = 1, kC = 1, kH = 1;
+
+    const C1 = Math.sqrt(a1 * a1 + b1 * b1);
+    const C2 = Math.sqrt(a2 * a2 + b2 * b2);
+    const Cbar = (C1 + C2) / 2;
+
+    const Cbar7 = Math.pow(Cbar, 7);
+    const G = 0.5 * (1 - Math.sqrt(Cbar7 / (Cbar7 + Math.pow(25, 7))));
+
+    const a1p = (1 + G) * a1;
+    const a2p = (1 + G) * a2;
+
+    const C1p = Math.sqrt(a1p * a1p + b1 * b1);
+    const C2p = Math.sqrt(a2p * a2p + b2 * b2);
+
+    const h1p = ((Math.atan2(b1, a1p) * 180) / Math.PI + 360) % 360;
+    const h2p = ((Math.atan2(b2, a2p) * 180) / Math.PI + 360) % 360;
+
+    const dLp = L2 - L1;
+    const dCp = C2p - C1p;
+
+    let dhp = 0;
+    if (C1p * C2p !== 0) {
+      const dh = h2p - h1p;
+      if (Math.abs(dh) <= 180) dhp = dh;
+      else if (dh > 180) dhp = dh - 360;
+      else dhp = dh + 360;
     }
-    const styleAttr = textEl.getAttribute && textEl.getAttribute("style");
-    if (styleAttr && /fill\s*:/i.test(styleAttr)) {
-      const m = styleAttr.match(/fill:\s*([^;]+)/i);
-      if (m && m[1]) {
-        const v = norm(m[1]);
-        if (v.startsWith("rgb")) return rgbToHex(v) || null;
-        if (v.startsWith("#") && v.length === 7) return v;
+    const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin((((dhp * Math.PI) / 180) / 2));
+
+    const Lbarp = (L1 + L2) / 2;
+    const Cbarp = (C1p + C2p) / 2;
+
+    let hbarp = 0;
+    if (C1p * C2p === 0) {
+      hbarp = h1p + h2p;
+    } else {
+      const dh = Math.abs(h1p - h2p);
+      if (dh <= 180) hbarp = (h1p + h2p) / 2;
+      else hbarp = (h1p + h2p + (h1p + h2p < 360 ? 360 : -360)) / 2;
+    }
+
+    const T =
+      1 -
+      0.17 * Math.cos(((hbarp - 30) * Math.PI) / 180) +
+      0.24 * Math.cos(((2 * hbarp) * Math.PI) / 180) +
+      0.32 * Math.cos(((3 * hbarp + 6) * Math.PI) / 180) -
+      0.20 * Math.cos(((4 * hbarp - 63) * Math.PI) / 180);
+
+    const dTheta = 30 * Math.exp(-Math.pow((hbarp - 275) / 25, 2));
+    const RC = 2 * Math.sqrt(Math.pow(Cbarp, 7) / (Math.pow(Cbarp, 7) + Math.pow(25, 7)));
+
+    const SL = 1 + (0.015 * Math.pow(Lbarp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbarp - 50, 2));
+    const SC = 1 + 0.045 * Cbarp;
+    const SH = 1 + 0.015 * Cbarp * T;
+
+    const RT = -Math.sin(((2 * dTheta) * Math.PI) / 180) * RC;
+
+    return Math.sqrt(
+      Math.pow(dLp / (kL * SL), 2) +
+        Math.pow(dCp / (kC * SC), 2) +
+        Math.pow(dHp / (kH * SH), 2) +
+        RT * (dCp / (kC * SC)) * (dHp / (kH * SH))
+    );
+  }
+
+  function hueDistDeg(h1, h2) {
+    const d = Math.abs(h1 - h2);
+    return Math.min(d, 360 - d); // 0..180
+  }
+
+  // ---------- Phase 0: caches ----------
+  function buildPaletteCache(paletteItemsOrHexes) {
+    const items = Array.isArray(paletteItemsOrHexes)
+      ? paletteItemsOrHexes.map((x) => (typeof x === "string" ? { hex: x, tag: "" } : x))
+      : [];
+
+    const cache = [];
+    for (let i = 0; i < items.length; i++) {
+      const hex = norm(items[i].hex);
+      if (!isHex6(hex)) continue;
+      const lab = hexToLab(hex);
+      if (!lab) continue;
+      cache.push({
+        idx: i,
+        hex,
+        tag: (items[i].tag || "").toString().trim(),
+        L: lab.L,
+        a: lab.a,
+        b: lab.b,
+        C: lab.C,
+        h: lab.h,
+        lab,
+        rankL_pal: 0,
+      });
+    }
+    // rankL_pal: order by L* ascending (dark->light) gives stable "scale"
+    const sorted = cache.slice().sort((p, q) => p.L - q.L || p.idx - q.idx);
+    sorted.forEach((p, r) => (p.rankL_pal = r));
+    return cache;
+  }
+
+  function buildOriginalCache(originalItems) {
+    // originalItems: [{tag, oldHex, weight}]
+    const cache = [];
+    for (let i = 0; i < originalItems.length; i++) {
+      const it = originalItems[i];
+      const hex = norm(it.oldHex);
+      if (!isHex6(hex)) continue;
+      const lab = hexToLab(hex);
+      if (!lab) continue;
+      cache.push({
+        i,
+        tag: (it.tag || "").toString().trim(),
+        oldHex: hex,
+        weight: Number.isFinite(it.weight) ? it.weight : 1,
+        L: lab.L,
+        a: lab.a,
+        b: lab.b,
+        C: lab.C,
+        h: lab.h,
+        lab,
+        rankL_orig: 0,
+      });
+    }
+    const sorted = cache.slice().sort((p, q) => p.L - q.L || p.i - q.i);
+    sorted.forEach((o, r) => (o.rankL_orig = r));
+    return cache;
+  }
+
+  function buildKNNGraph(originalCache, K) {
+    const n = originalCache.length;
+    const graph = Array.from({ length: n }, () => []);
+    if (n <= 1) return graph;
+
+    // For KNN selection use ΔE76 (fast) (still good for neighbor structure)
+    function d76(l1, l2) {
+      const dL = l1.L - l2.L;
+      const da = l1.a - l2.a;
+      const db = l1.b - l2.b;
+      return Math.sqrt(dL * dL + da * da + db * db);
+    }
+
+    for (let i = 0; i < n; i++) {
+      const li = originalCache[i].lab;
+      const arr = [];
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        arr.push({ j, d: d76(li, originalCache[j].lab) });
+      }
+      arr.sort((a, b) => a.d - b.d);
+      const knn = arr.slice(0, Math.max(0, K));
+      // store with dOrig00 (needed by phase2)
+      for (const e of knn) {
+        const d00 = deltaE00(originalCache[i].lab, originalCache[e.j].lab);
+        graph[i].push({ j: e.j, dOrig: d00 });
       }
     }
-    try {
-      const cs = window.getComputedStyle(textEl);
-      const f = cs && cs.fill ? norm(cs.fill) : "";
-      if (!f || f === "none" || f === "transparent") return null;
-      if (f.startsWith("rgb")) return rgbToHex(f) || null;
-      if (f.startsWith("#") && f.length === 7) return f;
-    } catch (_) {}
-    return null;
+    return graph;
   }
 
-  // ---------------- SVG SIZING ----------------
+  function buildCostMatrix(originalCache, paletteCache, weights, params) {
+    const {
+      ALPHA = 1.2,
+      BETA = 0.15,
+      GAMMA = 0.08,
+      C_NEUTRAL = 6.0,
+    } = params || {};
+
+    const n = originalCache.length;
+    const m = paletteCache.length;
+    const C = Array.from({ length: n }, () => new Float64Array(m));
+
+    for (let i = 0; i < n; i++) {
+      const o = originalCache[i];
+      const w = (weights && Number.isFinite(weights[i]) ? weights[i] : o.weight) || 1;
+      const oNeutral = o.C < C_NEUTRAL;
+
+      for (let j = 0; j < m; j++) {
+        const p = paletteCache[j];
+
+        const base = deltaE00(o.lab, p.lab);
+        const scale = ALPHA * Math.abs(o.rankL_orig - p.rankL_pal);
+        const hue = BETA * hueDistDeg(o.h, p.h);
+        const neutral = oNeutral ? GAMMA * Math.max(0, p.C - o.C) : 0;
+
+        C[i][j] = w * (base + scale + hue + neutral);
+      }
+    }
+    return C;
+  }
+
+  // Hungarian for rectangular n<=m (min cost). Returns array assign[i]=j
+  function hungarianAssign(costMatrix) {
+    const n = costMatrix.length;
+    const m = costMatrix[0].length;
+    if (n === 0) return [];
+
+    // 1-indexed classic implementation (u,v potentials), O(n*m)
+    const u = new Float64Array(n + 1);
+    const v = new Float64Array(m + 1);
+    const p = new Int32Array(m + 1);
+    const way = new Int32Array(m + 1);
+
+    for (let i = 1; i <= n; i++) {
+      p[0] = i;
+      let j0 = 0;
+      const minv = new Float64Array(m + 1);
+      const used = new Uint8Array(m + 1);
+      for (let j = 1; j <= m; j++) minv[j] = Infinity;
+
+      do {
+        used[j0] = 1;
+        const i0 = p[j0];
+        let delta = Infinity;
+        let j1 = 0;
+        for (let j = 1; j <= m; j++) {
+          if (used[j]) continue;
+          const cur = costMatrix[i0 - 1][j - 1] - u[i0] - v[j];
+          if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
+          if (minv[j] < delta) { delta = minv[j]; j1 = j; }
+        }
+        for (let j = 0; j <= m; j++) {
+          if (used[j]) { u[p[j]] += delta; v[j] -= delta; }
+          else { minv[j] -= delta; }
+        }
+        j0 = j1;
+      } while (p[j0] !== 0);
+
+      // augmenting
+      do {
+        const j1 = way[j0];
+        p[j0] = p[j1];
+        j0 = j1;
+      } while (j0);
+    }
+
+    const assign = new Int32Array(n);
+    for (let j = 1; j <= m; j++) {
+      if (p[j] > 0) assign[p[j] - 1] = j - 1;
+    }
+    return Array.from(assign);
+  }
+
+  // Phase 2: refine by swaps (gradient preservation)
+  function refineBySwaps(assign, originalCache, paletteCache, graph, params) {
+    const {
+      DELTA = 0.35,
+      ITER = 800,
+    } = params || {};
+
+    const n = originalCache.length;
+    const m = paletteCache.length;
+    if (n <= 1) return assign;
+
+    // Precompute palette-palette ΔE00 (167x167)
+    const palDE = Array.from({ length: m }, () => new Float64Array(m));
+    for (let i = 0; i < m; i++) {
+      palDE[i][i] = 0;
+      for (let j = i + 1; j < m; j++) {
+        const d = deltaE00(paletteCache[i].lab, paletteCache[j].lab);
+        palDE[i][j] = d;
+        palDE[j][i] = d;
+      }
+    }
+
+    // We also want quick per-i cost access: rebuild cost matrix for selected originals only once
+    const weights = originalCache.map((o) => o.weight);
+    const baseCost = buildCostMatrix(originalCache, paletteCache, weights, params);
+
+    // Helper edge cost between i and neighbor j
+    function edgeCost(i, j) {
+      const ai = assign[i];
+      const aj = assign[j];
+      const dPal = palDE[ai][aj];
+      const dOrig = graph[i].find((e) => e.j === j)?.dOrig;
+      const dO = Number.isFinite(dOrig) ? dOrig : deltaE00(originalCache[i].lab, originalCache[j].lab);
+      return DELTA * Math.abs(dO - dPal);
+    }
+
+    // For delta calculation on swap only incident edges
+    function incidentDelta(i, oldPal, newPal, otherAssign, neighbors) {
+      let delta = 0;
+      for (const e of neighbors) {
+        const j = e.j;
+        const aj = otherAssign[j];
+        const dOld = DELTA * Math.abs(e.dOrig - palDE[oldPal][aj]);
+        const dNew = DELTA * Math.abs(e.dOrig - palDE[newPal][aj]);
+        delta += (dNew - dOld);
+      }
+      return delta;
+    }
+
+    const randInt = (max) => (Math.random() * max) | 0;
+
+    for (let it = 0; it < ITER; it++) {
+      const i1 = randInt(n);
+      let i2 = randInt(n);
+      if (i2 === i1) i2 = (i2 + 1) % n;
+
+      const a1 = assign[i1];
+      const a2 = assign[i2];
+      if (a1 === a2) continue;
+
+      // base term delta
+      const dBase =
+        (baseCost[i1][a2] + baseCost[i2][a1]) -
+        (baseCost[i1][a1] + baseCost[i2][a2]);
+
+      // gradient term delta (only edges incident to i1 or i2)
+      const n1 = graph[i1] || [];
+      const n2 = graph[i2] || [];
+
+      let dGrad = 0;
+
+      // i1 edges (avoid double-count with i2 handled below; still fine, but keep stable)
+      dGrad += incidentDelta(i1, a1, a2, assign, n1);
+      dGrad += incidentDelta(i2, a2, a1, assign, n2);
+
+      const dTotal = dBase + dGrad;
+
+      if (dTotal < 0) {
+        assign[i1] = a2;
+        assign[i2] = a1;
+      }
+    }
+
+    return assign;
+  }
+
+  // High-level suggestion mapping 1:1
+  function suggestOneToOneMapping(originalColorsUsed, paletteCache, params) {
+    const p = params || {};
+    const m = paletteCache.length;
+    const items = originalColorsUsed.slice();
+
+    // weights: if area not available, use node count as proxy (more shapes => more area)
+    const originals = buildOriginalCache(
+      items.map((x) => ({ tag: x.tag, oldHex: x.oldHex, weight: x.weight }))
+    );
+
+    const N = originals.length;
+    if (!N) return { mapping: new Map(), meta: { mode: "empty" } };
+
+    // If N > m: assign 1:1 only to top m by weight, rest map to closest assigned (can repeat)
+    let activeIdx = originals.map((_, i) => i);
+    if (N > m) {
+      activeIdx = originals
+        .map((o, i) => ({ i, w: o.weight }))
+        .sort((a, b) => b.w - a.w || a.i - b.i)
+        .slice(0, m)
+        .map((x) => x.i);
+    }
+
+    const act = activeIdx.map((i) => originals[i]);
+    const weights = act.map((o) => o.weight);
+
+    // build cost matrix for active
+    const C = buildCostMatrix(act, paletteCache, weights, p);
+
+    // Hungarian (n<=m guaranteed)
+    let assign = hungarianAssign(C);
+
+    // Phase 2: swaps for gradients
+    const graph = buildKNNGraph(act, p.K || 3);
+    assign = refineBySwaps(assign, act, paletteCache, graph, p);
+
+    const usedPalSet = new Set(assign);
+
+    // For non-active (if any): map to closest among USED palette colors (not necessarily unique)
+    function closestAmongUsed(origLab) {
+      let bestJ = -1;
+      let bestD = Infinity;
+      for (const j of usedPalSet) {
+        const d = deltaE00(origLab, paletteCache[j].lab);
+        if (d < bestD) { bestD = d; bestJ = j; }
+      }
+      return bestJ;
+    }
+
+    const mapping = new Map(); // oldHex -> {hex, tag, meta}
+
+    // Active mappings (1:1)
+    for (let k = 0; k < act.length; k++) {
+      const o = act[k];
+      const j = assign[k];
+      const pal = paletteCache[j];
+      mapping.set(o.oldHex, {
+        hex: pal.hex,
+        tag: pal.tag,
+        meta: { mode: "1to1", palIdx: j },
+      });
+    }
+
+    // Inactive mappings
+    if (N > m) {
+      for (let i = 0; i < originals.length; i++) {
+        const o = originals[i];
+        if (mapping.has(o.oldHex)) continue;
+        const j = closestAmongUsed(o.lab);
+        const pal = j >= 0 ? paletteCache[j] : null;
+        mapping.set(o.oldHex, {
+          hex: pal ? pal.hex : "",
+          tag: pal ? pal.tag : "",
+          meta: { mode: "closestUsed", palIdx: j },
+        });
+      }
+    }
+
+    return { mapping, meta: { mode: N <= m ? "1to1" : "1to1_top167_plus_closest" } };
+  }
+
+  // ---------- Legacy local suggestion (kept as fallback) ----------
+  const LOCAL_MATCH_CFG = { C_NEUTRAL: 6.0, W_NEUTRAL: 0.08, EPS_TIE: 0.35, EPS_L: 0.05 };
+  function matchToPaletteColorLocal(targetLab, paletteCache) {
+    const Ct = targetLab.C;
+    const targetIsNeutral = Ct < LOCAL_MATCH_CFG.C_NEUTRAL;
+
+    let best = null;
+    let second = null;
+
+    for (let i = 0; i < paletteCache.length; i++) {
+      const p = paletteCache[i];
+      const dBase = deltaE00(targetLab, p.lab);
+      let dFinal = dBase;
+      let neutralBiasApplied = false;
+
+      if (targetIsNeutral) {
+        const penalty = LOCAL_MATCH_CFG.W_NEUTRAL * Math.max(0, (p.C - Ct));
+        if (penalty > 0) { dFinal += penalty; neutralBiasApplied = true; }
+      }
+
+      const cand = { idx: p.idx, hex: p.hex, tag: p.tag, L: p.L, dBase, dFinal, neutralBiasApplied };
+
+      if (!best || cand.dFinal < best.dFinal || (cand.dFinal === best.dFinal && cand.idx < best.idx)) {
+        second = best; best = cand;
+      } else if (!second || cand.dFinal < second.dFinal || (cand.dFinal === second.dFinal && cand.idx < second.idx)) {
+        second = cand;
+      }
+    }
+
+    let tieBreakApplied = false;
+    if (best && second && (second.dFinal - best.dFinal) < LOCAL_MATCH_CFG.EPS_TIE) {
+      if (second.L > best.L + LOCAL_MATCH_CFG.EPS_L) {
+        const tmp = best; best = second; second = tmp; tieBreakApplied = true;
+      } else if (Math.abs(second.L - best.L) <= LOCAL_MATCH_CFG.EPS_L) {
+        if (second.idx < best.idx) { const tmp = best; best = second; second = tmp; tieBreakApplied = true; }
+      } else tieBreakApplied = true;
+    }
+
+    if (!best) return { hex: "", tag: "", meta: null };
+    return {
+      hex: best.hex,
+      tag: best.tag,
+      meta: { d_final: best.dFinal, d_base: best.dBase, target_neutral: targetIsNeutral, neutral_bias_applied: best.neutralBiasApplied, tie_break_applied: tieBreakApplied, idx: best.idx, L: best.L },
+    };
+  }
+
+  // ---------- Build palette cache ONCE ----------
+  const PALETTE_CACHE = buildPaletteCache(
+    PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ hex, tag: "" }))
+  );
+
+  // ---------- SVG sizing ----------
   function ensureViewBox(svg) {
     if (!svg || svg.tagName.toLowerCase() !== "svg") return;
     if (svg.getAttribute("viewBox")) return;
 
-    const wAttr = svg.getAttribute("width");
-    const hAttr = svg.getAttribute("height");
-    const w = parseFloat(wAttr);
-    const h = parseFloat(hAttr);
-
-    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-      svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-      return;
-    }
+    const w = parseFloat(svg.getAttribute("width"));
+    const h = parseFloat(svg.getAttribute("height"));
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) { svg.setAttribute("viewBox", `0 0 ${w} ${h}`); return; }
 
     try {
       const bb = svg.getBBox();
-      if (bb && bb.width > 0 && bb.height > 0) {
-        svg.setAttribute("viewBox", `0 0 ${bb.width} ${bb.height}`);
-      }
+      if (bb && bb.width > 0 && bb.height > 0) svg.setAttribute("viewBox", `0 0 ${bb.width} ${bb.height}`);
     } catch (_) {}
   }
-
   function makePreview(svg) {
     ensureViewBox(svg);
     svg.style.display = "block";
@@ -150,19 +684,16 @@
     svg.style.maxWidth = "100%";
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
-
-  function getSvgIntrinsicSize(svgEl) {
+  function getSvgSize(svgEl) {
     ensureViewBox(svgEl);
     const vb = svgEl.getAttribute("viewBox");
     if (vb) {
       const parts = vb.split(/\s+/).map(Number);
-      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-        return { w: parts[2], h: parts[3] };
-      }
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) return { w: parts[2], h: parts[3] };
     }
-    const w = parseFloat(svgEl.getAttribute("width") || "0");
-    const h = parseFloat(svgEl.getAttribute("height") || "0");
-    if (w > 0 && h > 0) return { w, h };
+    const wAttr = parseFloat(svgEl.getAttribute("width") || "0");
+    const hAttr = parseFloat(svgEl.getAttribute("height") || "0");
+    if (wAttr > 0 && hAttr > 0) return { w: wAttr, h: hAttr };
     try {
       const bb = svgEl.getBBox();
       if (bb && bb.width > 0 && bb.height > 0) return { w: bb.width, h: bb.height };
@@ -170,32 +701,44 @@
     return { w: 1600, h: 1600 };
   }
 
-  // ---------------- FIND OUTPUT SVG ----------------
+  // ---------- Find output SVG ----------
   function findFinalOutputSvgLight() {
     const svgs = Array.from(document.querySelectorAll("svg"));
     if (!svgs.length) return null;
-
-    let best = null;
-    let bestScore = 0;
+    let best = null, bestScore = 0;
     for (const s of svgs) {
       const score =
         s.querySelectorAll("path,polygon,rect,circle,ellipse").length * 2 +
         s.querySelectorAll("text").length * 3;
-      if (score > bestScore) {
-        bestScore = score;
-        best = s;
-      }
+      if (score > bestScore) { bestScore = score; best = s; }
     }
     return best;
   }
 
-  // ---------------- GROUP FILLS ----------------
+  // ---------- Detect readiness ----------
+  function findDownloadButtonsRow() {
+    const btns = Array.from(document.querySelectorAll("button, a"));
+    const hits = btns.filter((b) => {
+      const t = norm(b.textContent);
+      return t.includes("download svg") || t.includes("download png") || t.includes("download palette");
+    });
+    if (!hits.length) return null;
+    for (const b of hits) {
+      const p = b.parentElement;
+      if (!p) continue;
+      const txt = norm(p.textContent);
+      if (txt.includes("download svg") && (txt.includes("download png") || txt.includes("download palette"))) return p;
+    }
+    return hits[0].parentElement || null;
+  }
+  function isGeneratorReady() { return !!findDownloadButtonsRow() && !!findFinalOutputSvgLight(); }
+
+  // ---------- Group fills ----------
   function collectFillGroups(svg) {
     const groups = new Map();
     const nodes = Array.from(svg.querySelectorAll("*"))
       .filter((el) => el instanceof SVGElement)
       .filter((el) => ["path", "polygon", "rect", "circle", "ellipse"].includes(el.tagName.toLowerCase()));
-
     for (const el of nodes) {
       const fill = getElementFill(el);
       if (!fill) continue;
@@ -207,80 +750,101 @@
     return groups;
   }
 
-  // ---------------- DOWNLOAD HELPERS ----------------
-  function downloadText(filename, text, mime = "text/plain") {
-    const blob = new Blob([text], { type: mime });
+  // ---------- Download helpers ----------
+  function forceDownloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
+  function downloadText(filename, text, mime = "text/plain") {
+    const blob = new Blob([text], { type: mime });
+    forceDownloadBlob(blob, filename);
+  }
 
-  async function downloadSvgAsPng(svgEl, filename, scaleWanted = PNG_MAX_SCALE) {
-    const clone = svgEl.cloneNode(true);
-    ensureViewBox(clone);
+  async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
+    const MAX_SIDE = 20000;
+    const MAX_PIXELS = 220e6;
 
-    Array.from(clone.querySelectorAll("text")).forEach((t) => {
-      const fill = getTextFillHex(t) || "#000000";
-      if (!t.getAttribute("fill")) t.setAttribute("fill", fill);
-      if (!t.getAttribute("fill-opacity")) {
-        const fo = t.getAttribute("fill-opacity");
-        if (fo != null) t.setAttribute("fill-opacity", fo);
-      }
-    });
+    const { w: baseW, h: baseH } = getSvgSize(svgEl);
 
-    const { w, h } = getSvgIntrinsicSize(clone);
-    const maxDim = Math.max(w, h);
-    const capScale = Math.max(1, Math.floor(CANVAS_MAX_DIM / maxDim));
-    const scale = Math.max(1, Math.min(scaleWanted, capScale));
+    let outW = Math.round(baseW * scale);
+    let outH = Math.round(baseH * scale);
 
-    clone.setAttribute("width", String(Math.round(w * scale)));
-    clone.setAttribute("height", String(Math.round(h * scale)));
-    clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    if (outW > MAX_SIDE || outH > MAX_SIDE) {
+      const s = Math.min(MAX_SIDE / outW, MAX_SIDE / outH);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
 
-    const svgText = new XMLSerializer().serializeToString(clone);
-    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+    const pixels = outW * outH;
+    if (pixels > MAX_PIXELS) {
+      const s = Math.sqrt(MAX_PIXELS / pixels);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
 
-    const img = new Image();
-    img.decoding = "async";
+    const svgText = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
 
-    await new Promise((res, rej) => {
-      img.onload = () => res();
-      img.onerror = (e) => rej(e);
-      img.src = url;
-    });
+    try {
+      const bitmap = await createImageBitmap(svgBlob);
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(w * scale);
-    canvas.height = Math.round(h * scale);
+      const ctx = canvas.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(bitmap, 0, 0, outW, outH);
 
-    const ctx = canvas.getContext("2d", { alpha: false });
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
+      if (pngBlob) { forceDownloadBlob(pngBlob, filename); return; }
 
-    URL.revokeObjectURL(url);
-
-    const blobPng = await new Promise((resolve) => {
-      canvas.toBlob((b) => resolve(b), "image/png", 1.0);
-      setTimeout(() => resolve(null), 5000);
-    });
-
-    if (blobPng) {
-      const pngUrl = URL.createObjectURL(blobPng);
+      const dataUrl = canvas.toDataURL("image/png");
       const a = document.createElement("a");
-      a.href = pngUrl;
+      a.href = dataUrl;
       a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      setTimeout(() => URL.revokeObjectURL(pngUrl), 4000);
-    } else {
+      return;
+    } catch (_) {
+      const url = URL.createObjectURL(svgBlob);
+      const img = new Image();
+      img.decoding = "async";
+      img.crossOrigin = "anonymous";
+
+      await new Promise((res, rej) => {
+        img.onload = () => res();
+        img.onerror = (e) => rej(e);
+        img.src = url;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
+
+      const ctx = canvas.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.setTransform(outW / baseW, 0, 0, outH / baseH, 0, 0);
+      ctx.drawImage(img, 0, 0);
+
+      URL.revokeObjectURL(url);
+
+      const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
+      if (pngBlob) { forceDownloadBlob(pngBlob, filename); return; }
+
       const dataUrl = canvas.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = dataUrl;
@@ -291,7 +855,7 @@
     }
   }
 
-  // ---------------- SVG STYLE INJECTION (toggles) ----------------
+  // ---------- SVG style injection (toggles) ----------
   function ensureSvgStyle(svg, id) {
     let style = svg.querySelector(`#${id}`);
     if (style) return style;
@@ -300,140 +864,55 @@
     svg.insertBefore(style, svg.firstChild);
     return style;
   }
-
   function setBorders(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-borders-style");
-    style.textContent = on
-      ? ""
-      : `
-        [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] {
-          stroke-opacity: 0 !important;
-        }
-        [stroke][fill="transparent"], path[stroke][fill="transparent"] {
-          stroke-opacity: 0 !important;
-        }
-      `;
+    style.textContent = on ? "" : `
+      [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] { stroke-opacity: 0 !important; }
+      [stroke][fill="transparent"], path[stroke][fill="transparent"] { stroke-opacity: 0 !important; }
+    `;
   }
-
   function setColorFills(svg, on) {
     const style = ensureSvgStyle(svg, "recolor-fills-style");
-    style.textContent = on
-      ? ""
-      : `
-        path, polygon, rect, circle, ellipse {
-          fill: none !important;
-        }
-      `;
+    style.textContent = on ? "" : `path, polygon, rect, circle, ellipse { fill: none !important; }`;
   }
 
-  // ---------------- UI ATOMS ----------------
+  // ---------- UI atoms ----------
   function makeBadgeCorner(text) {
     const b = document.createElement("span");
     b.textContent = text;
-    b.setAttribute(
-      "style",
-      `
-        position:absolute !important;
-        left:4px !important;
-        top:4px !important;
-        padding:2px 6px !important;
-        border-radius:999px !important;
-        font-size:11px !important;
-        font-weight:900 !important;
-        background: rgba(255,255,255,.90) !important;
-        border: 1px solid rgba(0,0,0,.12) !important;
-        color: rgba(0,0,0,.85) !important;
-        max-width: calc(100% - 8px) !important;
-        white-space: nowrap !important;
-        overflow:hidden !important;
-        text-overflow: ellipsis !important;
-        pointer-events:none !important;
-        line-height: 1 !important;
-      `.trim()
-    );
+    b.setAttribute("style", `
+      position:absolute !important; left:4px !important; top:4px !important;
+      padding:2px 6px !important; border-radius:999px !important;
+      font-size:11px !important; font-weight:900 !important;
+      background: rgba(255,255,255,.90) !important;
+      border: 1px solid rgba(0,0,0,.12) !important;
+      color: rgba(0,0,0,.85) !important;
+      max-width: calc(100% - 8px) !important;
+      white-space: nowrap !important; overflow:hidden !important; text-overflow: ellipsis !important;
+      pointer-events:none !important; line-height: 1 !important;
+    `.trim());
     return b;
-  }
-
-  function ensureSpinStyle() {
-    if (document.getElementById(SPIN_STYLE_ID)) return;
-    const st = document.createElement("style");
-    st.id = SPIN_STYLE_ID;
-    st.textContent = `@keyframes spin{to{transform:rotate(360deg)}}`;
-    document.head.appendChild(st);
-  }
-
-  function makePressyButton(label) {
-    ensureSpinStyle();
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.style.cssText = `
-      padding:10px 14px;
-      border-radius:12px;
-      border:1px solid rgba(0,0,0,.22);
-      background:white;
-      cursor:pointer;
-      font-weight:900;
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,.08);
-      transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease;
-    `;
-    btn.innerHTML = `<span class="btn-label">${label}</span><span class="btn-spin" style="display:none;width:14px;height:14px;border-radius:999px;border:2px solid rgba(0,0,0,.18);border-top-color:rgba(0,0,0,.55);animation:spin 700ms linear infinite;"></span>`;
-
-    btn.addEventListener("mousedown", () => {
-      btn.style.transform = "translateY(1px)";
-      btn.style.boxShadow = "0 1px 6px rgba(0,0,0,.10)";
-      btn.style.background = "rgba(0,0,0,.02)";
-    });
-    const up = () => {
-      btn.style.transform = "translateY(0)";
-      btn.style.boxShadow = "0 2px 10px rgba(0,0,0,.08)";
-      btn.style.background = "white";
-    };
-    btn.addEventListener("mouseup", up);
-    btn.addEventListener("mouseleave", up);
-
-    btn._setLoading = (on) => {
-      const sp = btn.querySelector(".btn-spin");
-      if (sp) sp.style.display = on ? "inline-block" : "none";
-    };
-
-    return btn;
   }
 
   function makeToggleButton(label, initialOn, onChange) {
     let on = !!initialOn;
     const btn = document.createElement("button");
     btn.type = "button";
-
+    btn.style.cssText = `
+      padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22);
+      background:${on ? "white" : "rgba(0,0,0,.06)"}; cursor:pointer; font-weight:900;
+      display:inline-flex; align-items:center;
+    `;
     const paint = () => {
       btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
-      btn.style.cssText = `
-        padding:10px 14px;
-        border-radius:12px;
-        border:1px solid rgba(0,0,0,.22);
-        background:${on ? "white" : "rgba(0,0,0,.06)"};
-        cursor:pointer;
-        font-weight:900;
-        box-shadow: ${on ? "0 2px 10px rgba(0,0,0,.08)" : "none"};
-        transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease;
-      `;
+      btn.style.background = on ? "white" : "rgba(0,0,0,.06)";
     };
     paint();
+    enhanceButton(btn);
 
-    btn.addEventListener("click", () => {
-      on = !on;
-      paint();
-      onChange(on);
-    });
-
+    btn.addEventListener("click", () => { on = !on; paint(); onChange(on); });
     btn._get = () => on;
-    btn._set = (v) => {
-      on = !!v;
-      paint();
-    };
-
+    btn._set = (v) => { on = !!v; paint(); };
     return btn;
   }
 
@@ -441,18 +920,10 @@
     const x = document.createElement("div");
     x.className = "tile-used-x";
     x.style.cssText = `
-      position:absolute;
-      inset:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-weight:1000;
-      font-size:22px;
-      color: rgba(0,0,0,.65);
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      font-weight:1000; font-size:22px; color: rgba(0,0,0,.65);
       text-shadow: 0 1px 0 rgba(255,255,255,.55);
-      pointer-events:none;
-      opacity:0;
-      transition: opacity 120ms ease;
+      pointer-events:none; opacity:0; transition: opacity 120ms ease;
     `;
     x.textContent = "✕";
     return x;
@@ -461,35 +932,24 @@
   function renderGridPicker({ onPick, isUsed }) {
     const grid = document.createElement("div");
     grid.style.cssText = `
-      display:grid;
-      grid-template-columns: repeat(10, minmax(0, 1fr));
-      gap: 6px;
-      max-height: 340px;
-      overflow:auto;
-      padding: 6px;
-      border: 1px solid rgba(0,0,0,.10);
-      border-radius: 12px;
-      background: rgba(0,0,0,.02);
+      display:grid; grid-template-columns: repeat(10, minmax(0, 1fr));
+      gap: 6px; max-height: 340px; overflow:auto; padding: 6px;
+      border: 1px solid rgba(0,0,0,.10); border-radius: 12px; background: rgba(0,0,0,.02);
     `;
 
-    const items = PALETTE_LIST;
+    const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ tag: "", hex }));
     const tilesByHex = new Map();
 
     items.forEach((it) => {
-      const hex = it.hex;
-      const tag = it.tag;
+      const hex = norm(it.hex);
+      const tag = (it.tag || "").toString().trim();
 
       const tile = document.createElement("button");
       tile.type = "button";
       tile.title = tag ? `${tag} — ${hex}` : hex;
       tile.style.cssText = `
-        height: 40px;
-        border-radius: 10px;
-        border: 1px solid rgba(0,0,0,.16);
-        background: ${hex};
-        cursor: pointer;
-        position: relative;
-        overflow: hidden;
+        height: 40px; border-radius: 10px; border: 1px solid rgba(0,0,0,.16);
+        background: ${hex}; cursor: pointer; position: relative; overflow: hidden;
       `;
 
       if (tag) tile.appendChild(makeBadgeCorner(tag));
@@ -497,7 +957,6 @@
       tile.appendChild(x);
 
       tile.addEventListener("click", () => onPick({ hex, tag }));
-
       grid.appendChild(tile);
       tilesByHex.set(hex, tile);
     });
@@ -509,12 +968,34 @@
         x.style.opacity = isUsed(hex) ? "1" : "0";
       }
     }
-
     refreshUsedX();
     return { grid, refreshUsedX };
   }
 
-  // ---------------- ORIGINAL TAG MAPPING (legend-based) ----------------
+  // ---------- ORIGINAL TAG MAPPING ----------
+  function buildOriginalTagByHexFromTopSwatches() {
+    const map = {};
+    const candidates = Array.from(document.querySelectorAll("button, div, span"))
+      .filter((el) => el && el.textContent && !el.closest("#recolor-modal") && !el.closest("#recolor-fab"))
+      .filter((el) => {
+        const t = (el.textContent || "").trim();
+        if (!t || !isTagLike(t)) return false;
+        const r = el.getBoundingClientRect();
+        if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
+        const bg = getComputedStyle(el).backgroundColor;
+        if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
+        return true;
+      });
+
+    for (const el of candidates) {
+      const tag = (el.textContent || "").trim();
+      const bg = getComputedStyle(el).backgroundColor;
+      const hex = rgbToHex(bg);
+      if (hex && !map[hex]) map[hex] = tag;
+    }
+    return map;
+  }
+
   function buildOriginalTagByHexFromSvgLegend(svg) {
     const map = {};
     if (!svg) return map;
@@ -545,15 +1026,58 @@
 
       if (near) {
         const tag = (near.textContent || "").trim();
-        if (tag && /^[a-z0-9]{1,6}$/i.test(tag) && !map[hex]) map[hex] = tag;
+        if (tag && isTagLike(tag) && !map[hex]) map[hex] = tag;
       }
     }
     return map;
   }
 
-  function isNumericTag(t) {
-    return /^-?\d+(\.\d+)?$/.test((t || "").toString().trim());
+  function buildOriginalTagByHexFromSvgProximity(svg, fillGroups) {
+    const map = {};
+    if (!svg || !fillGroups || !fillGroups.size) return map;
+
+    const texts = Array.from(svg.querySelectorAll("text"))
+      .map((t) => {
+        const tag = (t.textContent || "").toString().trim();
+        if (!tag || !isTagLike(tag)) return null;
+        let bb;
+        try { bb = t.getBBox(); } catch (_) { return null; }
+        if (!bb) return null;
+        return { tag, cx: bb.x + bb.width / 2, cy: bb.y + bb.height / 2 };
+      })
+      .filter(Boolean);
+
+    if (!texts.length) return map;
+
+    for (const [hex, nodes] of fillGroups.entries()) {
+      let sumX = 0, sumY = 0, count = 0;
+      const sample = nodes.slice(0, 40);
+      for (const el of sample) {
+        let bb;
+        try { bb = el.getBBox(); } catch (_) { continue; }
+        if (!bb) continue;
+        sumX += bb.x + bb.width / 2;
+        sumY += bb.y + bb.height / 2;
+        count++;
+      }
+      if (!count) continue;
+
+      const cx = sumX / count;
+      const cy = sumY / count;
+
+      let best = null, bestD = Infinity;
+      for (const t of texts) {
+        const dx = t.cx - cx;
+        const dy = t.cy - cy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      if (best && !map[hex]) map[hex] = best.tag;
+    }
+    return map;
   }
+
+  function isNumericTag(t) { return /^-?\d+(\.\d+)?$/.test((t || "").toString().trim()); }
   function cmpTagAsc(a, b) {
     const ta = (a || "").toString().trim();
     const tb = (b || "").toString().trim();
@@ -565,538 +1089,118 @@
     return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
   }
 
-  // ---------------- COLOR SCIENCE (Lab + ΔE00) ----------------
-  function srgbToLinear(c) {
-    c /= 255;
-    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  }
-  function hexToRgb01(hex) {
-    const h = (hex || "").replace("#", "");
-    const r = parseInt(h.slice(0, 2), 16);
-    const g = parseInt(h.slice(2, 4), 16);
-    const b = parseInt(h.slice(4, 6), 16);
-    return { r, g, b };
-  }
-  function rgbToXyzD65(r, g, b) {
-    const R = srgbToLinear(r);
-    const G = srgbToLinear(g);
-    const B = srgbToLinear(b);
-    const x = R * 0.4124564 + G * 0.3575761 + B * 0.1804375;
-    const y = R * 0.2126729 + G * 0.7151522 + B * 0.0721750;
-    const z = R * 0.0193339 + G * 0.1191920 + B * 0.9503041;
-    return { x, y, z };
-  }
-  function xyzToLabD65(x, y, z) {
-    const Xn = 0.95047;
-    const Yn = 1.0;
-    const Zn = 1.08883;
-
-    let fx = x / Xn;
-    let fy = y / Yn;
-    let fz = z / Zn;
-
-    const eps = 216 / 24389;
-    const k = 24389 / 27;
-
-    const f = (t) => (t > eps ? Math.cbrt(t) : (k * t + 16) / 116);
-
-    fx = f(fx);
-    fy = f(fy);
-    fz = f(fz);
-
-    const L = 116 * fy - 16;
-    const a = 500 * (fx - fy);
-    const b = 200 * (fy - fz);
-    return { L, a, b };
-  }
-  function labExtras(lab) {
-    const C = Math.sqrt(lab.a * lab.a + lab.b * lab.b);
-    let h = Math.atan2(lab.b, lab.a) * (180 / Math.PI);
-    if (h < 0) h += 360;
-    return { ...lab, C, h };
-  }
-  function hexToLab(hex) {
-    const { r, g, b } = hexToRgb01(hex);
-    const xyz = rgbToXyzD65(r, g, b);
-    return xyzToLabD65(xyz.x, xyz.y, xyz.z);
-  }
-
-  function deltaE00(l1, l2) {
-    const L1 = l1.L, a1 = l1.a, b1 = l1.b;
-    const L2 = l2.L, a2 = l2.a, b2 = l2.b;
-    const kL = 1, kC = 1, kH = 1;
-
-    const C1 = Math.sqrt(a1 * a1 + b1 * b1);
-    const C2 = Math.sqrt(a2 * a2 + b2 * b2);
-    const Cbar = (C1 + C2) / 2;
-    const Cbar7 = Math.pow(Cbar, 7);
-    const G = 0.5 * (1 - Math.sqrt(Cbar7 / (Cbar7 + Math.pow(25, 7))));
-    const a1p = (1 + G) * a1;
-    const a2p = (1 + G) * a2;
-
-    const C1p = Math.sqrt(a1p * a1p + b1 * b1);
-    const C2p = Math.sqrt(a2p * a2p + b2 * b2);
-
-    const h1p = hp(a1p, b1);
-    const h2p = hp(a2p, b2);
-
-    const dLp = L2 - L1;
-    const dCp = C2p - C1p;
-
-    let dhp = h2p - h1p;
-    if (C1p * C2p === 0) dhp = 0;
-    else {
-      if (dhp > 180) dhp -= 360;
-      if (dhp < -180) dhp += 360;
-    }
-    const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin(deg2rad(dhp / 2));
-
-    const Lbarp = (L1 + L2) / 2;
-    const Cbarp = (C1p + C2p) / 2;
-
-    let hbarp = h1p + h2p;
-    if (C1p * C2p === 0) hbarp = h1p + h2p;
-    else {
-      if (Math.abs(h1p - h2p) > 180) {
-        hbarp = (h1p + h2p + 360) / 2;
-        if (h1p + h2p >= 360) hbarp = (h1p + h2p - 360) / 2;
-      } else {
-        hbarp = (h1p + h2p) / 2;
-      }
-    }
-
-    const T =
-      1 -
-      0.17 * Math.cos(deg2rad(hbarp - 30)) +
-      0.24 * Math.cos(deg2rad(2 * hbarp)) +
-      0.32 * Math.cos(deg2rad(3 * hbarp + 6)) -
-      0.20 * Math.cos(deg2rad(4 * hbarp - 63));
-
-    const dTheta = 30 * Math.exp(-Math.pow((hbarp - 275) / 25, 2));
-    const RC = 2 * Math.sqrt(Math.pow(Cbarp, 7) / (Math.pow(Cbarp, 7) + Math.pow(25, 7)));
-    const SL = 1 + (0.015 * Math.pow(Lbarp - 50, 2)) / Math.sqrt(20 + Math.pow(Lbarp - 50, 2));
-    const SC = 1 + 0.045 * Cbarp;
-    const SH = 1 + 0.015 * Cbarp * T;
-    const RT = -Math.sin(deg2rad(2 * dTheta)) * RC;
-
-    const dE = Math.sqrt(
-      Math.pow(dLp / (kL * SL), 2) +
-        Math.pow(dCp / (kC * SC), 2) +
-        Math.pow(dHp / (kH * SH), 2) +
-        RT * (dCp / (kC * SC)) * (dHp / (kH * SH))
-    );
-
-    return dE;
-
-    function hp(ap, b) {
-      if (ap === 0 && b === 0) return 0;
-      let h = Math.atan2(b, ap) * (180 / Math.PI);
-      if (h < 0) h += 360;
-      return h;
-    }
-    function deg2rad(d) {
-      return (d * Math.PI) / 180;
-    }
-  }
-
-  function hueDist(h1, h2) {
-    const d = Math.abs(h1 - h2) % 360;
-    return d > 180 ? 360 - d : d;
-  }
-
-  function deltaE76(l1, l2) {
-    const dL = l1.L - l2.L;
-    const da = l1.a - l2.a;
-    const db = l1.b - l2.b;
-    return Math.sqrt(dL * dL + da * da + db * db);
-  }
-
-  // ---------------- ADVANCED SUGGESTION ENGINE (Hungarian + swaps) ----------------
-  function buildPaletteCache(paletteList) {
-    const out = paletteList.map((p) => {
-      const lab = labExtras(hexToLab(p.hex));
-      return { ...p, ...lab };
-    });
-    const sortedIdx = out.map((p, i) => ({ i, L: p.L })).sort((a, b) => a.L - b.L).map((x) => x.i);
-    const rankL = new Array(out.length);
-    sortedIdx.forEach((idx, r) => (rankL[idx] = r));
-    out.forEach((p, i) => (p.rankL_pal = rankL[i]));
-    return out;
-  }
-
-  function buildOriginalCache(entries, weightsMap) {
-    const out = entries.map((e, i) => {
-      const lab = labExtras(hexToLab(e.oldHex));
-      const w = weightsMap && weightsMap[e.oldHex] ? weightsMap[e.oldHex] : 1;
-      return { i, tag: e.tagOriginal || "", hex: e.oldHex, ...lab, w };
-    });
-    const sortedIdx = out.map((o, i) => ({ i, L: o.L })).sort((a, b) => a.L - b.L).map((x) => x.i);
-    const rankL = new Array(out.length);
-    sortedIdx.forEach((idx, r) => (rankL[idx] = r));
-    out.forEach((o, i) => (o.rankL_orig = rankL[i]));
-    return out;
-  }
-
-  function buildKNNGraph(originalCache, K) {
-    const n = originalCache.length;
-    const graph = Array.from({ length: n }, () => []);
-    for (let i = 0; i < n; i++) {
-      const oi = originalCache[i];
-      const dists = [];
-      for (let j = 0; j < n; j++) {
-        if (i === j) continue;
-        const oj = originalCache[j];
-        const d = deltaE76(oi, oj);
-        dists.push({ j, d });
-      }
-      dists.sort((a, b) => a.d - b.d);
-      graph[i] = dists.slice(0, Math.min(K, dists.length)).map((x) => x.j);
-    }
-
-    const edges = [];
-    const seen = new Set();
-    for (let i = 0; i < n; i++) {
-      for (const j of graph[i]) {
-        const a = Math.min(i, j), b = Math.max(i, j);
-        const key = `${a}-${b}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const dOrig = deltaE00(originalCache[a], originalCache[b]);
-        edges.push({ a, b, dOrig });
-      }
-    }
-    return { graph, edges };
-  }
-
-  function buildCostMatrix(originalCache, paletteCache, params) {
-    const { ALPHA, BETA, GAMMA, C_NEUTRAL } = params;
-    const n = originalCache.length;
-    const m = paletteCache.length;
-    const C = Array.from({ length: n }, () => new Float64Array(m));
-
-    for (let i = 0; i < n; i++) {
-      const o = originalCache[i];
-      const neutralTarget = o.C < C_NEUTRAL;
-      for (let j = 0; j < m; j++) {
-        const p = paletteCache[j];
-        const base = deltaE00(o, p);
-        const scale = ALPHA * Math.abs(o.rankL_orig - p.rankL_pal);
-        const hue = BETA * hueDist(o.h, p.h);
-        const neutral = neutralTarget ? GAMMA * Math.max(0, p.C - o.C) : 0;
-        C[i][j] = o.w * (base + scale + hue + neutral);
-      }
-    }
-    return C;
-  }
-
-  function hungarianAssign(costMatrix) {
-    const n = costMatrix.length;
-    const m = costMatrix[0].length;
-    const u = new Float64Array(n + 1);
-    const v = new Float64Array(m + 1);
-    const p = new Int32Array(m + 1);
-    const way = new Int32Array(m + 1);
-
-    for (let i = 1; i <= n; i++) {
-      p[0] = i;
-      let j0 = 0;
-      const minv = new Float64Array(m + 1);
-      const used = new Uint8Array(m + 1);
-      for (let j = 1; j <= m; j++) minv[j] = Infinity;
-
-      do {
-        used[j0] = 1;
-        const i0 = p[j0];
-        let delta = Infinity;
-        let j1 = 0;
-        for (let j = 1; j <= m; j++) {
-          if (used[j]) continue;
-          const cur = costMatrix[i0 - 1][j - 1] - u[i0] - v[j];
-          if (cur < minv[j]) {
-            minv[j] = cur;
-            way[j] = j0;
-          }
-          if (minv[j] < delta) {
-            delta = minv[j];
-            j1 = j;
-          }
-        }
-        for (let j = 0; j <= m; j++) {
-          if (used[j]) {
-            u[p[j]] += delta;
-            v[j] -= delta;
-          } else {
-            minv[j] -= delta;
-          }
-        }
-        j0 = j1;
-      } while (p[j0] !== 0);
-
-      do {
-        const j1 = way[j0];
-        p[j0] = p[j1];
-        j0 = j1;
-      } while (j0 !== 0);
-    }
-
-    const assign = new Int32Array(n);
-    for (let j = 1; j <= m; j++) {
-      if (p[j] > 0 && p[j] <= n) {
-        assign[p[j] - 1] = j - 1;
-      }
-    }
-    return assign;
-  }
-
-  function refineBySwaps(assign, originalCache, paletteCache, graphObj, params) {
-    const { edges } = graphObj;
-    const { DELTA, ITER } = params;
-    const n = originalCache.length;
-    if (n <= 1) return assign;
-
-    const m = paletteCache.length;
-    const palDE = Array.from({ length: m }, () => new Float64Array(m));
-    for (let i = 0; i < m; i++) {
-      palDE[i][i] = 0;
-      for (let j = i + 1; j < m; j++) {
-        const d = deltaE00(paletteCache[i], paletteCache[j]);
-        palDE[i][j] = d;
-        palDE[j][i] = d;
-      }
-    }
-
-    function nodeCost(i, palIdx) {
-      const o = originalCache[i];
-      const p = paletteCache[palIdx];
-      const base = deltaE00(o, p);
-      const scale = params.ALPHA * Math.abs(o.rankL_orig - p.rankL_pal);
-      const hue = params.BETA * hueDist(o.h, p.h);
-      const neutral = o.C < params.C_NEUTRAL ? params.GAMMA * Math.max(0, p.C - o.C) : 0;
-      return o.w * (base + scale + hue + neutral);
-    }
-
-    const incident = Array.from({ length: n }, () => []);
-    edges.forEach((e, idx) => {
-      incident[e.a].push(idx);
-      incident[e.b].push(idx);
-    });
-
-    function edgeCost(e, aPal, bPal) {
-      const dPal = palDE[aPal][bPal];
-      return DELTA * Math.abs(e.dOrig - dPal);
-    }
-
-    for (let it = 0; it < ITER; it++) {
-      const i1 = (Math.random() * n) | 0;
-      let i2 = (Math.random() * n) | 0;
-      if (i2 === i1) i2 = (i2 + 1) % n;
-
-      const p1 = assign[i1];
-      const p2 = assign[i2];
-
-      let dE = 0;
-      dE += nodeCost(i1, p2) - nodeCost(i1, p1);
-      dE += nodeCost(i2, p1) - nodeCost(i2, p2);
-
-      const touched = new Set([...incident[i1], ...incident[i2]]);
-      for (const eIdx of touched) {
-        const e = edges[eIdx];
-        const a = e.a, b = e.b;
-        const paOld = assign[a];
-        const pbOld = assign[b];
-        const paNew = a === i1 ? p2 : a === i2 ? p1 : paOld;
-        const pbNew = b === i1 ? p2 : b === i2 ? p1 : pbOld;
-        dE += edgeCost(e, paNew, pbNew) - edgeCost(e, paOld, pbOld);
-      }
-
-      if (dE < 0) {
-        assign[i1] = p2;
-        assign[i2] = p1;
-      }
-    }
-
-    return assign;
-  }
-
-  function suggestOneToOneMapping(originalEntries, weightsMap, params, paletteCache) {
-    const originalCache = buildOriginalCache(originalEntries, weightsMap);
-    const n = originalCache.length;
-    const m = paletteCache.length;
-    if (n === 0) return { mappingByOldHex: {}, meta: {} };
-
-    let activeIdx = [...Array(n).keys()];
-    if (n > m) {
-      activeIdx.sort((i, j) => (originalCache[j].w || 1) - (originalCache[i].w || 1));
-      activeIdx = activeIdx.slice(0, m);
-    }
-
-    const activeOriginal = activeIdx.map((i) => originalEntries[i]);
-    const activeWeights = {};
-    activeIdx.forEach((i) => (activeWeights[originalEntries[i].oldHex] = weightsMap[originalEntries[i].oldHex] || 1));
-
-    const activeCache = buildOriginalCache(activeOriginal, activeWeights);
-    const C = buildCostMatrix(activeCache, paletteCache, params);
-
-    const assign = hungarianAssign(C);
-    const graphObj = buildKNNGraph(activeCache, params.K);
-    const refined = refineBySwaps(assign, activeCache, paletteCache, graphObj, params);
-
-    const mappingByOldHex = {};
-    for (let i = 0; i < activeCache.length; i++) {
-      mappingByOldHex[activeOriginal[i].oldHex] = refined[i];
-    }
-
-    if (n > m) {
-      const usedPal = new Set(Object.values(mappingByOldHex));
-      const usedArray = Array.from(usedPal);
-
-      for (let i = 0; i < n; i++) {
-        const oldHex = originalEntries[i].oldHex;
-        if (mappingByOldHex[oldHex] != null) continue;
-
-        const oLab = labExtras(hexToLab(oldHex));
-        let best = usedArray[0];
-        let bestD = Infinity;
-        for (const pIdx of usedArray) {
-          const d = deltaE00(oLab, paletteCache[pIdx]);
-          if (d < bestD) {
-            bestD = d;
-            best = pIdx;
-          }
-        }
-        mappingByOldHex[oldHex] = best;
-      }
-    }
-
-    return { mappingByOldHex, meta: { activeN: activeIdx.length } };
-  }
-
-  // ---------------- MEMORY ----------------
-  function hashSignatureFromEntries(entries, groups) {
-    const parts = entries
-      .map((e) => `${e.oldHex}:${(groups.get(e.oldHex) || []).length}`)
-      .sort()
-      .join("|");
-    let h = 2166136261;
-    for (let i = 0; i < parts.length; i++) {
-      h ^= parts.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return `sig_${(h >>> 0).toString(16)}`;
-  }
-
-  function loadState() {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (_) {
-      return null;
-    }
-  }
-  function saveState(state) {
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (_) {}
-  }
-
-  // ---------------- MODAL HOST ----------------
-  function closeModal() {
-    const m = document.getElementById(MODAL_ID);
-    if (m) m.remove();
-  }
-
-  function createModalShell() {
-    closeModal();
+  // ---------- Modal ----------
+  function openModal() {
+    const existing = document.getElementById("recolor-modal");
+    if (existing) existing.remove();
 
     const overlay = document.createElement("div");
-    overlay.id = MODAL_ID;
-    overlay.style.cssText = `
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.35);
-      z-index: 999999;
-      display:flex;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-    `;
+    overlay.id = "recolor-modal";
+    overlay.style.cssText = `position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 2147483647; overflow: auto; padding: 22px;`;
 
     const card = document.createElement("div");
     card.style.cssText = `
-      width: min(1320px, calc(100vw - 36px));
-      height: min(860px, calc(100vh - 36px));
+      max-width: 1200px; margin: 0 auto;
       background: rgba(255,255,255,.98);
+      border: 1px solid rgba(0,0,0,.14);
       border-radius: 16px;
-      border: 1px solid rgba(0,0,0,.18);
-      box-shadow: 0 20px 70px rgba(0,0,0,.25);
-      display:flex;
-      flex-direction: column;
-      overflow: hidden;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      box-shadow: 0 24px 80px rgba(0,0,0,.25);
+      padding: 14px;
     `;
 
-    const top = document.createElement("div");
-    top.style.cssText = `
-      padding: 12px 14px;
-      border-bottom: 1px solid rgba(0,0,0,.10);
-      display:flex;
-      align-items:center;
-      justify-content: space-between;
-      gap: 10px;
-      background: white;
-    `;
+    const topbar = document.createElement("div");
+    topbar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
 
     const title = document.createElement("div");
-    title.style.cssText = "font-weight: 1000;";
-    title.textContent = `Recoloreo (paleta ${PALETTE_LIST.length})`;
+    title.style.cssText = "font-weight:900;";
+    title.textContent = `Recoloreo (paleta ${PALETTE.length})`;
 
-    const close = makePressyButton("Cerrar");
-    close.addEventListener("click", closeModal);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "Cerrar";
+    close.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(close);
+    close.addEventListener("click", () => overlay.remove());
 
-    top.appendChild(title);
-    top.appendChild(close);
+    topbar.appendChild(title);
+    topbar.appendChild(close);
+    card.appendChild(topbar);
 
-    const body = document.createElement("div");
-    body.id = "recolor-modal-body";
-    body.style.cssText = `
-      flex: 1;
-      overflow: auto;
-      padding: 14px;
-      background: rgba(0,0,0,.02);
+    const host = document.createElement("div");
+    host.id = "recolor-host";
+    host.style.cssText = `
+      margin-top: 10px; padding: 14px; border: 1px solid rgba(0,0,0,.12);
+      border-radius: 12px; background: rgba(255,255,255,.96);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     `;
+    card.appendChild(host);
 
-    card.appendChild(top);
-    card.appendChild(body);
     overlay.appendChild(card);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
 
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) closeModal();
-    });
+    document.addEventListener("keydown", function onEsc(e) {
+      if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
+    }, { once: true });
 
     document.body.appendChild(overlay);
-    return body;
+    return host;
   }
 
-  // ---------------- EDITOR ----------------
-  const paletteCache = buildPaletteCache(PALETTE_LIST);
-
+  // ---------- Editor ----------
   function openEditor(originalSvg) {
-    const host = createModalShell();
+    const host = openModal();
     host.innerHTML = "";
+
+    const sig = svgSignature(originalSvg);
+    const stored = loadStored();
+    const sameDoc = stored && stored.svgSig === sig;
+    if (!sameDoc) writeStored({ svgSig: sig, mappings: {}, ui: {} });
+
+    const header = document.createElement("div");
+    header.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    header.innerHTML = `
+      <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
+      <div style="color:rgba(0,0,0,.65); font-size:13px;">
+        Selecciona color original → elige reemplazo / sugerencia → (renombrar) → toggles → descarga
+      </div>
+    `;
+    host.appendChild(header);
 
     const originalClone = originalSvg.cloneNode(true);
     const recolorSvg = originalSvg.cloneNode(true);
     makePreview(originalClone);
     makePreview(recolorSvg);
 
+    const previews = document.createElement("div");
+    previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
+    const panel = (title, node) => {
+      const wrap = document.createElement("div");
+      wrap.style.cssText = `border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; overflow: hidden; background: white;`;
+      const h = document.createElement("div");
+      h.textContent = title;
+      h.style.cssText = "font-weight:800; margin-bottom: 8px;";
+      const viewport = document.createElement("div");
+      viewport.style.cssText = `width: 100%; border-radius: 10px; border: 1px solid rgba(0,0,0,.10); background: white; overflow: hidden;`;
+      viewport.appendChild(node);
+      wrap.appendChild(h);
+      wrap.appendChild(viewport);
+      return wrap;
+    };
+    previews.appendChild(panel("Original", originalClone));
+    previews.appendChild(panel("Recoloreada", recolorSvg));
+    host.appendChild(previews);
+
     const fillGroups = collectFillGroups(recolorSvg);
 
+    const topMap = buildOriginalTagByHexFromTopSwatches();
     const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
-    const origTagByHex = { ...legendMap };
+    const proxMap = buildOriginalTagByHexFromSvgProximity(recolorSvg, fillGroups);
+    const tagByHex = { ...proxMap, ...legendMap, ...topMap };
 
     const rawEntries = Array.from(fillGroups.entries()).map(([oldHex, nodes]) => {
-      const tagOriginal = origTagByHex[oldHex] || "";
-      return { oldHex, nodes, tagOriginal };
+      const hex = norm(oldHex);
+      const tagOriginal = tagByHex[hex] || "";
+      return { oldHex: hex, nodes, tagOriginal };
     });
 
     rawEntries.sort((a, b) => {
@@ -1110,85 +1214,29 @@
       return a.oldHex.localeCompare(b.oldHex);
     });
 
-    const weightsMap = {};
-    rawEntries.forEach((e) => (weightsMap[e.oldHex] = (fillGroups.get(e.oldHex) || []).length || 1));
+    // ---- State ----
+    let colorsOn = true;
+    let bordersOn = true;
+    let textColorModeOn = false; // OFF => black
+    let textOpacity = 0.7; // ALWAYS applied
+    let selectedOldHex = null;
 
-    const signature = hashSignatureFromEntries(rawEntries, fillGroups);
-    const saved = loadState();
-    const state =
-      saved && saved.signature === signature
-        ? saved
-        : {
-            signature,
-            replByOldHex: {},
-            renameByOldHex: {},
-            toggles: { colorsOn: true, bordersOn: true, textColorOn: false, suggestOneToOneOn: true },
-            textOpacity: 0.3,
-          };
+    // 🆕 Suggestion toggle state (default ON)
+    let suggestOneToOneOn = true;
 
-    let colorsOn = !!state.toggles.colorsOn;
-    let bordersOn = !!state.toggles.bordersOn;
-    let textColorOn = !!state.toggles.textColorOn;
-    let suggestOneToOneOn = state.toggles.suggestOneToOneOn !== false;
-    let textOpacity = clamp01(state.textOpacity ?? 0.3);
+    const storedNow = loadStored();
+    const savedUi = storedNow && storedNow.svgSig === sig && storedNow.ui ? storedNow.ui : {};
+    if (typeof savedUi.colorsOn === "boolean") colorsOn = savedUi.colorsOn;
+    if (typeof savedUi.bordersOn === "boolean") bordersOn = savedUi.bordersOn;
+    if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
+    if (typeof savedUi.textOpacity === "number") textOpacity = Math.max(0, Math.min(1, savedUi.textOpacity));
+    if (typeof savedUi.selectedOldHex === "string") selectedOldHex = savedUi.selectedOldHex;
+    if (typeof savedUi.suggestOneToOneOn === "boolean") suggestOneToOneOn = savedUi.suggestOneToOneOn;
 
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
 
-    const textEls = Array.from(recolorSvg.querySelectorAll("text"));
-    textEls.forEach((t) => {
-      if (!t.getAttribute("data-orig-fill")) {
-        const f = getTextFillHex(t) || "#000000";
-        t.setAttribute("data-orig-fill", f);
-      }
-      t.setAttribute("fill-opacity", String(textOpacity));
-    });
-
-    const header = document.createElement("div");
-    header.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-    header.innerHTML = `
-      <div style="font-weight:900;">Recoloreo (paleta ${PALETTE_LIST.length})</div>
-      <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        Selecciona color original → elige reemplazo / sugerencia → (renombrar) → toggles → descarga
-      </div>
-    `;
-    host.appendChild(header);
-
-    const previews = document.createElement("div");
-    previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
-
-    const panel = (title, node) => {
-      const wrap = document.createElement("div");
-      wrap.style.cssText = `
-        border: 1px solid rgba(0,0,0,.12);
-        border-radius: 12px;
-        padding: 10px;
-        overflow: hidden;
-        background: white;
-      `;
-      const h = document.createElement("div");
-      h.textContent = title;
-      h.style.cssText = "font-weight:800; margin-bottom: 8px;";
-      const viewport = document.createElement("div");
-      viewport.style.cssText = `
-        width: 100%;
-        border-radius: 10px;
-        border: 1px solid rgba(0,0,0,.10);
-        background: white;
-        overflow: hidden;
-      `;
-      viewport.appendChild(node);
-      wrap.appendChild(h);
-      wrap.appendChild(viewport);
-      return wrap;
-    };
-
-    previews.appendChild(panel("Original", originalClone));
-    previews.appendChild(panel("Recoloreada", recolorSvg));
-    host.appendChild(previews);
-
     const usedReplacementHex = new Set();
-    let selectedOldHex = null;
 
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
@@ -1196,7 +1244,7 @@
 
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar + sugerido)</div>`;
+    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar + sugerencia)</div>`;
     controls.appendChild(left);
 
     const right = document.createElement("div");
@@ -1206,195 +1254,230 @@
 
     const info = document.createElement("div");
     info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
-    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
+    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla (o usa la sugerencia).";
     right.appendChild(info);
 
-    function updateLabelsForOldHex(oldHex, newText) {
-      const e = rawEntries.find((x) => x.oldHex === oldHex);
-      if (!e) return;
+    // Row state maps
+    const rowByOldHex = new Map();
+    const renameInputByOldHex = new Map();
+    const labelNodesByOldHex = new Map();
+    const suggestBtnByOldHex = new Map();
 
-      const tagOriginal = (e.tagOriginal || "").trim();
-      const prevRename = (state.renameByOldHex[oldHex] || "").trim();
-
-      const texts = Array.from(recolorSvg.querySelectorAll("text"));
-      const targets = texts.filter((t) => {
-        const v = (t.textContent || "").trim();
-        return (tagOriginal && v === tagOriginal) || (prevRename && v === prevRename);
-      });
-
-      targets.forEach((t) => (t.textContent = newText));
+    function buildTagToReplacementHexMap() {
+      const map = new Map(); // tagLower -> hex
+      for (const [oldHex, row] of rowByOldHex.entries()) {
+        const replHex = norm(row.getAttribute("data-replhex") || "");
+        const inp = renameInputByOldHex.get(oldHex);
+        const tag = inp ? (inp.value || "").toString().trim() : "";
+        if (!tag || !isTagLike(tag)) continue;
+        if (!replHex || !isHex6(replHex)) continue;
+        map.set(norm(tag), replHex);
+      }
+      return map;
     }
 
-    function applyTextMode() {
+    function stripStyleProps(styleStr, props) {
+      if (!styleStr) return "";
+      let s = styleStr;
+      props.forEach((p) => {
+        const re = new RegExp(`\\b${p}\\s*:\\s*[^;]+;?`, "gi");
+        s = s.replace(re, "");
+      });
+      s = s.replace(/;;+/g, ";").trim();
+      return s;
+    }
+
+    function applyTextColors() {
+      const map = buildTagToReplacementHexMap();
       const texts = Array.from(recolorSvg.querySelectorAll("text"));
-      const opacityStr = String(textOpacity);
+      const op = String(Math.max(0, Math.min(1, textOpacity)));
 
       texts.forEach((t) => {
-        t.setAttribute("fill-opacity", opacityStr);
+        const raw = (t.textContent || "").toString().trim();
+        if (!raw || !isTagLike(raw)) return;
 
-        if (!textColorOn) {
-          const orig = t.getAttribute("data-orig-fill") || getTextFillHex(t) || "#000000";
-          t.setAttribute("fill", orig);
-          return;
-        }
+        const key = norm(raw);
+        const hex = textColorModeOn ? map.get(key) || "#000000" : "#000000";
 
-        const label = (t.textContent || "").trim();
-        if (!label) return;
+        t.setAttribute("fill", hex);
+        t.setAttribute("fill-opacity", op);
+        t.setAttribute("opacity", op);
 
-        let matchedOldHex = null;
-        for (const e of rawEntries) {
-          const rn = (state.renameByOldHex[e.oldHex] != null ? state.renameByOldHex[e.oldHex] : e.tagOriginal) || "";
-          if ((rn || "").toString().trim() === label) {
-            matchedOldHex = e.oldHex;
-            break;
-          }
-        }
-        if (!matchedOldHex) return;
-
-        const repl = state.replByOldHex[matchedOldHex];
-        if (repl && repl.hex && isHex6(repl.hex)) {
-          t.setAttribute("fill", repl.hex);
-        } else {
-          const orig = t.getAttribute("data-orig-fill") || getTextFillHex(t) || "#000000";
-          t.setAttribute("fill", orig);
-        }
+        const prev = t.getAttribute("style") || "";
+        const cleaned = stripStyleProps(prev, ["fill", "fill-opacity", "opacity"]);
+        const prefix = cleaned ? (cleaned.trim().endsWith(";") ? cleaned : cleaned + ";") : "";
+        t.setAttribute("style", `${prefix}fill:${hex};fill-opacity:${op};opacity:${op};`);
       });
     }
 
-    // picker
-    const picker = renderGridPicker({
-      isUsed: (hex) => usedReplacementHex.has(normHex(hex)),
-      onPick: ({ hex: newHex, tag: newTag }) => {
-        if (!selectedOldHex) {
-          alert("Primero selecciona un color original (panel izquierdo).");
-          return;
+    function queueSaveState(buildStateFn) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        const current = loadStored() || { svgSig: sig, mappings: {}, ui: {} };
+        if (current.svgSig !== sig) return;
+        const next = buildStateFn(current);
+        writeStored(next);
+      }, 80);
+    }
+
+    function saveAllState() {
+      queueSaveState((cur) => {
+        const mappings = {};
+        for (const [oldHex, row] of rowByOldHex.entries()) {
+          const replHex = norm(row.getAttribute("data-replhex") || "");
+          const replTag = (row.getAttribute("data-repltag") || "").toString();
+          const inp = renameInputByOldHex.get(oldHex);
+          const rename = inp ? (inp.value || "").toString() : "";
+          if (replHex || rename || replTag) mappings[oldHex] = { replHex, replTag, rename };
         }
-        applyReplacement(selectedOldHex, newHex, newTag);
+        cur.mappings = mappings;
+        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "", suggestOneToOneOn };
+        return cur;
+      });
+    }
+
+    function setRenameForOldHex(oldHex, newLabel) {
+      oldHex = norm(oldHex);
+      const inp = renameInputByOldHex.get(oldHex);
+      const nodes = labelNodesByOldHex.get(oldHex) || [];
+      if (!inp) return;
+
+      inp.value = (newLabel || "").toString();
+      nodes.forEach((t) => (t.textContent = inp.value));
+      applyTextColors();
+      saveAllState();
+    }
+
+    function applyReplacementToOldHex(oldHex, newHex, newTag, { autoRename = true } = {}) {
+      oldHex = norm(oldHex);
+      newHex = norm(newHex);
+      newTag = (newTag || "").toString().trim();
+      if (!isHex6(newHex)) return;
+
+      const row = rowByOldHex.get(oldHex);
+      if (!row) return;
+
+      const prev = row.getAttribute("data-replhex") || "";
+      if (prev) usedReplacementHex.delete(norm(prev));
+      usedReplacementHex.add(newHex);
+
+      const nodes = fillGroups.get(oldHex) || [];
+      nodes.forEach((el) => {
+        el.setAttribute("fill", newHex);
+        if (el.hasAttribute("style")) el.setAttribute("style", el.getAttribute("style").replace(/fill:\s*[^;]+;?/gi, ""));
+      });
+
+      row.setAttribute("data-replhex", newHex);
+      row.setAttribute("data-repltag", newTag);
+
+      const swNew = row.querySelector(".sw-new");
+      const txt = row.querySelector(".row-text");
+      if (swNew) { swNew.style.background = newHex; swNew.style.borderStyle = "solid"; }
+
+      const badgeHost = row.querySelector(".new-badge-host");
+      if (badgeHost) {
+        badgeHost.innerHTML = "";
+        if (newTag) badgeHost.appendChild(makeBadgeCorner(newTag));
+      }
+      if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
+
+      if (autoRename && newTag) setRenameForOldHex(oldHex, newTag);
+      else { applyTextColors(); saveAllState(); }
+    }
+
+    const picker = renderGridPicker({
+      isUsed: (hex) => usedReplacementHex.has(norm(hex)),
+      onPick: ({ hex, tag }) => {
+        if (!selectedOldHex) { alert("Primero selecciona un color original (panel izquierdo)."); return; }
+        applyReplacementToOldHex(selectedOldHex, hex, tag, { autoRename: true });
+        picker.refreshUsedX();
       },
     });
     right.appendChild(picker.grid);
-
-    const suggestBar = document.createElement("div");
-    suggestBar.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;";
-    right.appendChild(suggestBar);
-
-    const btnSuggestMode = makeToggleButton("Sugerencia 1:1 (sin repetir) + Preservar escala", suggestOneToOneOn, (on) => {
-      suggestOneToOneOn = on;
-      state.toggles.suggestOneToOneOn = on;
-      saveState(state);
-      computeAndRenderSuggestions();
-    });
-    suggestBar.appendChild(btnSuggestMode);
 
     const list = document.createElement("div");
     list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
 
-    let suggestionByOldHex = {};
-
-    function computeAndRenderSuggestions() {
-      if (!rawEntries.length) return;
-
-      if (suggestOneToOneOn) {
-        const { mappingByOldHex } = suggestOneToOneMapping(rawEntries, weightsMap, { ...PARAMS_DEFAULT }, paletteCache);
-        suggestionByOldHex = {};
-        for (const oldHex of Object.keys(mappingByOldHex)) {
-          const idx = mappingByOldHex[oldHex];
-          const p = paletteCache[idx];
-          suggestionByOldHex[oldHex] = { hex: p.hex, tag: p.tag || "" };
-        }
-      } else {
-        suggestionByOldHex = {};
-        rawEntries.forEach((e) => {
-          const o = labExtras(hexToLab(e.oldHex));
-          let best = paletteCache[0];
-          let bestD = Infinity;
-          for (const p of paletteCache) {
-            const d = deltaE00(o, p);
-            if (d < bestD) {
-              bestD = d;
-              best = p;
-            }
-          }
-          suggestionByOldHex[e.oldHex] = { hex: best.hex, tag: best.tag || "" };
-        });
-      }
-
-      rawEntries.forEach((e) => {
-        const row = list.querySelector(`button[data-oldhex="${e.oldHex}"]`);
-        if (!row) return;
-        const sug = suggestionByOldHex[e.oldHex];
-        const sugBox = row.querySelector(".sw-sug");
-        const sugBadgeHost = row.querySelector(".sug-badge-host");
-        const sugLine = row.querySelector(".sug-text");
-
-        if (sugBox && sug) {
-          sugBox.style.background = sug.hex;
-          sugBox.style.borderStyle = "solid";
-          row.setAttribute("data-sughex", sug.hex);
-          row.setAttribute("data-sugtag", sug.tag || "");
-          if (sugBadgeHost) {
-            sugBadgeHost.innerHTML = "";
-            if (sug.tag) sugBadgeHost.appendChild(makeBadgeCorner(sug.tag));
-          }
-          if (sugLine) sugLine.textContent = sug.tag ? `Sugerido: ${sug.tag} (${sug.hex})` : `Sugerido: ${sug.hex}`;
-        }
+    function highlightRow(oldHex) {
+      oldHex = norm(oldHex);
+      Array.from(list.querySelectorAll("button")).forEach((b) => {
+        if (b.getAttribute("data-oldhex")) { b.style.outline = "none"; b.style.boxShadow = "none"; }
       });
+      const row = rowByOldHex.get(oldHex);
+      if (!row) return;
+      row.style.outline = "2px solid rgba(0,0,0,.28)";
+      row.style.boxShadow = "0 0 0 4px rgba(0,0,0,.05)";
     }
 
-    function applyReplacement(oldHex, newHex, newTag, opts = {}) {
-      oldHex = normHex(oldHex);
-      newHex = normHex(newHex);
-      if (!isHex6(oldHex) || !isHex6(newHex)) return;
+    // ---- Global suggestion mapping (computed once per open, recomputed if toggle changes) ----
+    const PARAMS_1TO1 = {
+      ALPHA: 1.2,
+      BETA: 0.15,
+      GAMMA: 0.08,
+      DELTA: 0.35,
+      C_NEUTRAL: 6.0,
+      K: 3,
+      ITER: 800,
+      EPS_TIE: 0.35,
+    };
 
-      const row = list.querySelector(`[data-oldhex="${oldHex}"]`);
-      if (row) {
-        const prev = row.getAttribute("data-replhex") || "";
-        if (prev) usedReplacementHex.delete(normHex(prev));
-        usedReplacementHex.add(newHex);
-        row.setAttribute("data-replhex", newHex);
-      } else {
-        usedReplacementHex.add(newHex);
-      }
-
-      const nodes = fillGroups.get(oldHex) || [];
-      nodes.forEach((el) => {
-        el.setAttribute("fill", newHex);
-        if (el.hasAttribute("style")) {
-          el.setAttribute("style", el.getAttribute("style").replace(/fill:\s*[^;]+;?/gi, ""));
-        }
-      });
-
-      state.replByOldHex[oldHex] = { hex: newHex, tag: (newTag || "").toString().trim() };
-      saveState(state);
-
-      if (row) {
-        const swNew = row.querySelector(".sw-new");
-        const txt = row.querySelector(".row-text");
-        const badgeHost = row.querySelector(".new-badge-host");
-        const input = row.querySelector("input[data-rename]");
-        if (swNew) {
-          swNew.style.background = newHex;
-          swNew.style.borderStyle = "solid";
-        }
-        if (badgeHost) {
-          badgeHost.innerHTML = "";
-          if (newTag) badgeHost.appendChild(makeBadgeCorner(newTag));
-        }
-        if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
-
-        if (!opts.skipRenameAuto && input && newTag) {
-          input.value = newTag;
-          updateLabelsForOldHex(oldHex, newTag);
-          state.renameByOldHex[oldHex] = newTag;
-          saveState(state);
-        }
-      }
-
-      applyTextMode();
-      picker.refreshUsedX();
+    function computeSuggestionsMapOneToOne() {
+      const originalsUsed = rawEntries.map((e) => ({
+        oldHex: e.oldHex,
+        tag: e.tagOriginal,
+        // proxy weight by node count (if you later have real area, plug it here)
+        weight: (e.nodes && e.nodes.length) ? e.nodes.length : 1,
+      }));
+      return suggestOneToOneMapping(originalsUsed, PALETTE_CACHE, PARAMS_1TO1).mapping;
     }
 
+    function computeSuggestionLocal(oldHex) {
+      const labT = hexToLab(oldHex);
+      if (!labT) return { hex: "", tag: "", meta: null };
+      return matchToPaletteColorLocal(labT, PALETTE_CACHE);
+    }
+
+    let oneToOneMap = null;
+    if (suggestOneToOneOn) oneToOneMap = computeSuggestionsMapOneToOne();
+
+    function getSuggestionForOldHex(oldHex) {
+      const key = norm(oldHex);
+      if (suggestOneToOneOn && oneToOneMap && oneToOneMap.has(key)) {
+        const v = oneToOneMap.get(key);
+        return { hex: v.hex, tag: v.tag, meta: v.meta || null };
+      }
+      return computeSuggestionLocal(key);
+    }
+
+    function updateSuggestionTile(oldHex) {
+      oldHex = norm(oldHex);
+      const btn = suggestBtnByOldHex.get(oldHex);
+      if (!btn) return;
+
+      const s = getSuggestionForOldHex(oldHex);
+      const sugHex = norm(s.hex || "");
+      const sugTag = (s.tag || "").toString().trim();
+
+      btn.style.background = isHex6(sugHex) ? sugHex : "rgba(0,0,0,.03)";
+      btn.style.cursor = isHex6(sugHex) ? "pointer" : "not-allowed";
+      btn.title = sugTag ? `Sugerido: ${sugTag} — ${sugHex}` : (sugHex ? `Sugerido: ${sugHex}` : "Sin sugerencia");
+
+      btn.innerHTML = "";
+      if (sugTag) btn.appendChild(makeBadgeCorner(sugTag));
+      else if (sugHex) btn.appendChild(makeBadgeCorner("≈"));
+
+      btn.setAttribute("data-sughex", sugHex);
+      btn.setAttribute("data-sugtag", sugTag);
+    }
+
+    function updateAllSuggestionTiles() {
+      if (suggestOneToOneOn) oneToOneMap = computeSuggestionsMapOneToOne();
+      else oneToOneMap = null;
+      for (const e of rawEntries) updateSuggestionTile(e.oldHex);
+    }
+
+    // ---- Build list rows ----
     if (!rawEntries.length) {
       const empty = document.createElement("div");
       empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
@@ -1402,49 +1485,39 @@
       list.appendChild(empty);
     } else {
       rawEntries.forEach(({ oldHex, tagOriginal }) => {
+        const labelNodes =
+          tagOriginal && tagOriginal.trim()
+            ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
+            : [];
+
+        const suggestion = getSuggestionForOldHex(oldHex);
+        const sugHex = norm(suggestion.hex || "");
+        const sugTag = (suggestion.tag || "").toString().trim();
+
         const row = document.createElement("button");
         row.type = "button";
         row.setAttribute("data-oldhex", oldHex);
         row.setAttribute("data-replhex", "");
+        row.setAttribute("data-repltag", "");
         row.style.cssText = `
-          text-align:left;
-          display:grid;
-          grid-template-columns: 72px 72px 72px 72px 1fr;
-          gap: 10px;
-          align-items:center;
-          padding: 10px;
-          border-radius: 12px;
-          border: 1px solid rgba(0,0,0,.12);
-          background: white;
-          cursor: pointer;
+          text-align:left; display:grid; grid-template-columns: 72px 72px 72px 72px 1fr;
+          gap: 10px; align-items:center; padding: 10px; border-radius: 12px;
+          border: 1px solid rgba(0,0,0,.12); background: white; cursor: pointer;
         `;
 
         const boxTag = document.createElement("div");
         boxTag.style.cssText = `
-          width:72px; height:44px;
-          border-radius:12px;
-          border:1px solid rgba(0,0,0,.20);
-          background:${oldHex};
-          position:relative;
-          overflow:hidden;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          font-weight:900;
-          font-size:18px;
-          color:${textColorForBg(oldHex)};
+          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.20);
+          background:${oldHex}; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center;
+          font-weight:900; font-size:18px; color:${textColorForBg(oldHex)};
         `;
         boxTag.textContent = tagOriginal || "";
 
         const boxRepl = document.createElement("div");
         boxRepl.className = "sw-new";
         boxRepl.style.cssText = `
-          width:72px; height:44px;
-          border-radius:12px;
-          border:1px dashed rgba(0,0,0,.20);
-          background:transparent;
-          position:relative;
-          overflow:hidden;
+          width:72px; height:44px; border-radius:12px; border:1px dashed rgba(0,0,0,.20);
+          background:transparent; position:relative; overflow:hidden;
         `;
         const newBadgeHost = document.createElement("div");
         newBadgeHost.className = "new-badge-host";
@@ -1453,94 +1526,57 @@
 
         const boxRename = document.createElement("div");
         boxRename.style.cssText = `
-          width:72px; height:44px;
-          border-radius:12px;
-          border:1px solid rgba(0,0,0,.22);
-          background:white;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          padding:0 6px;
+          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.22);
+          background:white; display:flex; align-items:center; justify-content:center; padding:0 6px;
         `;
-
         const input = document.createElement("input");
         input.type = "text";
-        input.setAttribute("data-rename", "1");
-        input.value = (state.renameByOldHex[oldHex] != null ? state.renameByOldHex[oldHex] : tagOriginal) || "";
-        input.style.cssText = `
-          width:100%;
-          height:28px;
-          border:0;
-          outline:none;
-          text-align:center;
-          font-size:13px;
-          background:transparent;
-        `;
+        input.value = tagOriginal || "";
+        input.style.cssText = `width:100%; height:28px; border:0; outline:none; text-align:center; font-size:13px; background:transparent;`;
         boxRename.appendChild(input);
 
-        const boxSug = document.createElement("div");
-        boxSug.className = "sw-sug";
-        boxSug.title = "Click para aplicar sugerencia";
+        const boxSug = document.createElement("button");
+        boxSug.type = "button";
+        boxSug.className = "recolor-suggest";
         boxSug.style.cssText = `
-          width:72px; height:44px;
-          border-radius:12px;
-          border:1px dashed rgba(0,0,0,.20);
-          background:transparent;
-          position:relative;
-          overflow:hidden;
+          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.18);
+          background:${isHex6(sugHex) ? sugHex : "rgba(0,0,0,.03)"}; position:relative; overflow:hidden;
+          cursor:${isHex6(sugHex) ? "pointer" : "not-allowed"}; display:flex; align-items:center; justify-content:center; padding:0;
         `;
-        const sugBadgeHost = document.createElement("div");
-        sugBadgeHost.className = "sug-badge-host";
-        sugBadgeHost.style.cssText = "position:absolute; inset:0;";
-        boxSug.appendChild(sugBadgeHost);
+        if (sugTag) boxSug.appendChild(makeBadgeCorner(sugTag));
+        else if (sugHex) boxSug.appendChild(makeBadgeCorner("≈"));
+        boxSug.setAttribute("data-sughex", sugHex);
+        boxSug.setAttribute("data-sugtag", sugTag);
+        boxSug.title = sugTag ? `Sugerido: ${sugTag} — ${sugHex}` : (sugHex ? `Sugerido: ${sugHex}` : "Sin sugerencia");
+
+        boxSug.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const sh = norm(boxSug.getAttribute("data-sughex") || "");
+          const st = (boxSug.getAttribute("data-sugtag") || "").toString().trim();
+          if (!isHex6(sh)) return;
+          selectedOldHex = oldHex;
+          applyReplacementToOldHex(oldHex, sh, st, { autoRename: true });
+          picker.refreshUsedX();
+          highlightRow(oldHex);
+        });
 
         const stack = document.createElement("div");
         stack.style.cssText = "display:grid; gap:4px;";
-
         const meta = document.createElement("div");
         meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
         meta.textContent = tagOriginal ? `Tag original: ${tagOriginal} | Color: ${oldHex}` : `Color: ${oldHex}`;
-
         const repl = document.createElement("div");
         repl.className = "row-text";
         repl.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
         repl.textContent = "Reemplazo: —";
-
-        const sugLine = document.createElement("div");
-        sugLine.className = "sug-text";
-        sugLine.style.cssText = "font-size:12px; color: rgba(0,0,0,.60)";
-        sugLine.textContent = "Sugerido: —";
-
         stack.appendChild(meta);
         stack.appendChild(repl);
-        stack.appendChild(sugLine);
 
         input.addEventListener("input", () => {
           const v = input.value;
-          updateLabelsForOldHex(oldHex, v);
-          state.renameByOldHex[oldHex] = v;
-          saveState(state);
-          applyTextMode();
-        });
-
-        row.addEventListener("click", () => {
-          selectedOldHex = oldHex;
-          Array.from(list.querySelectorAll("button")).forEach((b) => {
-            b.style.outline = "none";
-            b.style.boxShadow = "none";
-          });
-          row.style.outline = "2px solid rgba(0,0,0,.28)";
-          row.style.boxShadow = "0 0 0 4px rgba(0,0,0,.05)";
-        });
-
-        boxSug.addEventListener("click", (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          const sugHex = row.getAttribute("data-sughex");
-          const sugTag = row.getAttribute("data-sugtag") || "";
-          if (!sugHex) return;
-          selectedOldHex = oldHex;
-          applyReplacement(oldHex, sugHex, sugTag);
+          labelNodes.forEach((t) => (t.textContent = v));
+          applyTextColors();
+          saveAllState();
         });
 
         row.appendChild(boxTag);
@@ -1548,133 +1584,160 @@
         row.appendChild(boxRename);
         row.appendChild(boxSug);
         row.appendChild(stack);
+
+        row.addEventListener("click", () => {
+          selectedOldHex = oldHex;
+          highlightRow(oldHex);
+          saveAllState();
+        });
+
         list.appendChild(row);
+
+        rowByOldHex.set(oldHex, row);
+        renameInputByOldHex.set(oldHex, input);
+        labelNodesByOldHex.set(oldHex, labelNodes);
+        suggestBtnByOldHex.set(oldHex, boxSug);
       });
     }
 
-    computeAndRenderSuggestions();
+    // Restore mappings if same SVG
+    function restoreMappingsIfAny() {
+      const st = loadStored();
+      if (!st || st.svgSig !== sig || !st.mappings) return;
 
-    // restore memory replacements
-    for (const oldHex of Object.keys(state.replByOldHex || {})) {
-      const it = state.replByOldHex[oldHex];
-      if (it && it.hex && isHex6(it.hex)) {
-        applyReplacement(oldHex, it.hex, it.tag || "", { skipRenameAuto: true });
-        const row = list.querySelector(`button[data-oldhex="${oldHex}"]`);
-        if (row) {
-          const input = row.querySelector("input[data-rename]");
-          if (input && state.renameByOldHex && state.renameByOldHex[oldHex] != null) {
-            input.value = state.renameByOldHex[oldHex];
-            updateLabelsForOldHex(oldHex, input.value);
-          }
+      const mappings = st.mappings || {};
+      for (const oldHex of Object.keys(mappings)) {
+        const m = mappings[oldHex] || {};
+        const row = rowByOldHex.get(norm(oldHex));
+        if (!row) continue;
+
+        const replHex = norm(m.replHex || "");
+        const replTag = (m.replTag || "").toString();
+        const rename = (m.rename || "").toString();
+
+        if (rename && renameInputByOldHex.get(norm(oldHex))) {
+          const inp = renameInputByOldHex.get(norm(oldHex));
+          inp.value = rename;
+          const nodes = labelNodesByOldHex.get(norm(oldHex)) || [];
+          nodes.forEach((t) => (t.textContent = rename));
         }
+
+        if (isHex6(replHex)) applyReplacementToOldHex(oldHex, replHex, replTag, { autoRename: false });
       }
+
+      const sel = st.ui && st.ui.selectedOldHex ? norm(st.ui.selectedOldHex) : "";
+      if (sel && rowByOldHex.has(sel)) { selectedOldHex = sel; highlightRow(sel); }
+
+      picker.refreshUsedX();
+      applyTextColors();
     }
 
-    // toggles row
+    // ---------- Toggles row ----------
     const togglesRow = document.createElement("div");
     togglesRow.style.cssText = `
-      margin-top: 12px;
-      display:flex;
-      align-items:center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-      padding: 10px;
-      border: 1px solid rgba(0,0,0,.10);
-      border-radius: 12px;
-      background: rgba(0,0,0,.02);
+      margin-top: 12px; display:flex; align-items:center; justify-content: space-between;
+      gap: 10px; flex-wrap: wrap; padding: 10px;
+      border: 1px solid rgba(0,0,0,.10); border-radius: 12px; background: rgba(0,0,0,.02);
     `;
 
     const togglesLeft = document.createElement("div");
     togglesLeft.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
 
-    const btnColors = makeToggleButton("Colores", colorsOn, (on) => {
-      colorsOn = on;
-      state.toggles.colorsOn = on;
-      saveState(state);
-      setColorFills(recolorSvg, colorsOn);
+    const btnColors = makeToggleButton("Colores", colorsOn, (on) => { colorsOn = on; setColorFills(recolorSvg, colorsOn); saveAllState(); });
+    const btnBorders = makeToggleButton("Bordes", bordersOn, (on) => { bordersOn = on; setBorders(recolorSvg, bordersOn); saveAllState(); });
+    const btnTextColor = makeToggleButton("Color textos", textColorModeOn, (on) => { textColorModeOn = on; applyTextColors(); saveAllState(); });
+
+    // 🆕 Suggestion toggle
+    const btnSug = makeToggleButton("Sugerencia 1:1 (sin repetir) + Preservar escala", suggestOneToOneOn, (on) => {
+      suggestOneToOneOn = on;
+      updateAllSuggestionTiles();
+      saveAllState();
     });
 
-    const btnBorders = makeToggleButton("Bordes", bordersOn, (on) => {
-      bordersOn = on;
-      state.toggles.bordersOn = on;
-      saveState(state);
-      setBorders(recolorSvg, bordersOn);
+    const sliderWrap = document.createElement("div");
+    sliderWrap.style.cssText = `
+      display:flex; align-items:center; gap:8px; padding: 8px 10px;
+      border-radius: 12px; border: 1px solid rgba(0,0,0,.12); background: rgba(255,255,255,.9);
+    `;
+    const sliderLabel = document.createElement("div");
+    sliderLabel.style.cssText = "font-size:12px; color: rgba(0,0,0,.70); font-weight:800;";
+    sliderLabel.textContent = "Opacidad texto";
+    const slider = document.createElement("input");
+    slider.type = "range"; slider.min = "0"; slider.max = "100";
+    slider.value = String(Math.round(textOpacity * 100));
+    slider.style.cssText = "width: 180px; cursor: pointer;";
+    const sliderVal = document.createElement("div");
+    sliderVal.style.cssText = "font-size:12px; color: rgba(0,0,0,.70); font-weight:900; width:44px; text-align:right;";
+    sliderVal.textContent = `${Math.round(textOpacity * 100)}%`;
+    slider.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(100, Number(slider.value || 0)));
+      sliderVal.textContent = `${v}%`;
+      textOpacity = v / 100;
+      applyTextColors();
+      saveAllState();
     });
-
-    const btnTextColor = makeToggleButton("Color textos", textColorOn, (on) => {
-      textColorOn = on;
-      state.toggles.textColorOn = on;
-      saveState(state);
-      applyTextMode();
-    });
-
-    const opWrap = document.createElement("div");
-    opWrap.style.cssText = "display:flex; align-items:center; gap:10px; min-width: 320px;";
-
-    const opLabel = document.createElement("div");
-    opLabel.style.cssText = "font-size:12px; font-weight:800; color: rgba(0,0,0,.70);";
-    opLabel.textContent = "Opacidad texto";
-
-    const op = document.createElement("input");
-    op.type = "range";
-    op.min = "0";
-    op.max = "100";
-    op.value = String(Math.round(textOpacity * 100));
-    op.style.cssText = "width: 140px;";
-
-    const opVal = document.createElement("div");
-    opVal.style.cssText = "font-size:12px; font-weight:900; color: rgba(0,0,0,.70); width:44px; text-align:right;";
-    opVal.textContent = `${op.value}%`;
-
-    op.addEventListener("input", () => {
-      textOpacity = clamp01(Number(op.value) / 100);
-      opVal.textContent = `${op.value}%`;
-      state.textOpacity = textOpacity;
-      saveState(state);
-      applyTextMode();
-    });
-
-    opWrap.appendChild(opLabel);
-    opWrap.appendChild(op);
-    opWrap.appendChild(opVal);
+    sliderWrap.appendChild(sliderLabel);
+    sliderWrap.appendChild(slider);
+    sliderWrap.appendChild(sliderVal);
 
     togglesLeft.appendChild(btnColors);
     togglesLeft.appendChild(btnBorders);
     togglesLeft.appendChild(btnTextColor);
+    togglesLeft.appendChild(btnSug);
+    togglesLeft.appendChild(sliderWrap);
+
+    const hint = document.createElement("div");
+    hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
+    hint.textContent =
+      "Sugerencia 1:1 usa Hungarian + rank L* + hue + neutral + refinamiento por swaps (gradientes). OFF vuelve a sugerencia local (ΔE00). Textos: OFF=negro con opacidad; ON=hex del reemplazo. Opacidad siempre aplica (también en export).";
+
     togglesRow.appendChild(togglesLeft);
-    togglesRow.appendChild(opWrap);
+    togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
 
-    applyTextMode();
+    // Apply initial suggestion updates (in case toggle loaded from memory)
+    updateAllSuggestionTiles();
 
-    // downloads
+    restoreMappingsIfAny();
+    applyTextColors();
+
+    // ---------- Downloads ----------
     const dl = document.createElement("div");
     dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
     host.appendChild(dl);
 
-    const btnSvg = makePressyButton("DOWNLOAD RECOLORED SVG");
+    const btnSvg = document.createElement("button");
+    btnSvg.type = "button";
+    btnSvg.textContent = "DOWNLOAD RECOLORED SVG";
+    btnSvg.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnSvg);
     btnSvg.addEventListener("click", async () => {
-      btnSvg._setLoading(true);
+      setButtonLoading(btnSvg, true);
       try {
-        applyTextMode();
+        applyTextColors();
         const svgText = new XMLSerializer().serializeToString(recolorSvg);
         downloadText("paintbynumber_recolored.svg", svgText, "image/svg+xml");
       } finally {
-        setTimeout(() => btnSvg._setLoading(false), 250);
+        setTimeout(() => setButtonLoading(btnSvg, false), 220);
       }
     });
 
-    const btnPng = makePressyButton("DOWNLOAD RECOLORED PNG");
+    const btnPng = document.createElement("button");
+    btnPng.type = "button";
+    btnPng.textContent = "DOWNLOAD RECOLORED PNG";
+    btnPng.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnPng);
     btnPng.addEventListener("click", async () => {
-      btnPng._setLoading(true);
+      setButtonLoading(btnPng, true);
       try {
-        applyTextMode();
-        await downloadSvgAsPng(recolorSvg, "paintbynumber_recolored.png", PNG_MAX_SCALE);
+        applyTextColors();
+        const svgClone = recolorSvg.cloneNode(true);
+        await downloadSvgAsPngHQ(svgClone, "paintbynumber_recolored.png", 10);
       } catch (e) {
-        alert("No pude exportar PNG (límite de canvas / navegador).");
+        console.error(e);
+        alert("No pude exportar PNG. Revisa si el navegador bloqueó el canvas.");
       } finally {
-        setTimeout(() => btnPng._setLoading(false), 250);
+        setButtonLoading(btnPng, false);
       }
     });
 
@@ -1682,100 +1745,69 @@
     dl.appendChild(btnPng);
   }
 
-  function clamp01(x) {
-    x = Number(x);
-    if (!Number.isFinite(x)) return 0;
-    return Math.max(0, Math.min(1, x));
-  }
-
-  // ---------------- FAB LAUNCHER (ALWAYS) ----------------
+  // ---------- Floating launcher ----------
   function ensureFab() {
-    if (document.getElementById(FAB_ID)) return;
+    let fab = document.getElementById("recolor-fab");
+    if (fab) return fab;
 
-    ensureSpinStyle();
-
-    const fab = document.createElement("button");
-    fab.id = FAB_ID;
-    fab.type = "button";
+    fab = document.createElement("div");
+    fab.id = "recolor-fab";
     fab.style.cssText = `
-      position: fixed;
-      right: 18px;
-      bottom: 18px;
-      z-index: 999998;
-      padding: 12px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(0,0,0,.25);
-      background: rgba(255,255,255,.95);
-      cursor: pointer;
-      font-weight: 1000;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      box-shadow: 0 8px 28px rgba(0,0,0,.20);
-      transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease, opacity 200ms ease;
-      opacity: .65;
-    `;
-    fab.innerHTML = `
-      <span>🧩 Abrir Recolorear</span>
-      <span class="fab-dot" style="width:10px;height:10px;border-radius:99px;background:rgba(0,0,0,.20);"></span>
+      position: fixed; right: 18px; bottom: 18px; z-index: 2147483646;
+      display: none; gap: 8px; align-items: center; padding: 10px; border-radius: 14px;
+      background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.14);
+      box-shadow: 0 12px 40px rgba(0,0,0,.18);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     `;
 
-    const dot = fab.querySelector(".fab-dot");
-
-    // button feedback
-    fab.addEventListener("mousedown", () => {
-      fab.style.transform = "translateY(1px)";
-      fab.style.boxShadow = "0 6px 18px rgba(0,0,0,.22)";
-      fab.style.background = "rgba(255,255,255,1)";
-    });
-    const up = () => {
-      fab.style.transform = "translateY(0)";
-      fab.style.boxShadow = "0 8px 28px rgba(0,0,0,.20)";
-      fab.style.background = "rgba(255,255,255,.95)";
-    };
-    fab.addEventListener("mouseup", up);
-    fab.addEventListener("mouseleave", up);
-
-    fab.addEventListener("click", () => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Abrir Recolorear";
+    btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btn);
+    btn.addEventListener("click", () => {
       const current = findFinalOutputSvgLight();
-      if (!current) {
-        alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera el output.");
-        return;
-      }
+      if (!current) return alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera el output.");
       openEditor(current);
     });
 
-    document.body.appendChild(fab);
+    const status = document.createElement("div");
+    status.id = "recolor-fab-status";
+    status.style.cssText = "font-size: 12px; color: rgba(0,0,0,.65); white-space:nowrap;";
+    status.textContent = "Esperando output…";
 
-    // live indicator: if output svg exists -> turn dot green & opacity 1
-    function refresh() {
-      const svg = findFinalOutputSvgLight();
-      if (svg) {
-        fab.style.opacity = "1";
-        if (dot) dot.style.background = "rgba(46, 204, 113, .9)";
-      } else {
-        fab.style.opacity = ".65";
-        if (dot) dot.style.background = "rgba(0,0,0,.20)";
-      }
-    }
-    refresh();
-    setInterval(refresh, 700);
+    fab.appendChild(btn);
+    fab.appendChild(status);
+    document.body.appendChild(fab);
+    return fab;
   }
 
-  // ---------------- START ----------------
-  function start() {
-    ensureFab();
+  function updateFab() {
+    const fab = ensureFab();
+    const status = document.getElementById("recolor-fab-status");
+    const ready = isGeneratorReady();
+    fab.style.display = ready ? "flex" : "none";
+    if (status) status.textContent = ready ? "Output detectado" : "Esperando output…";
   }
 
   window.addEventListener("load", () => {
-    setTimeout(start, 200);
-    setTimeout(start, 900);
+    setTimeout(updateFab, 650);
+    setTimeout(updateFab, 1600);
   });
 
-  // If the app is SPA and re-renders, keep FAB alive
-  const mo = new MutationObserver(() => {
-    if (!document.getElementById(FAB_ID)) ensureFab();
-  });
-  mo.observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener(
+    "click",
+    (e) => {
+      const el = e.target && e.target.closest ? e.target.closest("button, a") : null;
+      if (!el) return;
+      const t = norm(el.textContent);
+      if (t.includes("process image") || t.includes("download svg") || t.includes("download png") || t.includes("output")) {
+        setTimeout(updateFab, 120);
+        setTimeout(updateFab, 600);
+      }
+    },
+    true
+  );
 
+  try { updateFab(); } catch (_) {}
 })();
