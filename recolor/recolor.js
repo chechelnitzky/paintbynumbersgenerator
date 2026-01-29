@@ -1,16 +1,21 @@
-/* Recolor add-on (v8.9 - RESTORE ORIGINAL TAGS + SORT + RENAME FIX)
-   ✅ Restores ORIGINAL tag detection (0..n) like before:
-      1) From top swatches/labels in generator UI (works best for your frog case)
-      2) From SVG legend (if present)
-      3) Fallback: from SVG geometry proximity (no elementFromPoint, so overlay-safe)
-   ✅ Sorts rows by ORIGINAL TAG asc again
-   ✅ Renombrar edits the correct SVG <text> nodes again
-   ✅ Auto-rename on pick (rename box becomes picker tag) + editable
-   ✅ Color textos ON/OFF + opacity slider uses replacement hex
-   ✅ Hard reload safe: floating FAB + modal overlay
+/* Recolor add-on (v9.0 - ALL FIXES INCORPORATED)
+   ✅ Hard reload safe: FAB + modal overlay (no early DOM injection)
+   ✅ Restores ORIGINAL tag detection (0..n) + sort asc + renombrar edits real SVG texts
+   ✅ Auto-rename on pick: rename input becomes picker tag (still editable)
+   ✅ Picker shows X when a color is already used (indicator only)
+   ✅ Colores ON/OFF, Bordes ON/OFF
+   ✅ Color textos toggle:
+        - ON  => text fill = replacement hex (by tag) else black
+        - OFF => text fill = black
+      Opacity slider ALWAYS applies (ON or OFF, color or black)
+   ✅ PNG download fixed + HQ export:
+        - Reads real SVG size (viewBox/attrs/bbox)
+        - Exports at scale 10x by default (capped to avoid memory blowups)
+        - Robust download (blob + dataURL fallback)
 */
 
 (function () {
+  // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
   const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map((x) => x.hex);
 
@@ -96,6 +101,29 @@
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
+  function getSvgSize(svgEl) {
+    ensureViewBox(svgEl);
+
+    const vb = svgEl.getAttribute("viewBox");
+    if (vb) {
+      const parts = vb.split(/\s+/).map(Number);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        return { w: parts[2], h: parts[3] };
+      }
+    }
+
+    const wAttr = parseFloat(svgEl.getAttribute("width") || "0");
+    const hAttr = parseFloat(svgEl.getAttribute("height") || "0");
+    if (wAttr > 0 && hAttr > 0) return { w: wAttr, h: hAttr };
+
+    try {
+      const bb = svgEl.getBBox();
+      if (bb && bb.width > 0 && bb.height > 0) return { w: bb.width, h: bb.height };
+    } catch (_) {}
+
+    return { w: 1600, h: 1600 };
+  }
+
   // ---------- Find output SVG ----------
   function findFinalOutputSvgLight() {
     const svgs = Array.from(document.querySelectorAll("svg"));
@@ -158,64 +186,122 @@
   // ---------- Download helpers ----------
   function downloadText(filename, text, mime = "text/plain") {
     const blob = new Blob([text], { type: mime });
+    forceDownloadBlob(blob, filename);
+  }
+
+  function forceDownloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  async function downloadSvgAsPng(svgEl, filename) {
-    const svgText = new XMLSerializer().serializeToString(svgEl);
-    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+  async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
+    const MAX_SIDE = 20000;
+    const MAX_PIXELS = 220e6;
 
-    const img = new Image();
-    img.decoding = "async";
+    const { w: baseW, h: baseH } = getSvgSize(svgEl);
 
-    const vb = svgEl.getAttribute("viewBox");
-    let w = 1600, h = 1600;
-    if (vb) {
-      const parts = vb.split(/\s+/).map(Number);
-      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-        w = Math.round(parts[2]);
-        h = Math.round(parts[3]);
-      }
+    let outW = Math.round(baseW * scale);
+    let outH = Math.round(baseH * scale);
+
+    if (outW > MAX_SIDE || outH > MAX_SIDE) {
+      const s = Math.min(MAX_SIDE / outW, MAX_SIDE / outH);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
     }
 
-    await new Promise((res, rej) => {
-      img.onload = () => res();
-      img.onerror = (e) => rej(e);
-      img.src = url;
-    });
+    const pixels = outW * outH;
+    if (pixels > MAX_PIXELS) {
+      const s = Math.sqrt(MAX_PIXELS / pixels);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
 
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
+    const svgText = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
 
-    URL.revokeObjectURL(url);
+    // Try createImageBitmap first
+    try {
+      const bitmap = await createImageBitmap(svgBlob);
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
 
-    canvas.toBlob(
-      (pngBlob) => {
-        const pngUrl = URL.createObjectURL(pngBlob);
-        const a = document.createElement("a");
-        a.href = pngUrl;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(pngUrl), 2000);
-      },
-      "image/png",
-      1.0
-    );
+      const ctx = canvas.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(bitmap, 0, 0, outW, outH);
+
+      const pngBlob = await new Promise((resolve) => {
+        canvas.toBlob((b) => resolve(b), "image/png", 1.0);
+      });
+
+      if (pngBlob) {
+        forceDownloadBlob(pngBlob, filename);
+        return;
+      }
+
+      // fallback if toBlob fails
+      const dataUrl = canvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    } catch (_) {
+      // Fallback to Image()
+      const url = URL.createObjectURL(svgBlob);
+      const img = new Image();
+      img.decoding = "async";
+      img.crossOrigin = "anonymous";
+
+      await new Promise((res, rej) => {
+        img.onload = () => res();
+        img.onerror = (e) => rej(e);
+        img.src = url;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext("2d", { alpha: false });
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.setTransform(outW / baseW, 0, 0, outH / baseH, 0, 0);
+      ctx.drawImage(img, 0, 0);
+
+      URL.revokeObjectURL(url);
+
+      const pngBlob = await new Promise((resolve) => {
+        canvas.toBlob((b) => resolve(b), "image/png", 1.0);
+      });
+
+      if (pngBlob) {
+        forceDownloadBlob(pngBlob, filename);
+        return;
+      }
+
+      const dataUrl = canvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
   }
 
   // ---------- SVG style injection (toggles) ----------
@@ -386,12 +472,9 @@
     return { grid, refreshUsedX };
   }
 
-  // ---------- ORIGINAL TAG MAPPING (restored) ----------
-  // 1) Best: read from generator UI swatches/labels (this is what gave you correct 0..n before)
+  // ---------- ORIGINAL TAG MAPPING ----------
   function buildOriginalTagByHexFromTopSwatches() {
-    const map = {}; // hex -> tag
-
-    // Heuristic: small square-ish colored chips with a short tag text over it
+    const map = {};
     const candidates = Array.from(document.querySelectorAll("button, div, span"))
       .filter((el) => el && el.textContent && !el.closest("#recolor-modal") && !el.closest("#recolor-fab"))
       .filter((el) => {
@@ -403,7 +486,6 @@
 
         const bg = getComputedStyle(el).backgroundColor;
         if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
-
         return true;
       });
 
@@ -416,7 +498,6 @@
     return map;
   }
 
-  // 2) Legend inside SVG (if present)
   function buildOriginalTagByHexFromSvgLegend(svg) {
     const map = {};
     if (!svg) return map;
@@ -453,7 +534,6 @@
     return map;
   }
 
-  // 3) Overlay-safe fallback: assign each fill hex the nearest tag text inside the SVG (proximity)
   function buildOriginalTagByHexFromSvgProximity(svg, fillGroups) {
     const map = {};
     if (!svg || !fillGroups || !fillGroups.size) return map;
@@ -471,11 +551,10 @@
 
     if (!texts.length) return map;
 
-    // For each fill group, approximate its center from a sample of nodes
     for (const [hex, nodes] of fillGroups.entries()) {
       let sumX = 0, sumY = 0, count = 0;
 
-      const sample = nodes.slice(0, 40); // keep light
+      const sample = nodes.slice(0, 40);
       for (const el of sample) {
         let bb;
         try { bb = el.getBBox(); } catch (_) { continue; }
@@ -502,7 +581,6 @@
       }
       if (best && !map[hex]) map[hex] = best.tag;
     }
-
     return map;
   }
 
@@ -605,11 +683,6 @@
     const host = openModal();
     host.innerHTML = "";
 
-    const originalClone = originalSvg.cloneNode(true);
-    const recolorSvg = originalSvg.cloneNode(true);
-    makePreview(originalClone);
-    makePreview(recolorSvg);
-
     const header = document.createElement("div");
     header.style.cssText =
       "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
@@ -620,6 +693,11 @@
       </div>
     `;
     host.appendChild(header);
+
+    const originalClone = originalSvg.cloneNode(true);
+    const recolorSvg = originalSvg.cloneNode(true);
+    makePreview(originalClone);
+    makePreview(recolorSvg);
 
     const previews = document.createElement("div");
     previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
@@ -648,22 +726,19 @@
       wrap.appendChild(viewport);
       return wrap;
     };
+
     previews.appendChild(panel("Original", originalClone));
     previews.appendChild(panel("Recoloreada", recolorSvg));
     host.appendChild(previews);
 
-    // Build fills
     const fillGroups = collectFillGroups(recolorSvg);
 
-    // ✅ RESTORED: build original tag map BEFORE building rows
-    const topMap = buildOriginalTagByHexFromTopSwatches();          // hex -> tag
-    const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg); // hex -> tag
-    const proxMap = buildOriginalTagByHexFromSvgProximity(recolorSvg, fillGroups); // hex -> tag
-
-    // Merge priority: top > legend > proximity
+    // Build original tag map: priority top > legend > proximity
+    const topMap = buildOriginalTagByHexFromTopSwatches();
+    const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
+    const proxMap = buildOriginalTagByHexFromSvgProximity(recolorSvg, fillGroups);
     const tagByHex = { ...proxMap, ...legendMap, ...topMap };
 
-    // Entries
     const rawEntries = Array.from(fillGroups.entries()).map(([oldHex, nodes]) => {
       const hex = norm(oldHex);
       const tagOriginal = tagByHex[hex] || "";
@@ -685,16 +760,14 @@
     // Toggles state
     let colorsOn = true;
     let bordersOn = true;
-    let textColorModeOn = false;
-    let textOpacity = 0.7;
+    let textColorModeOn = false; // OFF => black
+    let textOpacity = 0.7;       // ALWAYS applied (0..1)
 
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
 
-    // Used replacement tracker
     const usedReplacementHex = new Set();
 
-    // Layout
     const controls = document.createElement("div");
     controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
     host.appendChild(controls);
@@ -716,40 +789,12 @@
     info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla.";
     right.appendChild(info);
 
-    const list = document.createElement("div");
-    list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
-    left.appendChild(list);
-
-    // Selection
     let selectedOldHex = null;
 
     // Row state maps
     const rowByOldHex = new Map();
     const renameInputByOldHex = new Map();
     const labelNodesByOldHex = new Map();
-
-    // Text color mode helpers
-    function snapshotTextOriginal(textEl) {
-      if (!textEl || !textEl.dataset) return;
-      if (textEl.dataset.recolorOrigFill === undefined) {
-        const fill = textEl.getAttribute("fill");
-        const fo = textEl.getAttribute("fill-opacity");
-        textEl.dataset.recolorOrigFill = fill !== null ? fill : "";
-        textEl.dataset.recolorOrigFillOpacity = fo !== null ? fo : "";
-      }
-    }
-
-    function restoreTextOriginal(textEl) {
-      if (!textEl || !textEl.dataset) return;
-      const f = textEl.dataset.recolorOrigFill;
-      const fo = textEl.dataset.recolorOrigFillOpacity;
-
-      if (f === "") textEl.removeAttribute("fill");
-      else textEl.setAttribute("fill", f);
-
-      if (fo === "") textEl.removeAttribute("fill-opacity");
-      else textEl.setAttribute("fill-opacity", fo);
-    }
 
     function buildTagToReplacementHexMap() {
       const map = new Map(); // tagLower -> hex
@@ -764,6 +809,7 @@
       return map;
     }
 
+    // ✅ Slider must apply always; OFF => black, ON => replacement hex (else black)
     function applyTextColors() {
       const map = buildTagToReplacementHexMap();
       const texts = Array.from(recolorSvg.querySelectorAll("text"));
@@ -772,15 +818,8 @@
         const raw = (t.textContent || "").toString().trim();
         if (!raw || !isTagLike(raw)) return;
 
-        snapshotTextOriginal(t);
-
         const key = norm(raw);
-        const hex = map.get(key);
-
-        if (!textColorModeOn || !hex) {
-          restoreTextOriginal(t);
-          return;
-        }
+        const hex = textColorModeOn ? (map.get(key) || "#000000") : "#000000";
 
         t.setAttribute("fill", hex);
         t.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, textOpacity))));
@@ -795,10 +834,9 @@
 
       inp.value = (newLabel || "").toString();
       nodes.forEach((t) => (t.textContent = inp.value));
-      if (textColorModeOn) applyTextColors();
+      applyTextColors();
     }
 
-    // Picker
     const picker = renderGridPicker({
       isUsed: (hex) => usedReplacementHex.has(norm(hex)),
       onPick: ({ hex: newHex, tag: newTag }) => {
@@ -843,144 +881,151 @@
 
           if (txt) txt.textContent = newTag ? `Reemplazo: ${newTag} (${newHex})` : `Reemplazo: ${newHex}`;
 
-          // ✅ EXACT: rename becomes picker tag immediately
+          // ✅ auto-rename becomes picker tag
           if (newTag) setRenameForOldHex(selectedOldHex, newTag);
+          else applyTextColors();
         }
 
         picker.refreshUsedX();
-        if (textColorModeOn) applyTextColors();
       },
     });
 
     right.appendChild(picker.grid);
 
-    // Rows
-    rawEntries.forEach(({ oldHex, tagOriginal }) => {
-      // Find label nodes by original tag (this is what makes renombrar work)
-      const labelNodes =
-        tagOriginal && tagOriginal.trim()
-          ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
-          : [];
+    const list = document.createElement("div");
+    list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
+    left.appendChild(list);
 
-      const row = document.createElement("button");
-      row.type = "button";
-      row.setAttribute("data-oldhex", oldHex);
-      row.setAttribute("data-replhex", "");
-      row.style.cssText = `
-        text-align:left;
-        display:grid;
-        grid-template-columns: 72px 72px 72px 1fr;
-        gap: 10px;
-        align-items:center;
-        padding: 10px;
-        border-radius: 12px;
-        border: 1px solid rgba(0,0,0,.12);
-        background: white;
-        cursor: pointer;
-      `;
+    if (!rawEntries.length) {
+      const empty = document.createElement("div");
+      empty.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
+      empty.textContent = "No detecté fills en el SVG.";
+      list.appendChild(empty);
+    } else {
+      rawEntries.forEach(({ oldHex, tagOriginal }) => {
+        const labelNodes =
+          tagOriginal && tagOriginal.trim()
+            ? Array.from(recolorSvg.querySelectorAll("text")).filter((t) => (t.textContent || "").trim() === tagOriginal)
+            : [];
 
-      const boxTag = document.createElement("div");
-      boxTag.style.cssText = `
-        width:72px; height:44px;
-        border-radius:12px;
-        border:1px solid rgba(0,0,0,.20);
-        background:${oldHex};
-        position:relative;
-        overflow:hidden;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-weight:900;
-        font-size:18px;
-        color:${textColorForBg(oldHex)};
-      `;
-      boxTag.textContent = tagOriginal || "";
+        const row = document.createElement("button");
+        row.type = "button";
+        row.setAttribute("data-oldhex", oldHex);
+        row.setAttribute("data-replhex", "");
+        row.style.cssText = `
+          text-align:left;
+          display:grid;
+          grid-template-columns: 72px 72px 72px 1fr;
+          gap: 10px;
+          align-items:center;
+          padding: 10px;
+          border-radius: 12px;
+          border: 1px solid rgba(0,0,0,.12);
+          background: white;
+          cursor: pointer;
+        `;
 
-      const boxRepl = document.createElement("div");
-      boxRepl.className = "sw-new";
-      boxRepl.style.cssText = `
-        width:72px; height:44px;
-        border-radius:12px;
-        border:1px dashed rgba(0,0,0,.20);
-        background:transparent;
-        position:relative;
-        overflow:hidden;
-      `;
-      const newBadgeHost = document.createElement("div");
-      newBadgeHost.className = "new-badge-host";
-      newBadgeHost.style.cssText = "position:absolute; inset:0;";
-      boxRepl.appendChild(newBadgeHost);
+        const boxTag = document.createElement("div");
+        boxTag.style.cssText = `
+          width:72px; height:44px;
+          border-radius:12px;
+          border:1px solid rgba(0,0,0,.20);
+          background:${oldHex};
+          position:relative;
+          overflow:hidden;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          font-weight:900;
+          font-size:18px;
+          color:${textColorForBg(oldHex)};
+        `;
+        boxTag.textContent = tagOriginal || "";
 
-      const boxRename = document.createElement("div");
-      boxRename.style.cssText = `
-        width:72px; height:44px;
-        border-radius:12px;
-        border:1px solid rgba(0,0,0,.22);
-        background:white;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        padding:0 6px;
-      `;
+        const boxRepl = document.createElement("div");
+        boxRepl.className = "sw-new";
+        boxRepl.style.cssText = `
+          width:72px; height:44px;
+          border-radius:12px;
+          border:1px dashed rgba(0,0,0,.20);
+          background:transparent;
+          position:relative;
+          overflow:hidden;
+        `;
+        const newBadgeHost = document.createElement("div");
+        newBadgeHost.className = "new-badge-host";
+        newBadgeHost.style.cssText = "position:absolute; inset:0;";
+        boxRepl.appendChild(newBadgeHost);
 
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = tagOriginal || ""; // ✅ restored original tag prefill (0..n)
-      input.style.cssText = `
-        width:100%;
-        height:28px;
-        border:0;
-        outline:none;
-        text-align:center;
-        font-size:13px;
-        background:transparent;
-      `;
-      boxRename.appendChild(input);
+        const boxRename = document.createElement("div");
+        boxRename.style.cssText = `
+          width:72px; height:44px;
+          border-radius:12px;
+          border:1px solid rgba(0,0,0,.22);
+          background:white;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          padding:0 6px;
+        `;
 
-      const stack = document.createElement("div");
-      stack.style.cssText = "display:grid; gap:4px;";
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = tagOriginal || "";
+        input.style.cssText = `
+          width:100%;
+          height:28px;
+          border:0;
+          outline:none;
+          text-align:center;
+          font-size:13px;
+          background:transparent;
+        `;
+        boxRename.appendChild(input);
 
-      const meta = document.createElement("div");
-      meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
-      meta.textContent = tagOriginal
-        ? `Tag original: ${tagOriginal} | Color: ${oldHex}`
-        : `Color: ${oldHex}`;
+        const stack = document.createElement("div");
+        stack.style.cssText = "display:grid; gap:4px;";
 
-      const repl = document.createElement("div");
-      repl.className = "row-text";
-      repl.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
-      repl.textContent = "Reemplazo: —";
+        const meta = document.createElement("div");
+        meta.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
+        meta.textContent = tagOriginal ? `Tag original: ${tagOriginal} | Color: ${oldHex}` : `Color: ${oldHex}`;
 
-      stack.appendChild(meta);
-      stack.appendChild(repl);
+        const repl = document.createElement("div");
+        repl.className = "row-text";
+        repl.style.cssText = "font-size:12px; color: rgba(0,0,0,.70)";
+        repl.textContent = "Reemplazo: —";
 
-      input.addEventListener("input", () => {
-        const v = input.value;
-        labelNodes.forEach((t) => (t.textContent = v));
-        if (textColorModeOn) applyTextColors();
-      });
+        stack.appendChild(meta);
+        stack.appendChild(repl);
 
-      row.appendChild(boxTag);
-      row.appendChild(boxRepl);
-      row.appendChild(boxRename);
-      row.appendChild(stack);
-
-      row.addEventListener("click", () => {
-        selectedOldHex = norm(oldHex);
-        Array.from(list.querySelectorAll("button")).forEach((b) => {
-          b.style.outline = "none";
-          b.style.boxShadow = "none";
+        input.addEventListener("input", () => {
+          const v = input.value;
+          labelNodes.forEach((t) => (t.textContent = v));
+          applyTextColors();
         });
-        row.style.outline = "2px solid rgba(0,0,0,.28)";
-        row.style.boxShadow = "0 0 0 4px rgba(0,0,0,.05)";
+
+        row.appendChild(boxTag);
+        row.appendChild(boxRepl);
+        row.appendChild(boxRename);
+        row.appendChild(stack);
+
+        row.addEventListener("click", () => {
+          selectedOldHex = oldHex;
+          Array.from(list.querySelectorAll("button")).forEach((b) => {
+            b.style.outline = "none";
+            b.style.boxShadow = "none";
+          });
+          row.style.outline = "2px solid rgba(0,0,0,.28)";
+          row.style.boxShadow = "0 0 0 4px rgba(0,0,0,.05)";
+        });
+
+        list.appendChild(row);
+
+        rowByOldHex.set(oldHex, row);
+        renameInputByOldHex.set(oldHex, input);
+        labelNodesByOldHex.set(oldHex, labelNodes);
       });
-
-      list.appendChild(row);
-
-      rowByOldHex.set(norm(oldHex), row);
-      renameInputByOldHex.set(norm(oldHex), input);
-      labelNodesByOldHex.set(norm(oldHex), labelNodes);
-    });
+    }
 
     // ---------- Toggles row ----------
     const togglesRow = document.createElement("div");
@@ -1010,12 +1055,9 @@
       setBorders(recolorSvg, bordersOn);
     });
 
-    const textControls = document.createElement("div");
-    textControls.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; align-items:center;";
-
     const btnTextColor = makeToggleButton("Color textos", false, (on) => {
       textColorModeOn = on;
-      applyTextColors();
+      applyTextColors(); // ✅ always
     });
 
     const sliderWrap = document.createElement("div");
@@ -1049,27 +1091,29 @@
       const v = Math.max(0, Math.min(100, Number(slider.value || 0)));
       sliderVal.textContent = `${v}%`;
       textOpacity = v / 100;
-      if (textColorModeOn) applyTextColors();
+      applyTextColors(); // ✅ always (ON or OFF)
     });
 
     sliderWrap.appendChild(sliderLabel);
     sliderWrap.appendChild(slider);
     sliderWrap.appendChild(sliderVal);
 
-    textControls.appendChild(btnTextColor);
-    textControls.appendChild(sliderWrap);
-
     togglesLeft.appendChild(btnColors);
     togglesLeft.appendChild(btnBorders);
-    togglesLeft.appendChild(textControls);
+    togglesLeft.appendChild(btnTextColor);
+    togglesLeft.appendChild(sliderWrap);
 
     const hint = document.createElement("div");
     hint.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px;";
-    hint.textContent = "Orden y tags originales (0..n) restaurados. Renombrar vuelve a editar los textos reales.";
+    hint.textContent =
+      "Textos: OFF=negro con opacidad; ON=hex de reemplazo (si no hay reemplazo, negro). Opacidad siempre aplica.";
 
     togglesRow.appendChild(togglesLeft);
     togglesRow.appendChild(hint);
     host.appendChild(togglesRow);
+
+    // Init text styling (black with slider opacity)
+    applyTextColors();
 
     // ---------- Downloads ----------
     const dl = document.createElement("div");
@@ -1093,8 +1137,9 @@
       "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900;";
     btnPng.addEventListener("click", async () => {
       try {
-        await downloadSvgAsPng(recolorSvg, "paintbynumber_recolored.png");
+        await downloadSvgAsPngHQ(recolorSvg, "paintbynumber_recolored.png", 10);
       } catch (e) {
+        console.error(e);
         alert("No pude exportar PNG. Revisa si el navegador bloqueó el canvas.");
       }
     });
