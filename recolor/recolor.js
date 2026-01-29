@@ -104,13 +104,13 @@
     const st = document.createElement("style");
     st.id = "pbn-recolor-style";
     st.textContent = `
-      .pbn-recolor-fab{position:fixed;left:18px;top:18px;z-index:2147483647;
+      .pbn-recolor-fab{position:fixed;right:18px;bottom:18px;z-index:2147483647;
         padding:12px 14px;border-radius:14px;border:1px solid rgba(0,0,0,.18);
         background:rgba(255,255,255,.94);backdrop-filter:blur(8px);
         box-shadow:0 16px 42px rgba(0,0,0,.18);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
         font-weight:900;cursor:pointer;display:flex;align-items:center;gap:10px;}
       .pbn-recolor-fab small{font-weight:900;opacity:.65}
-      .pbn-recolor-fab[disabled]{opacity:.55;cursor:not-allowed}
+      .pbn-recolor-fab[data-ready="0"]{opacity:.70}
       .pbn-recolor-overlay{position:fixed;inset:0;background:rgba(0,0,0,.30);z-index:2147483647;overflow:auto;padding:22px;}
       .pbn-recolor-card{max-width:1250px;margin:0 auto;background:rgba(255,255,255,.98);border:1px solid rgba(0,0,0,.14);
         border-radius:18px;box-shadow:0 24px 90px rgba(0,0,0,.26);padding:14px 14px 18px;}
@@ -224,8 +224,23 @@
     return groups;
   }
 
+  function _collectAllSvgsReachable() {
+    const out = Array.from(document.querySelectorAll("svg"));
+    const iframes = Array.from(document.querySelectorAll("iframe"));
+    for (const fr of iframes) {
+      try {
+        const doc = fr.contentDocument;
+        if (!doc) continue;
+        out.push(...Array.from(doc.querySelectorAll("svg")));
+      } catch (_) {
+        // cross-origin; ignore
+      }
+    }
+    return out;
+  }
+
   function findFinalOutputSvg() {
-    const svgs = Array.from(document.querySelectorAll("svg"));
+    const svgs = _collectAllSvgsReachable();
     if (!svgs.length) return null;
     let best = null, bestScore = 0;
     for (const s of svgs) {
@@ -238,11 +253,12 @@
   }
 
   function isGeneratorReady() {
-    // If output svg exists with enough content, consider ready.
+    // If any output svg exists with some content, consider ready.
     const s = findFinalOutputSvg();
     if (!s) return false;
     const shapes = s.querySelectorAll("path,polygon,rect,circle,ellipse").length;
-    return shapes > 20;
+    const texts = s.querySelectorAll("text").length;
+    return (shapes + texts) > 0;
   }
 
   // ============================================================
@@ -1500,9 +1516,12 @@
     document.body.appendChild(fab);
 
     fab.addEventListener("click", () => {
-      if (!isGeneratorReady()) return;
       const svg = findFinalOutputSvg();
-      if (svg) openModal(svg);
+      if (!svg) {
+        alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera a que aparezca el output.");
+        return;
+      }
+      openModal(svg);
     });
 
     return fab;
@@ -1511,8 +1530,8 @@
   function refreshFabState() {
     const fab = ensureFab();
     const ready = isGeneratorReady();
-    fab.disabled = !ready;
-    fab.title = ready ? "Abrir recolorador" : "Procesa una imagen para generar SVG y luego abre el recolorador";
+    fab.dataset.ready = ready ? "1" : "0";
+    fab.title = ready ? "Abrir recolorador" : "Aún no detecto output SVG. Aprieta PROCESS IMAGE y vuelve a intentar.";
   }
 
   // ============================================================
