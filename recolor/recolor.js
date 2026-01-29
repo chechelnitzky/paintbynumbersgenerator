@@ -1,66 +1,86 @@
-/* Recolor add-on (v11.2.0)
-   ✅ Versioned addon (ADDON_VERSION always present)
-   ✅ Page small version title injected above "Paint by number generator"
-   ✅ Text color fix: OFF uses ORIGINAL SVG text fill (not forced black). Slider always applies.
-   ✅ Suggestion modes selector:
-        1) OFF (Closest) [DEFAULT]
-        2) SOFT (recommended)
-        3) HARD (experimental)
-   ✅ SOFT optimization: context + reuse penalty + dark/neutral penalties + highlight/shadow filtering
-   ✅ HARD: Hungarian 1:1 over scoreBase (no repeats) + N>167 handling
-   ✅ UI preserved (picker, renombrar, toggles, downloads)
-*/
+/* Recolor add-on (v11.2.1) — Paint By Number Generator
+   --------------------------------------------------------------------
+   Fixes requested:
+   1) Inject small version title above "Paint by number generator"
+   2) Code always has a version number (ADDON_VERSION)
+   3) Suggestion modes: OFF (Closest) [DEFAULT], SOFT (recommended), HARD (experimental)
+      - OFF keeps current behavior: closest by ΔE00, repetitions allowed
+      - SOFT: iterative optimization (context + reuse penalty + dark/neutral penalties + highlight/shadow filtering)
+      - HARD: Hungarian 1:1 (no repeats), with N>167 handling (top 167 by weight)
+   Also:
+   - Text color: default uses original SVG text fill; slider changes opacity only (never forces black)
+   - Does not depend on the page’s internal buttons; adds its own floating launcher
+   -------------------------------------------------------------------- */
 
 (function () {
-  // =====================================================================
-  // VERSION (FIX #2: always have a version number)
-  // =====================================================================
-  const ADDON_VERSION = "11.2.0";
-  const ADDON_NAME = `Recolor ${ADDON_VERSION}`;
+  "use strict";
 
-  // ---------- Config ----------
-  const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
-  const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map((x) => x.hex);
+  // ============================================================
+  // VERSION (required)
+  // ============================================================
+  const ADDON_VERSION = "11.2.1";
+  const ADDON_NAME = `Recolor v${ADDON_VERSION}`;
 
+  // ============================================================
+  // Palette input
+  // Expects ONE of:
+  //   window.PALETTE_ITEMS = [{ tag:"A1", hex:"#112233" }, ...] (recommended)
+  //   window.PALETTE_168   = ["#112233", ...]
+  // If missing, UI still works but picker/suggestions will show warning.
+  // ============================================================
+  const PALETTE_ITEMS = Array.isArray(window.PALETTE_ITEMS) ? window.PALETTE_ITEMS : [];
+  const PALETTE_HEXES = Array.isArray(window.PALETTE_168) ? window.PALETTE_168
+    : (PALETTE_ITEMS.length ? PALETTE_ITEMS.map(x => x.hex) : []);
+
+  // ============================================================
+  // Small utilities
+  // ============================================================
   const norm = (v) => (v || "").toString().trim().toLowerCase();
-  const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
-  const isTagLike = (t) => /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim());
+  const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test((s || "").toString().trim());
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  // =====================================================================
-  // FIX #1: inject small version title above the page title
-  // =====================================================================
+  function safeJsonParse(s) { try { return JSON.parse(s); } catch { return null; } }
+  function debounce(fn, ms) {
+    let t = null;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+  }
+
+  // ============================================================
+  // FIX #1: Inject version title above H1
+  // ============================================================
   function injectVersionTitleAboveH1() {
-    // Find the main H1 that says "Paint by number generator"
-    const h1 = Array.from(document.querySelectorAll("h1, h2, .title, header h1"))
-      .find((el) => /paint by number generator/i.test((el.textContent || "").trim()));
+    const h1 = Array.from(document.querySelectorAll("h1, h2, header h1, header h2"))
+      .find(el => /paint by number generator/i.test((el.textContent || "").trim()));
     if (!h1) return;
-
-    // Avoid duplicates
-    if (document.getElementById("pbn-addon-version-title")) return;
+    if (document.getElementById("pbn-recolor-version-title")) return;
 
     const small = document.createElement("div");
-    small.id = "pbn-addon-version-title";
+    small.id = "pbn-recolor-version-title";
     small.textContent = ADDON_NAME;
-    small.style.cssText = `
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .02em;
-      color: rgba(220, 38, 38, .95); /* red-ish, subtle */
-      margin: 2px 0 6px 0;
-      line-height: 1.1;
-    `;
+    small.style.cssText = [
+      "font-size:12px",
+      "font-weight:900",
+      "letter-spacing:.02em",
+      "color:rgba(220,38,38,.95)",
+      "margin:2px 0 6px 0",
+      "line-height:1.1"
+    ].join(";");
 
-    // Insert above the title
     h1.parentNode.insertBefore(small, h1);
   }
 
-  // ---------- Memory ----------
-  const STORAGE_KEY = "recolor_state_v1120";
-  let saveTimer = null;
+  // ============================================================
+  // Local storage
+  // ============================================================
+  const STORAGE_KEY = `pbn_recolor_state_${ADDON_VERSION.replace(/\W+/g, "_")}`;
 
-  function safeJsonParse(s) {
-    try { return JSON.parse(s); } catch { return null; }
+  function loadState() {
+    return safeJsonParse(localStorage.getItem(STORAGE_KEY)) || { ui: {}, mappings: {}, renames: {}, svgSig: "" };
   }
+  function saveState(state) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+  }
+
   function hashDjb2(str) {
     let h = 5381;
     for (let i = 0; i < str.length; i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
@@ -69,80 +89,89 @@
   function svgSignature(svgEl) {
     try {
       const s = new XMLSerializer().serializeToString(svgEl);
-      const compact = s.replace(/\s+/g, " ").slice(0, 40000);
+      const compact = s.replace(/\s+/g, " ").slice(0, 50000);
       return hashDjb2(`${compact.length}|${compact}`);
     } catch {
       return String(Date.now());
     }
   }
-  function loadStored() { return safeJsonParse(localStorage.getItem(STORAGE_KEY)) || null; }
-  function writeStored(obj) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
 
-  // ---------- Global UI CSS ----------
-  function ensureUiStyle() {
-    if (document.getElementById("recolor-ui-style")) return;
+  // ============================================================
+  // Basic CSS for UI
+  // ============================================================
+  function ensureStyle() {
+    if (document.getElementById("pbn-recolor-style")) return;
     const st = document.createElement("style");
-    st.id = "recolor-ui-style";
+    st.id = "pbn-recolor-style";
     st.textContent = `
-      @keyframes recolorSpin { to { transform: rotate(360deg); } }
-      .recolor-btn { transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease, opacity 120ms ease; box-shadow: 0 10px 24px rgba(0,0,0,.10); }
-      .recolor-btn:hover { box-shadow: 0 14px 30px rgba(0,0,0,.14); }
-      .recolor-btn.is-pressed { transform: translateY(1px) scale(.99); box-shadow: 0 6px 14px rgba(0,0,0,.10); }
-      .recolor-btn.is-loading { opacity: .85; cursor: progress !important; }
-      .recolor-spinner { width: 14px; height: 14px; border-radius: 999px; border: 2px solid rgba(0,0,0,.22); border-top-color: rgba(0,0,0,.65); animation: recolorSpin .7s linear infinite; display: inline-block; }
-      .recolor-suggest { transition: transform 80ms ease, box-shadow 120ms ease; }
-      .recolor-suggest:hover { box-shadow: 0 10px 18px rgba(0,0,0,.12); }
-      .recolor-suggest:active { transform: translateY(1px) scale(.99); }
-      .recolor-seg { display:inline-flex; border:1px solid rgba(0,0,0,.18); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.88); }
-      .recolor-seg button { border:0; background:transparent; padding:10px 12px; font-weight:900; cursor:pointer; font-size:12px; }
-      .recolor-seg button.active { background:white; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+      .pbn-recolor-fab{position:fixed;left:18px;top:18px;z-index:2147483647;
+        padding:12px 14px;border-radius:14px;border:1px solid rgba(0,0,0,.18);
+        background:rgba(255,255,255,.94);backdrop-filter:blur(8px);
+        box-shadow:0 16px 42px rgba(0,0,0,.18);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+        font-weight:900;cursor:pointer;display:flex;align-items:center;gap:10px;}
+      .pbn-recolor-fab small{font-weight:900;opacity:.65}
+      .pbn-recolor-fab[disabled]{opacity:.55;cursor:not-allowed}
+      .pbn-recolor-overlay{position:fixed;inset:0;background:rgba(0,0,0,.30);z-index:2147483647;overflow:auto;padding:22px;}
+      .pbn-recolor-card{max-width:1250px;margin:0 auto;background:rgba(255,255,255,.98);border:1px solid rgba(0,0,0,.14);
+        border-radius:18px;box-shadow:0 24px 90px rgba(0,0,0,.26);padding:14px 14px 18px;}
+      .pbn-recolor-topbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+      .pbn-recolor-title{display:flex;flex-direction:column;gap:2px;}
+      .pbn-recolor-title .v{font-size:12px;font-weight:1000;color:rgba(220,38,38,.95);}
+      .pbn-recolor-title .t{font-size:14px;font-weight:1000;}
+      .pbn-recolor-btn{padding:10px 14px;border-radius:12px;border:1px solid rgba(0,0,0,.20);background:white;cursor:pointer;font-weight:900;}
+      .pbn-recolor-btn:active{transform:translateY(1px) scale(.99);}
+      .pbn-recolor-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;}
+      .pbn-panel{border:1px solid rgba(0,0,0,.12);border-radius:14px;padding:10px;background:white;}
+      .pbn-panel h3{margin:0 0 8px 0;font-size:13px;font-weight:1000;}
+      .pbn-viewport{border:1px solid rgba(0,0,0,.10);border-radius:12px;overflow:hidden;background:white;}
+      .pbn-row{display:grid;grid-template-columns:120px 1fr 1fr 170px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(0,0,0,.06);}
+      .pbn-row:last-child{border-bottom:none;}
+      .sw{width:100%;height:38px;border-radius:10px;border:1px solid rgba(0,0,0,.14);display:flex;align-items:center;justify-content:center;font-weight:1000;font-size:12px;position:relative;overflow:hidden;}
+      .sw .tag{position:absolute;left:6px;top:6px;font-size:11px;font-weight:1000;background:rgba(255,255,255,.90);border:1px solid rgba(0,0,0,.12);padding:2px 6px;border-radius:999px;}
+      .pbn-rename{width:100%;padding:10px 10px;border-radius:10px;border:1px solid rgba(0,0,0,.18);font-weight:900;}
+      .pbn-suggest{padding:10px 12px;border-radius:10px;border:1px solid rgba(0,0,0,.18);background:rgba(0,0,0,.04);cursor:pointer;font-weight:1000;}
+      .seg{display:inline-flex;border:1px solid rgba(0,0,0,.18);border-radius:12px;overflow:hidden;background:rgba(255,255,255,.88);}
+      .seg button{border:0;background:transparent;padding:10px 12px;font-weight:1000;cursor:pointer;font-size:12px;}
+      .seg button.active{background:white;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08);}
+      .picker{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:6px;max-height:380px;overflow:auto;padding:6px;border:1px solid rgba(0,0,0,.10);border-radius:12px;background:rgba(0,0,0,.02);}
+      .tile{height:40px;border-radius:10px;border:1px solid rgba(0,0,0,.16);cursor:pointer;position:relative;overflow:hidden;}
+      .tile .x{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:1200;font-size:22px;color:rgba(0,0,0,.60);opacity:0;pointer-events:none;}
+      .tile.used .x{opacity:1;}
+      .foot{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px;}
+      .note{font-size:12px;color:rgba(0,0,0,.65);}
+      .warn{padding:10px 12px;border-radius:12px;border:1px solid rgba(220,38,38,.25);background:rgba(220,38,38,.06);color:rgba(0,0,0,.80);font-weight:900;}
+      .slider{display:flex;align-items:center;gap:10px;}
+      .slider input[type="range"]{width:220px;}
     `;
     document.head.appendChild(st);
   }
-  function enhanceButton(btn) {
-    ensureUiStyle();
-    btn.classList.add("recolor-btn");
-    btn.addEventListener("pointerdown", () => btn.classList.add("is-pressed"));
-    const up = () => btn.classList.remove("is-pressed");
-    btn.addEventListener("pointerup", up);
-    btn.addEventListener("pointercancel", up);
-    btn.addEventListener("mouseleave", up);
-  }
-  function setButtonLoading(btn, on) {
-    ensureUiStyle();
-    if (on) {
-      btn.classList.add("is-loading");
-      btn.disabled = true;
-      if (!btn._spinner) {
-        const sp = document.createElement("span");
-        sp.className = "recolor-spinner";
-        sp.style.marginLeft = "10px";
-        btn._spinner = sp;
-        btn.appendChild(sp);
-      }
-    } else {
-      btn.classList.remove("is-loading");
-      btn.disabled = false;
-      if (btn._spinner) { btn._spinner.remove(); btn._spinner = null; }
+
+  // ============================================================
+  // SVG helpers
+  // ============================================================
+  function ensureViewBox(svg) {
+    if (!svg || svg.tagName.toLowerCase() !== "svg") return;
+    if (svg.getAttribute("viewBox")) return;
+
+    const w = parseFloat(svg.getAttribute("width"));
+    const h = parseFloat(svg.getAttribute("height"));
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+      svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+      return;
     }
+    try {
+      const bb = svg.getBBox();
+      if (bb && bb.width > 0 && bb.height > 0) svg.setAttribute("viewBox", `0 0 ${bb.width} ${bb.height}`);
+    } catch (_) {}
   }
 
-  // ---------- Color helpers ----------
-  function rgbToHex(rgb) {
-    const m = (rgb || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
-    if (!m) return null;
-    const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
-    const to2 = (n) => n.toString(16).padStart(2, "0");
-    return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
-  }
-  function textColorForBg(hex) {
-    const h = (hex || "").replace("#", "");
-    if (h.length !== 6) return "#000";
-    const r = parseInt(h.slice(0, 2), 16);
-    const g = parseInt(h.slice(2, 4), 16);
-    const b = parseInt(h.slice(4, 6), 16);
-    const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    return y > 140 ? "#000" : "#fff";
+  function makePreview(svg) {
+    ensureViewBox(svg);
+    svg.style.display = "block";
+    svg.style.width = "100%";
+    svg.style.height = "auto";
+    svg.style.maxWidth = "100%";
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   }
 
   function getElementFill(el) {
@@ -171,10 +200,306 @@
     return null;
   }
 
-  // =====================================================================
-  //  COLOR SCIENCE ENGINE (ΔE00 + SOFT/HARD suggestion modes)
-  // =====================================================================
+  function rgbToHex(rgb) {
+    const m = (rgb || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (!m) return null;
+    const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
+    const to2 = (n) => n.toString(16).padStart(2, "0");
+    return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
+  }
 
+  function collectFillGroups(svg) {
+    const groups = new Map();
+    const nodes = Array.from(svg.querySelectorAll("*"))
+      .filter((el) => el instanceof SVGElement)
+      .filter((el) => ["path", "polygon", "rect", "circle", "ellipse"].includes(el.tagName.toLowerCase()));
+    for (const el of nodes) {
+      const fill = getElementFill(el);
+      if (!fill) continue;
+      const f = norm(fill);
+      if (!isHex6(f)) continue;
+      if (!groups.has(f)) groups.set(f, []);
+      groups.get(f).push(el);
+    }
+    return groups;
+  }
+
+  function findFinalOutputSvg() {
+    const svgs = Array.from(document.querySelectorAll("svg"));
+    if (!svgs.length) return null;
+    let best = null, bestScore = 0;
+    for (const s of svgs) {
+      const score =
+        s.querySelectorAll("path,polygon,rect,circle,ellipse").length * 2 +
+        s.querySelectorAll("text").length * 3;
+      if (score > bestScore) { bestScore = score; best = s; }
+    }
+    return best;
+  }
+
+  function isGeneratorReady() {
+    // If output svg exists with enough content, consider ready.
+    const s = findFinalOutputSvg();
+    if (!s) return false;
+    const shapes = s.querySelectorAll("path,polygon,rect,circle,ellipse").length;
+    return shapes > 20;
+  }
+
+  // ============================================================
+  // Download helpers
+  // ============================================================
+  function forceDownloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
+    const MAX_SIDE = 20000;
+    const MAX_PIXELS = 220e6;
+
+    ensureViewBox(svgEl);
+
+    const vb = svgEl.getAttribute("viewBox");
+    let baseW = 1600, baseH = 1600;
+    if (vb) {
+      const p = vb.split(/\s+/).map(Number);
+      if (p.length === 4 && p[2] > 0 && p[3] > 0) { baseW = p[2]; baseH = p[3]; }
+    }
+
+    let outW = Math.round(baseW * scale);
+    let outH = Math.round(baseH * scale);
+
+    if (outW > MAX_SIDE || outH > MAX_SIDE) {
+      const s = Math.min(MAX_SIDE / outW, MAX_SIDE / outH);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
+    const pixels = outW * outH;
+    if (pixels > MAX_PIXELS) {
+      const s = Math.sqrt(MAX_PIXELS / pixels);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
+
+    const svgText = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+
+    // Prefer createImageBitmap
+    try {
+      const bitmap = await createImageBitmap(svgBlob);
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
+
+      const ctx = canvas.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(bitmap, 0, 0, outW, outH);
+
+      const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
+      if (pngBlob) { forceDownloadBlob(pngBlob, filename); return; }
+    } catch (_) {}
+
+    // Fallback via img
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.decoding = "async";
+    img.crossOrigin = "anonymous";
+
+    await new Promise((res, rej) => {
+      img.onload = () => res();
+      img.onerror = (e) => rej(e);
+      img.src = url;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = outW;
+    canvas.height = outH;
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outW, outH);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, 0, 0, outW, outH);
+
+    URL.revokeObjectURL(url);
+
+    const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
+    if (pngBlob) { forceDownloadBlob(pngBlob, filename); }
+  }
+
+  // ============================================================
+  // TEXT COLOR FIX:
+  // - Capture original text fill (computed) once into data-orig-fill
+  // - Slider controls opacity only (never forces black)
+  // ============================================================
+  function captureOriginalTextFills(svg) {
+    const texts = Array.from(svg.querySelectorAll("text"));
+    for (const t of texts) {
+      if (t.getAttribute("data-orig-fill")) continue;
+      let fill = t.getAttribute("fill");
+      if (!fill || fill === "none" || fill === "transparent") {
+        try {
+          const cs = window.getComputedStyle(t);
+          fill = cs && cs.fill ? cs.fill : "";
+        } catch (_) {}
+      }
+      let hex = "";
+      const v = (fill || "").toString().trim();
+      if (v.startsWith("#") && v.length === 7) hex = v.toLowerCase();
+      else if (v.toLowerCase().startsWith("rgb")) hex = rgbToHex(v) || "";
+      if (!hex) hex = "#000000"; // ultimate fallback
+      t.setAttribute("data-orig-fill", hex);
+    }
+  }
+
+  function applyTextOpacity(svg, opacity01) {
+    const o = clamp(opacity01, 0, 1);
+    const texts = Array.from(svg.querySelectorAll("text"));
+    for (const t of texts) {
+      // keep original fill
+      const hex = t.getAttribute("data-orig-fill") || "#000000";
+      t.setAttribute("fill", hex);
+      t.setAttribute("fill-opacity", String(o));
+    }
+  }
+
+  // ============================================================
+  // Border / fill toggles (optional)
+  // ============================================================
+  function ensureSvgStyle(svg, id) {
+    let style = svg.querySelector(`#${id}`);
+    if (style) return style;
+    style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    style.setAttribute("id", id);
+    svg.insertBefore(style, svg.firstChild);
+    return style;
+  }
+
+  function setBorders(svg, on) {
+    const style = ensureSvgStyle(svg, "pbn-recolor-borders");
+    style.textContent = on ? "" : `
+      [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] { stroke-opacity: 0 !important; }
+      [stroke][fill="transparent"], path[stroke][fill="transparent"] { stroke-opacity: 0 !important; }
+    `;
+  }
+
+  function setShapeFills(svg, on) {
+    const style = ensureSvgStyle(svg, "pbn-recolor-fills");
+    style.textContent = on ? "" : `path, polygon, rect, circle, ellipse { fill: none !important; }`;
+  }
+
+  // ============================================================
+  // Tag extraction (best-effort):
+  // - Legend rect+text
+  // - Proximity to region numbers
+  // ============================================================
+  function isTagLike(t) { return /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim()); }
+
+  function buildTagByHexFromSvgLegend(svg) {
+    const map = {};
+    if (!svg) return map;
+
+    const rects = Array.from(svg.querySelectorAll("rect")).filter((r) => {
+      const w = parseFloat(r.getAttribute("width") || "0");
+      const h = parseFloat(r.getAttribute("height") || "0");
+      return w > 6 && h > 6 && w <= 160 && h <= 160;
+    });
+
+    for (const rect of rects) {
+      const fill = (rect.getAttribute("fill") || "").trim();
+      let hex = "";
+      if (fill.startsWith("#") && fill.length === 7) hex = fill.toLowerCase();
+      else if (fill.toLowerCase().startsWith("rgb")) hex = rgbToHex(fill) || "";
+      if (!hex) continue;
+
+      const parent = rect.parentElement;
+      if (!parent) continue;
+
+      const kids = Array.from(parent.children);
+      const idx = kids.indexOf(rect);
+      if (idx === -1) continue;
+
+      const near = kids.slice(idx + 1, idx + 6).find(
+        (n) => n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
+      );
+
+      if (near) {
+        const tag = (near.textContent || "").trim();
+        if (tag && isTagLike(tag) && !map[hex]) map[hex] = tag;
+      }
+    }
+    return map;
+  }
+
+  function buildTagByHexFromProximity(svg, fillGroups) {
+    const map = {};
+    if (!svg || !fillGroups) return map;
+
+    const texts = Array.from(svg.querySelectorAll("text"))
+      .map((t) => {
+        const tag = (t.textContent || "").toString().trim();
+        if (!tag || !isTagLike(tag)) return null;
+        try {
+          const bb = t.getBBox();
+          return { tag, cx: bb.x + bb.width / 2, cy: bb.y + bb.height / 2 };
+        } catch (_) { return null; }
+      })
+      .filter(Boolean);
+
+    if (!texts.length) return map;
+
+    for (const [hex, nodes] of fillGroups.entries()) {
+      let sumX = 0, sumY = 0, count = 0;
+      const sample = nodes.slice(0, 50);
+      for (const el of sample) {
+        try {
+          const bb = el.getBBox();
+          sumX += bb.x + bb.width / 2;
+          sumY += bb.y + bb.height / 2;
+          count++;
+        } catch (_) {}
+      }
+      if (!count) continue;
+      const cx = sumX / count;
+      const cy = sumY / count;
+
+      let best = null, bestD = Infinity;
+      for (const t of texts) {
+        const dx = t.cx - cx;
+        const dy = t.cy - cy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      if (best && !map[hex]) map[hex] = best.tag;
+    }
+    return map;
+  }
+
+  function cmpTagAsc(a, b) {
+    const ta = (a || "").toString().trim();
+    const tb = (b || "").toString().trim();
+    const na = /^-?\d+(\.\d+)?$/.test(ta) ? Number(ta) : null;
+    const nb = /^-?\d+(\.\d+)?$/.test(tb) ? Number(tb) : null;
+    if (na !== null && nb !== null) return na - nb;
+    if (na !== null && nb === null) return -1;
+    if (na === null && nb !== null) return 1;
+    return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
+  }
+
+  // ============================================================
+  // COLOR SCIENCE — REQUIRED FUNCTIONS
+  // ============================================================
   function srgbToLinear(u) { return u <= 0.04045 ? u / 12.92 : Math.pow((u + 0.055) / 1.055, 2.4); }
   function rgb01ToXyzD65(r, g, b) {
     const R = srgbToLinear(r), G = srgbToLinear(g), B = srgbToLinear(b);
@@ -203,8 +528,10 @@
     const C = Math.sqrt(lab.a * lab.a + lab.b * lab.b);
     let hDeg = (Math.atan2(lab.b, lab.a) * 180) / Math.PI;
     if (hDeg < 0) hDeg += 360;
-    return { L: lab.L, a: lab.a, b: lab.b, C, h: hDeg };
+    return { L: lab.L, a: lab.a, b: lab.b, C, h: hDeg, lab };
   }
+
+  // ΔE00 CIEDE2000
   function deltaE00(lab1, lab2) {
     const L1 = lab1.L, a1 = lab1.a, b1 = lab1.b;
     const L2 = lab2.L, a2 = lab2.a, b2 = lab2.b;
@@ -274,37 +601,30 @@
     );
   }
 
-  // ================================================================
-  // REQUIRED DELIVERY FUNCTIONS (as requested)
-  // ================================================================
-
-  // 0) Precompute palette cache (once)
-  function computePaletteCache(paletteItemsOrHexes) {
-    const items = Array.isArray(paletteItemsOrHexes)
-      ? paletteItemsOrHexes.map((x) => (typeof x === "string" ? { hex: x, tag: "" } : x))
-      : [];
+  // REQUIRED: computePaletteCache()
+  function computePaletteCache() {
+    const items = PALETTE_ITEMS.length
+      ? PALETTE_ITEMS.map(x => ({ tag: (x.tag || "").toString().trim(), hex: norm(x.hex) }))
+      : PALETTE_HEXES.map(h => ({ tag: "", hex: norm(h) }));
 
     const cache = [];
     for (let i = 0; i < items.length; i++) {
-      const hex = norm(items[i].hex);
+      const hex = items[i].hex;
       if (!isHex6(hex)) continue;
       const lab = hexToLab(hex);
       if (!lab) continue;
       cache.push({
         idx: i,
         hex,
-        tag: (items[i].tag || "").toString().trim(),
+        tag: items[i].tag,
         L: lab.L, a: lab.a, b: lab.b, C: lab.C, h: lab.h,
-        lab,
+        lab: { L: lab.L, a: lab.a, b: lab.b }
       });
     }
     return cache;
   }
 
-  // 2) Top-K candidates per tag with scoreBase and highlight/shadow filtering
-  // scoreBase = ΔE00 + darkPenalty + neutralPenalty
-  // darkPenalty = wDark * max(0, (Lo - Lp) - 4)^2
-  // neutralPenalty = (C_orig < 6) ? wNeu * max(0, C_pal - C_orig) : 0
+  // REQUIRED: computeTopKCandidates(tags, palette, params)
   function computeTopKCandidates(tags, paletteCache, params) {
     const K = params.K ?? 10;
     const wDark = params.wDark ?? 0.04;
@@ -320,8 +640,8 @@
       const labO = t.lab;
 
       const scores = new Float64Array(paletteCache.length);
-
       const raw = [];
+
       for (let p = 0; p < paletteCache.length; p++) {
         const pal = paletteCache[p];
         const dE = deltaE00(labO, pal.lab);
@@ -334,47 +654,39 @@
         const scoreBase = dE + darkPenalty + neutralPenalty;
 
         scores[p] = scoreBase;
-
         raw.push({
           palIdx: p,
           hex: pal.hex,
           tag: pal.tag,
-          L: pal.L, C: pal.C, h: pal.h,
-          dE,
-          darkPenalty,
-          neutralPenalty,
-          scoreBase,
+          L: pal.L,
+          C: pal.C,
+          scoreBase
         });
       }
 
-      // Highlight/shadow filters
+      // Highlight/shadow filters:
       let filtered = raw;
       if (Lo > 75) {
-        const f = raw.filter((c) => c.L >= 65);
-        if (f.length >= Math.min(K, 5)) filtered = f; // only apply if enough candidates survive
+        const f = raw.filter(c => c.L >= 65);
+        if (f.length >= Math.min(K, 5)) filtered = f;
       } else if (Lo < 25) {
-        const f = raw.filter((c) => c.L <= 40);
+        const f = raw.filter(c => c.L <= 40);
         if (f.length >= Math.min(K, 5)) filtered = f;
       }
 
       filtered.sort((a, b) => a.scoreBase - b.scoreBase || a.palIdx - b.palIdx);
       topK[i] = filtered.slice(0, K);
-
       allScores[i] = scores;
     }
-
     return { topK, allScores };
   }
 
-  // 3) Neighbor	bt/context:
-  // Preferred: proximity graph from SVG geometry (bbox distances between color groups)
-  // Fallback: KNN in Lab (K=3)
+  // REQUIRED: buildNeighborGraphFromSVG(...) + fallback KNN
   function buildNeighborGraphFromSVG(svgEl, rawEntries, tags, params) {
     const K = params.ctxK ?? 3;
     const n = tags.length;
     const graph = Array.from({ length: n }, () => []);
 
-    // Helper: bbox union for a color group
     function groupBBox(nodes) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       let ok = false;
@@ -391,19 +703,15 @@
         } catch (_) {}
       }
       if (!ok) return null;
-      const cx = (minX + maxX) / 2;
-      const cy = (minY + maxY) / 2;
-      return { minX, minY, maxX, maxY, cx, cy };
+      return { minX, minY, maxX, maxY };
     }
 
-    // bbox distance (0 if overlapping)
     function bboxDist(a, b) {
       const dx = (a.maxX < b.minX) ? (b.minX - a.maxX) : (b.maxX < a.minX) ? (a.minX - b.maxX) : 0;
       const dy = (a.maxY < b.minY) ? (b.minY - a.maxY) : (b.maxY < a.minY) ? (a.minY - b.maxY) : 0;
       return Math.sqrt(dx * dx + dy * dy);
     }
 
-    // Precompute bboxes
     const bboxes = new Array(n);
     let anyBBox = false;
     for (let i = 0; i < n; i++) {
@@ -413,7 +721,7 @@
       if (bb) anyBBox = true;
     }
 
-    // If bbox is available: build proximity KNN by bbox distance
+    // Preferred: geometry proximity
     if (anyBBox) {
       for (let i = 0; i < n; i++) {
         if (!bboxes[i]) continue;
@@ -421,42 +729,30 @@
         for (let j = 0; j < n; j++) {
           if (i === j) continue;
           if (!bboxes[j]) continue;
-          const dGeom = bboxDist(bboxes[i], bboxes[j]);
-          arr.push({ j, dGeom });
+          arr.push({ j, d: bboxDist(bboxes[i], bboxes[j]) });
         }
-        arr.sort((a, b) => a.dGeom - b.dGeom);
+        arr.sort((a, b) => a.d - b.d);
         const knn = arr.slice(0, Math.max(0, K));
         for (const e of knn) {
-          const dOrig = deltaE00(tags[i].lab, tags[e.j].lab);
-          graph[i].push({ j: e.j, dOrig });
+          graph[i].push({ j: e.j, dOrig: deltaE00(tags[i].lab, tags[e.j].lab) });
         }
       }
-
-      // If too sparse (some nodes have no neighbors), fill with Lab KNN fallback for those nodes
+      // Fill missing nodes using Lab KNN fallback
       for (let i = 0; i < n; i++) {
         if (graph[i].length) continue;
         const arr = [];
-        for (let j = 0; j < n; j++) {
-          if (i === j) continue;
-          const d = deltaE00(tags[i].lab, tags[j].lab);
-          arr.push({ j, d });
-        }
+        for (let j = 0; j < n; j++) if (i !== j) arr.push({ j, d: deltaE00(tags[i].lab, tags[j].lab) });
         arr.sort((a, b) => a.d - b.d);
         const knn = arr.slice(0, Math.max(0, K));
         for (const e of knn) graph[i].push({ j: e.j, dOrig: e.d });
       }
-
       return graph;
     }
 
-    // Fallback: Lab KNN (K=3)
+    // Fallback: Lab KNN
     for (let i = 0; i < n; i++) {
       const arr = [];
-      for (let j = 0; j < n; j++) {
-        if (i === j) continue;
-        const d = deltaE00(tags[i].lab, tags[j].lab);
-        arr.push({ j, d });
-      }
+      for (let j = 0; j < n; j++) if (i !== j) arr.push({ j, d: deltaE00(tags[i].lab, tags[j].lab) });
       arr.sort((a, b) => a.d - b.d);
       const knn = arr.slice(0, Math.max(0, K));
       for (const e of knn) graph[i].push({ j: e.j, dOrig: e.d });
@@ -464,9 +760,9 @@
     return graph;
   }
 
-  // 4) Mode OFF (Closest): choose candidate #1 per tag by scoreBase (repeats allowed)
+  // REQUIRED: suggestClosest(...)
   function suggestClosest(tags, paletteCache, allScores) {
-    const mapping = new Map();
+    const mapping = new Array(tags.length);
     for (let i = 0; i < tags.length; i++) {
       const scores = allScores[i];
       let best = 0;
@@ -475,13 +771,12 @@
         const v = scores[p];
         if (v < bestV) { bestV = v; best = p; }
       }
-      const pal = paletteCache[best];
-      mapping.set(tags[i].hex, { hex: pal.hex, tag: pal.tag, palIdx: best, mode: "OFF" });
+      mapping[i] = best;
     }
     return mapping;
   }
 
-  // Hungarian for rectangular n<=m (min cost). Returns array assign[i]=j
+  // Hungarian algorithm for n<=m
   function hungarianAssign(costMatrix) {
     const n = costMatrix.length;
     const m = costMatrix[0].length;
@@ -503,12 +798,14 @@
         const i0 = p[j0];
         let delta = Infinity;
         let j1 = 0;
+
         for (let j = 1; j <= m; j++) {
           if (used[j]) continue;
           const cur = costMatrix[i0 - 1][j - 1] - u[i0] - v[j];
           if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
           if (minv[j] < delta) { delta = minv[j]; j1 = j; }
         }
+
         for (let j = 0; j <= m; j++) {
           if (used[j]) { u[p[j]] += delta; v[j] -= delta; }
           else { minv[j] -= delta; }
@@ -528,71 +825,63 @@
     return Array.from(assign);
   }
 
-  // 5) Mode HARD (experimental): Hungarian 1:1 over scoreBase, no repeats.
-  // If N > 167: assign 1:1 to top 167 by weight, rest closest.
-  function suggestHardHungarian(tags, paletteCache, allScores, params) {
+  // REQUIRED: suggestHardHungarian(...)
+  function suggestHardHungarian(tags, paletteCache, allScores) {
     const m = paletteCache.length;
     const N = tags.length;
 
-    // Select active set
     let activeIdx = tags.map((_, i) => i);
     if (N > m) {
       activeIdx = tags
         .map((t, i) => ({ i, w: t.weight || 1 }))
         .sort((a, b) => b.w - a.w || a.i - b.i)
         .slice(0, m)
-        .map((x) => x.i);
+        .map(x => x.i);
     }
 
-    const active = activeIdx.map((i) => tags[i]);
-
-    // Build cost matrix for active: n<=m, each row is scoreBase across all palette
-    const cost = active.map((t, k) => {
-      const scores = allScores[activeIdx[k]];
-      // Copy into a Float64Array for speed
+    const n = activeIdx.length;
+    const cost = new Array(n);
+    for (let r = 0; r < n; r++) {
+      const i = activeIdx[r];
+      const scores = allScores[i];
       const row = new Float64Array(m);
       for (let j = 0; j < m; j++) row[j] = scores[j];
-      return row;
-    });
-
-    const assign = hungarianAssign(cost);
-
-    const used = new Set(assign);
-
-    const mapping = new Map();
-
-    // active unique assignments
-    for (let k = 0; k < active.length; k++) {
-      const i = activeIdx[k];
-      const j = assign[k];
-      const pal = paletteCache[j];
-      mapping.set(tags[i].hex, { hex: pal.hex, tag: pal.tag, palIdx: j, mode: "HARD" });
+      cost[r] = row;
     }
 
-    // remaining tags: closest among USED palette colors
-    function closestAmongUsed(lab) {
-      let bestJ = -1, bestD = Infinity;
-      for (const j of used) {
-        const d = deltaE00(lab, paletteCache[j].lab);
-        if (d < bestD) { bestD = d; bestJ = j; }
-      }
-      return bestJ;
+    const assign = hungarianAssign(cost); // row->pal
+    const finalAssign = new Int32Array(N);
+    finalAssign.fill(-1);
+
+    const used = new Set();
+    for (let r = 0; r < n; r++) {
+      const i = activeIdx[r];
+      const j = assign[r];
+      finalAssign[i] = j;
+      used.add(j);
     }
 
+    // Remaining: closest among used palette (as per spec note)
     if (N > m) {
+      const usedArr = Array.from(used);
       for (let i = 0; i < N; i++) {
-        if (mapping.has(tags[i].hex)) continue;
-        const j = closestAmongUsed(tags[i].lab);
-        const pal = j >= 0 ? paletteCache[j] : null;
-        mapping.set(tags[i].hex, { hex: pal ? pal.hex : "", tag: pal ? pal.tag : "", palIdx: j, mode: "HARD_closestUsed" });
+        if (finalAssign[i] !== -1) continue;
+        let bestJ = usedArr[0] ?? 0;
+        let bestD = Infinity;
+        for (const j of usedArr) {
+          const d = deltaE00(tags[i].lab, paletteCache[j].lab);
+          if (d < bestD) { bestD = d; bestJ = j; }
+        }
+        finalAssign[i] = bestJ;
       }
+    } else {
+      // If N<=m, any unassigned shouldn't happen
+      for (let i = 0; i < N; i++) if (finalAssign[i] === -1) finalAssign[i] = 0;
     }
-
-    return mapping;
+    return Array.from(finalAssign);
   }
 
-  // 6) Mode SOFT (RECOMMENDED): iterative optimization with reuse+context penalties.
-  // E = Σ scoreBase(i, ai) + wCtx Σ_edges |dOrig - dPal(ai,aj)| + wReuse Σ_c count[c]^2
+  // REQUIRED: suggestSoftOptimize(...)
   function suggestSoftOptimize(tags, paletteCache, topK, neighborGraph, params) {
     const wCtx = params.wCtx ?? 0.25;
     const wReuse = params.wReuse ?? 0.8;
@@ -601,10 +890,9 @@
     const n = tags.length;
     const m = paletteCache.length;
 
-    // Precompute palette-palette ΔE00 matrix once (167x167)
+    // Precompute palette ΔE matrix
     const palDE = Array.from({ length: m }, () => new Float64Array(m));
     for (let i = 0; i < m; i++) {
-      palDE[i][i] = 0;
       for (let j = i + 1; j < m; j++) {
         const d = deltaE00(paletteCache[i].lab, paletteCache[j].lab);
         palDE[i][j] = d;
@@ -612,7 +900,6 @@
       }
     }
 
-    // init assign to candidate #1
     const assign = new Int32Array(n);
     const baseScore = new Float64Array(n);
     const counts = new Int32Array(m);
@@ -624,17 +911,13 @@
       counts[c0.palIdx] += 1;
     }
 
-    // Helper: reuse delta when moving i from old->new
     function deltaReuse(oldIdx, newIdx) {
       if (oldIdx === newIdx) return 0;
       const cOld = counts[oldIdx];
       const cNew = counts[newIdx];
-      // before: cOld^2 + cNew^2
-      // after:  (cOld-1)^2 + (cNew+1)^2
       return wReuse * (((cOld - 1) * (cOld - 1) + (cNew + 1) * (cNew + 1)) - (cOld * cOld + cNew * cNew));
     }
 
-    // Context delta: only incident edges to i
     function deltaCtx(i, oldPal, newPal) {
       if (oldPal === newPal) return 0;
       const edges = neighborGraph[i] || [];
@@ -650,16 +933,14 @@
       return wCtx * d;
     }
 
-    // "Problematic" selection: bias to high base score and high reuse
     function pickProblematic() {
-      // sample a few random indices and pick worst
       let bestI = 0;
       let bestVal = -Infinity;
       const S = Math.min(18, n);
       for (let s = 0; s < S; s++) {
         const i = (Math.random() * n) | 0;
         const ai = assign[i];
-        const reusePressure = counts[ai]; // higher => more repeated
+        const reusePressure = counts[ai];
         const val = baseScore[i] + 0.35 * reusePressure;
         if (val > bestVal) { bestVal = val; bestI = i; }
       }
@@ -684,7 +965,6 @@
         const dBase = cand.scoreBase - oldBase;
         const dC = deltaCtx(i, oldPal, newPal);
         const dR = deltaReuse(oldPal, newPal);
-
         const dTotal = dBase + dC + dR;
 
         if (dTotal < bestDelta) {
@@ -695,7 +975,6 @@
       }
 
       if (bestNew !== oldPal) {
-        // apply
         counts[oldPal] -= 1;
         counts[bestNew] += 1;
         assign[i] = bestNew;
@@ -703,629 +982,559 @@
       }
     }
 
-    // Build mapping
-    const mapping = new Map();
-    for (let i = 0; i < n; i++) {
-      const j = assign[i];
-      const pal = paletteCache[j];
-      mapping.set(tags[i].hex, { hex: pal.hex, tag: pal.tag, palIdx: j, mode: "SOFT" });
-    }
-    return mapping;
+    return Array.from(assign);
   }
 
-  // Unified entry: suggestMapping(mode)
+  // REQUIRED: suggestMapping(mode)
   function suggestMapping(mode, ctx) {
     if (mode === "OFF") return suggestClosest(ctx.tags, ctx.paletteCache, ctx.allScores);
-    if (mode === "HARD") return suggestHardHungarian(ctx.tags, ctx.paletteCache, ctx.allScores, ctx.params);
+    if (mode === "HARD") return suggestHardHungarian(ctx.tags, ctx.paletteCache, ctx.allScores);
     if (mode === "SOFT") return suggestSoftOptimize(ctx.tags, ctx.paletteCache, ctx.topK, ctx.neighborGraph, ctx.params);
     return suggestClosest(ctx.tags, ctx.paletteCache, ctx.allScores);
   }
 
-  // =====================================================================
-  // SVG sizing / selection
-  // =====================================================================
-
-  function ensureViewBox(svg) {
-    if (!svg || svg.tagName.toLowerCase() !== "svg") return;
-    if (svg.getAttribute("viewBox")) return;
-
-    const w = parseFloat(svg.getAttribute("width"));
-    const h = parseFloat(svg.getAttribute("height"));
-    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) { svg.setAttribute("viewBox", `0 0 ${w} ${h}`); return; }
-
-    try {
-      const bb = svg.getBBox();
-      if (bb && bb.width > 0 && bb.height > 0) svg.setAttribute("viewBox", `0 0 ${bb.width} ${bb.height}`);
-    } catch (_) {}
-  }
-  function makePreview(svg) {
-    ensureViewBox(svg);
-    svg.style.display = "block";
-    svg.style.width = "100%";
-    svg.style.height = "auto";
-    svg.style.maxWidth = "100%";
-    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-  }
-  function getSvgSize(svgEl) {
-    ensureViewBox(svgEl);
-    const vb = svgEl.getAttribute("viewBox");
-    if (vb) {
-      const parts = vb.split(/\s+/).map(Number);
-      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) return { w: parts[2], h: parts[3] };
-    }
-    const wAttr = parseFloat(svgEl.getAttribute("width") || "0");
-    const hAttr = parseFloat(svgEl.getAttribute("height") || "0");
-    if (wAttr > 0 && hAttr > 0) return { w: wAttr, h: hAttr };
-    try {
-      const bb = svgEl.getBBox();
-      if (bb && bb.width > 0 && bb.height > 0) return { w: bb.width, h: bb.height };
-    } catch (_) {}
-    return { w: 1600, h: 1600 };
-  }
-
-  function findFinalOutputSvgLight() {
-    const svgs = Array.from(document.querySelectorAll("svg"));
-    if (!svgs.length) return null;
-    let best = null, bestScore = 0;
-    for (const s of svgs) {
-      const score =
-        s.querySelectorAll("path,polygon,rect,circle,ellipse").length * 2 +
-        s.querySelectorAll("text").length * 3;
-      if (score > bestScore) { bestScore = score; best = s; }
-    }
-    return best;
-  }
-
-  function findDownloadButtonsRow() {
-    const btns = Array.from(document.querySelectorAll("button, a"));
-    const hits = btns.filter((b) => {
-      const t = norm(b.textContent);
-      return t.includes("download svg") || t.includes("download png") || t.includes("download palette");
-    });
-    if (!hits.length) return null;
-    for (const b of hits) {
-      const p = b.parentElement;
-      if (!p) continue;
-      const txt = norm(p.textContent);
-      if (txt.includes("download svg") && (txt.includes("download png") || txt.includes("download palette"))) return p;
-    }
-    return hits[0].parentElement || null;
-  }
-  function isGeneratorReady() { return !!findDownloadButtonsRow() && !!findFinalOutputSvgLight(); }
-
-  // ---------- Group fills ----------
-  function collectFillGroups(svg) {
-    const groups = new Map();
-    const nodes = Array.from(svg.querySelectorAll("*"))
-      .filter((el) => el instanceof SVGElement)
-      .filter((el) => ["path", "polygon", "rect", "circle", "ellipse"].includes(el.tagName.toLowerCase()));
-    for (const el of nodes) {
-      const fill = getElementFill(el);
-      if (!fill) continue;
-      const f = norm(fill);
-      if (!isHex6(f)) continue;
-      if (!groups.has(f)) groups.set(f, []);
-      groups.get(f).push(el);
-    }
-    return groups;
-  }
-
-  // ---------- Download helpers ----------
-  function forceDownloadBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.rel = "noopener";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-  }
-  function downloadText(filename, text, mime = "text/plain") {
-    const blob = new Blob([text], { type: mime });
-    forceDownloadBlob(blob, filename);
-  }
-
-  async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
-    const MAX_SIDE = 20000;
-    const MAX_PIXELS = 220e6;
-
-    const { w: baseW, h: baseH } = getSvgSize(svgEl);
-
-    let outW = Math.round(baseW * scale);
-    let outH = Math.round(baseH * scale);
-
-    if (outW > MAX_SIDE || outH > MAX_SIDE) {
-      const s = Math.min(MAX_SIDE / outW, MAX_SIDE / outH);
-      outW = Math.max(1, Math.round(outW * s));
-      outH = Math.max(1, Math.round(outH * s));
-    }
-
-    const pixels = outW * outH;
-    if (pixels > MAX_PIXELS) {
-      const s = Math.sqrt(MAX_PIXELS / pixels);
-      outW = Math.max(1, Math.round(outW * s));
-      outH = Math.max(1, Math.round(outH * s));
-    }
-
-    const svgText = new XMLSerializer().serializeToString(svgEl);
-    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
-
-    try {
-      const bitmap = await createImageBitmap(svgBlob);
-      const canvas = document.createElement("canvas");
-      canvas.width = outW;
-      canvas.height = outH;
-
-      const ctx = canvas.getContext("2d", { alpha: false });
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, outW, outH);
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(bitmap, 0, 0, outW, outH);
-
-      const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
-      if (pngBlob) { forceDownloadBlob(pngBlob, filename); return;_toggle }
-    } catch (_) {}
-
-    // fallback via <img>
-    const url = URL.createObjectURL(svgBlob);
-    const img = new Image();
-    img.decoding = "async";
-    img.crossOrigin = "anonymous";
-
-    await new Promise((res, rej) => {
-      img.onload = () => res();
-      img.onerror = (e) => rej(e);
-      img.src = url;
-    });
-
-    const canvas = document.createElement("canvas");
-    canvas.width = outW;
-    canvas.height = outH;
-
-    const ctx = canvas.getContext("2d", { alpha: false });
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, outW, outH);
-
-    ctx.imageSmoothingEnabled = true;
-    ctx.setTransform(outW / baseW, 0, 0, outH / baseH, 0, 0);
-    ctx.drawImage(img, 0, 0);
-
-    URL.revokeObjectURL(url);
-
-    const pngBlob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png", 1.0));
-    if (pngBlob) { forceDownloadBlob(pngBlob, filename); return; }
-
-    const dataUrl = canvas.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-
-  // ---------- SVG style injection (toggles) ----------
-  function ensureSvgStyle(svg, id) {
-    let style = svg.querySelector(`#${id}`);
-    if (style) return style;
-    style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-    style.setAttribute("id", id);
-    svg.insertBefore(style, svg.firstChild);
-    return style;
-  }
-  function setBorders(svg, on) {
-    const style = ensureSvgStyle(svg, "recolor-borders-style");
-    style.textContent = on ? "" : `
-      [fill="none"][stroke], path[stroke][fill="none"], polyline[stroke], line[stroke] { stroke-opacity: 0 !important; }
-      [stroke][fill="transparent"], path[stroke][fill="transparent"] { stroke-opacity: 0 !important; }
-    `;
-  }
-  function setColorFills(svg, on) {
-    const style = ensureSvgStyle(svg, "recolor-fills-style");
-    style.textContent = on ? "" : `path, polygon, rect, circle, ellipse { fill: none !important; }`;
-  }
-
-  // ---------- UI atoms ----------
-  function makeBadgeCorner(text) {
-    const b = document.createElement("span");
-    b.textContent = text;
-    b.setAttribute("style", `
-      position:absolute !important; left:4px !important; top:4px !important;
-      padding:2px 6px !important; border-radius:999px !important;
-      font-size:11px !important; font-weight:900 !important;
-      background: rgba(255,255,255,.90) !important;
-      border: 1px solid rgba(0,0,0,.12) !important;
-      color: rgba(0,0,0,.85) !important;
-      max-width: calc(100% - 8px) !important;
-      white-space: nowrap !important; overflow:hidden !important; text-overflow: ellipsis !important;
-      pointer-events:none !important; line-height: 1 !important;
-    `.trim());
-    return b;
-  }
-
-  function makeToggleButton(label, initialOn, onChange) {
-    let on = !!initialOn;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.style.cssText = `
-      padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22);
-      background:${on ? "white" : "rgba(0,0,0,.06)"}; cursor:pointer; font-weight:900;
-      display:inline-flex; align-items:center;
-    `;
-    const paint = () => {
-      btn.textContent = `${label}: ${on ? "ON" : "OFF"}`;
-      btn.style.background = on ? "white" : "rgba(0,0,0,.06)";
-    };
-    paint();
-    enhanceButton(btn);
-
-    btn.addEventListener("click", () => { on = !on; paint(); onChange(on); });
-    btn._get = () => on;
-    btn._set = (v) => { on = !!v; paint(); };
-    return btn;
-  }
-
-  function makePickerTileX() {
-    const x = document.createElement("div");
-    x.className = "tile-used-x";
-    x.style.cssText = `
-      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-      font-weight:1000; font-size:22px; color: rgba(0,0,0,.65);
-      text-shadow: 0 1px 0 rgba(255,255,255,.55);
-      pointer-events:none; opacity:0; transition: opacity 120ms ease;
-    `;
-    x.textContent = "✕";
-    return x;
-  }
-
-  function renderGridPicker({ onPick, isUsed }) {
-    const grid = document.createElement("div");
-    grid.style.cssText = `
-      display:grid; grid-template-columns: repeat(10, minmax(0, 1fr));
-      gap: 6px; max-height: 340px; overflow:auto; padding: 6px;
-      border: 1px solid rgba(0,0,0,.10); border-radius: 12px; background: rgba(0,0,0,.02);
-    `;
-
-    const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ tag: "", hex }));
-    const tilesByHex = new Map();
-
-    items.forEach((it) => {
-      const hex = norm(it.hex);
-      const tag = (it.tag || "").toString().trim();
-
-      const tile = document.createElement("button");
-      tile.type = "button";
-      tile.title = tag ? `${tag} — ${hex}` : hex;
-      tile.style.cssText = `
-        height: 40px; border-radius: 10px; border: 1px solid rgba(0,0,0,.16);
-        background: ${hex}; cursor: pointer; position: relative; overflow: hidden;
-      `;
-
-      if (tag) tile.appendChild(makeBadgeCorner(tag));
-      const x = makePickerTileX();
-      tile.appendChild(x);
-
-      tile.addEventListener("click", () => onPick({ hex, tag }));
-      grid.appendChild(tile);
-      tilesByHex.set(hex, tile);
-    });
-
-    function refreshUsedX() {
-      for (const [hex, tile] of tilesByHex.entries()) {
-        const x = tile.querySelector(".tile-used-x");
-        if (!x) continue;
-        x.style.opacity = isUsed(hex) ? "1" : "0";
-      }
-    }
-    refreshUsedX();
-    return { grid, refreshUsedX };
-  }
-
-  // ---------- ORIGINAL TAG MAPPING ----------
-  function buildOriginalTagByHexFromTopSwatches() {
-    const map = {};
-    const candidates = Array.from(document.querySelectorAll("button, div, span"))
-      .filter((el) => el && el.textContent && !el.closest("#recolor-modal") && !el.closest("#recolor-fab"))
-      .filter((el) => {
-        const t = (el.textContent || "").trim();
-        if (!t || !isTagLike(t)) return false;
-        const r = el.getBoundingClientRect();
-        if (r.width < 12 || r.height < 12 || r.width > 90 || r.height > 90) return false;
-        const bg = getComputedStyle(el).backgroundColor;
-        if (!bg || bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return false;
-        return true;
-      });
-
-    for (const el of candidates) {
-      const tag = (el.textContent || "").trim();
-      const bg = getComputedStyle(el).backgroundColor;
-      const hex = rgbToHex(bg);
-      if (hex && !map[hex]) map[hex] = tag;
-    }
-    return map;
-  }
-
-  function buildOriginalTagByHexFromSvgLegend(svg) {
-    const map = {};
-    if (!svg) return map;
-
-    const rects = Array.from(svg.querySelectorAll("rect")).filter((r) => {
-      const w = parseFloat(r.getAttribute("width") || "0");
-      const h = parseFloat(r.getAttribute("height") || "0");
-      return w > 6 && h > 6 && w <= 140 && h <= 140;
-    });
-
-    for (const rect of rects) {
-      const fill = (rect.getAttribute("fill") || "").trim();
-      let hex = "";
-      if (fill.startsWith("#") && fill.length === 7) hex = fill.toLowerCase();
-      else if (fill.startsWith("rgb")) hex = rgbToHex(fill) || "";
-      if (!hex) continue;
-
-      const parent = rect.parentElement;
-      if (!parent) continue;
-
-      const kids = Array.from(parent.children);
-      const idx = kids.indexOf(rect);
-      if (idx === -1) continue;
-
-      const near = kids.slice(idx + 1, idx + 6).find(
-        (n) => n.tagName && n.tagName.toLowerCase() === "text" && (n.textContent || "").trim()
-      );
-
-      if (near) {
-        const tag = (near.textContent || "").trim();
-        if (tag && isTagLike(tag) && !map[hex]) map[hex] = tag;
-      }
-    }
-    return map;
-  }
-
-  function buildOriginalTagByHexFromSvgProximity(svg, fillGroups) {
-    const map = {};
-    if (!svg || !fillGroups || !fillGroups.size) return map;
-
-    const texts = Array.from(svg.querySelectorAll("text"))
-      .map((t) => {
-        const tag = (t.textContent || "").toString().trim();
-        if (!tag || !isTagLike(tag)) return null;
-        let bb;
-        try { bb = t.getBBox(); } catch (_) { return null; }
-        if (!bb) return null;
-        return { tag, cx: bb.x + bb.width / 2, cy: bb.y + bb.height / 2 };
-      })
-      .filter(Boolean);
-
-    if (!texts.length) return map;
-
-    for (const [hex, nodes] of fillGroups.entries()) {
-      let sumX = 0, sumY = 0, count = 0;
-      const sample = nodes.slice(0, 40);
-      for (const el of sample) {
-        let bb;
-        try { bb = el.getBBox(); } catch (_) { continue; }
-        if (!bb) continue;
-        sumX += bb.x + bb.width / 2;
-        sumY += bb.y + bb.height / 2;
-        count++;
-      }
-      if (!count) continue;
-
-      const cx = sumX / count;
-      const cy = sumY / count;
-
-      let best = null, bestD = Infinity;
-      for (const t of texts) {
-        const dx = t.cx - cx;
-        const dy = t.cy - cy;
-        const d = dx * dx + dy * dy;
-        if (d < bestD) { bestD = d; best = t; }
-      }
-      if (best && !map[hex]) map[hex] = best.tag;
-    }
-    return map;
-  }
-
-  function isNumericTag(t) { return /^-?\d+(\.\d+)?$/.test((t || "").toString().trim()); }
-  function cmpTagAsc(a, b) {
-    const ta = (a || "").toString().trim();
-    const tb = (b || "").toString().trim();
-    const na = isNumericTag(ta) ? Number(ta) : null;
-    const nb = isNumericTag(tb) ? Number(tb) : null;
-    if (na !== null && nb !== null) return na - nb;
-    if (na !== null && nb === null) return -1;
-    if (na === null && nb !== null) return 1;
-    return ta.localeCompare(tb, "es", { numeric: true, sensitivity: "base" });
-  }
-
-  // ---------- Modal ----------
-  function openModal() {
-    const existing = document.getElementById("recolor-modal");
-    if (existing) existing.remove();
+  // ============================================================
+  // UI Builder
+  // ============================================================
+  function openModal(originalSvg) {
+    ensureStyle();
 
     const overlay = document.createElement("div");
-    overlay.id = "recolor-modal";
-    overlay.style.cssText = `position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 2147483647; overflow: auto; padding: 22px;`;
+    overlay.className = "pbn-recolor-overlay";
 
     const card = document.createElement("div");
-    card.style.cssText = `
-      max-width: 1200px; margin: 0 auto;
-      background: rgba(255,255,255,.98);
-      border: 1px solid rgba(0,0,0,.14);
-      border-radius: 16px;
-      box-shadow: 0 24px 80px rgba(0,0,0,.25);
-      padding: 14px;
-    `;
+    card.className = "pbn-recolor-card";
 
-    const topbar = document.createElement("div");
-    topbar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    const top = document.createElement("div");
+    top.className = "pbn-recolor-topbar";
 
-    const titleWrap = document.createElement("div");
-    titleWrap.style.cssText = "display:flex; flex-direction:column; gap:2px;";
-    const vBadge = document.createElement("div");
-    vBadge.textContent = ADDON_NAME;
-    vBadge.style.cssText = "font-weight:900; font-size:12px; color: rgba(220,38,38,.95);";
     const title = document.createElement("div");
-    title.style.cssText = "font-weight:900;";
-    title.textContent = `Recoloreo (paleta ${PALETTE.length})`;
-    titleWrap.appendChild(vBadge);
-    titleWrap.appendChild(title);
+    title.className = "pbn-recolor-title";
+    title.innerHTML = `<div class="v">${ADDON_NAME}</div><div class="t">Recolorador (paleta ${PALETTE_HEXES.length || PALETTE_ITEMS.length || 0})</div>`;
 
     const close = document.createElement("button");
-    close.type = "button";
+    close.className = "pbn-recolor-btn";
     close.textContent = "Cerrar";
-    close.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
-    enhanceButton(close);
-    close.addEventListener("click", () => overlay.remove());
+    close.onclick = () => overlay.remove();
 
-    topbar.appendChild(titleWrap);
-    topbar.appendChild(close);
-    card.appendChild(topbar);
+    top.appendChild(title);
+    top.appendChild(close);
+    card.appendChild(top);
 
-    const host = document.createElement("div");
-    host.id = "recolor-host";
-    host.style.cssText = `
-      margin-top: 10px; padding: 14px; border: 1px solid rgba(0,0,0,.12);
-      border-radius: 12px; background: rgba(255,255,255,.96);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    `;
-    card.appendChild(host);
+    const body = document.createElement("div");
+    body.className = "pbn-recolor-grid";
+    card.appendChild(body);
 
     overlay.appendChild(card);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
 
-    document.addEventListener("keydown", function onEsc(e) {
-      if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
-    }, { once: true });
-
     document.body.appendChild(overlay);
-    return host;
+    buildEditor(body, originalSvg);
+
+    return overlay;
   }
 
-  // ---------- Editor ----------
-  function openEditor(originalSvg) {
-    const host = openModal();
+  function buildEditor(host, originalSvg) {
     host.innerHTML = "";
 
-    const sig = svgSignature(originalSvg);
-    const stored = loadStored();
-    const sameDoc = stored && stored.svgSig === sig;
-    if (!sameDoc) writeStored({ svgSig: sig, mappings: {}, ui: {} });
-
-    const header = document.createElement("div");
-    header.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
-    header.innerHTML = `
-      <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
-      <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        Selecciona color original → elige reemplazo / sugerencia → (renombrar) → toggles → descarga
-      </div>
-    `;
-    host.appendChild(header);
-
+    // Clone SVGs
     const originalClone = originalSvg.cloneNode(true);
     const recolorSvg = originalSvg.cloneNode(true);
     makePreview(originalClone);
     makePreview(recolorSvg);
 
-    const previews = document.createElement("div");
-    previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
-    const panel = (title, node) => {
-      const wrap = document.createElement("div");
-      wrap.style.cssText = `border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; overflow: hidden; background: white;`;
-      const h = document.createElement("div");
-      h.textContent = title;
-      h.style.cssText = "font-weight:800; margin-bottom: 8px;";
-      const viewport = document.createElement("div");
-      viewport.style.cssText = `width: 100%; border-radius: 10px; border: 1px solid rgba(0,0,0,.10); background: white; overflow: hidden;`;
-      viewport.appendChild(node);
-      wrap.appendChild(h);
-      wrap.appendChild(viewport);
-      return wrap;
-    };
-    previews.appendChild(panel("Original", originalClone));
-    previews.appendChild(panel("Recoloreada", recolorSvg));
-    host.appendChild(previews);
+    captureOriginalTextFills(recolorSvg); // text fix baseline
 
+    // Left: previews + actions
+    const left = document.createElement("div");
+    left.className = "pbn-panel";
+    left.innerHTML = `<h3>Previews</h3>`;
+    const vwrap = document.createElement("div");
+    vwrap.className = "pbn-viewport";
+    vwrap.style.display = "grid";
+    vwrap.style.gridTemplateColumns = "1fr 1fr";
+    vwrap.style.gap = "0";
+    vwrap.appendChild(originalClone);
+    vwrap.appendChild(recolorSvg);
+    left.appendChild(vwrap);
+
+    // Build rows data
     const fillGroups = collectFillGroups(recolorSvg);
-
-    const topMap = buildOriginalTagByHexFromTopSwatches();
-    const legendMap = buildOriginalTagByHexFromSvgLegend(originalSvg);
-    const proxMap = buildOriginalTagByHexFromSvgProximity(recolorSvg, fillGroups);
-    const tagByHex = { ...proxMap, ...legendMap, ...topMap };
+    const legendMap = buildTagByHexFromSvgLegend(originalSvg);
+    const proxMap = buildTagByHexFromProximity(originalSvg, fillGroups);
+    const tagByHex = { ...proxMap, ...legendMap };
 
     const rawEntries = Array.from(fillGroups.entries()).map(([oldHex, nodes]) => {
       const hex = norm(oldHex);
-      const tagOriginal = tagByHex[hex] || "";
-      return { oldHex: hex, nodes, tagOriginal };
+      // weight estimate (bbox area sum, sampled)
+      let w = 0;
+      const sample = nodes.slice(0, 60);
+      for (const el of sample) {
+        try {
+          const bb = el.getBBox();
+          w += Math.max(0, bb.width) * Math.max(0, bb.height);
+        } catch (_) {}
+      }
+      return { oldHex: hex, nodes, tag: tagByHex[hex] || "", weight: w || nodes.length };
     });
 
     rawEntries.sort((a, b) => {
-      const ta = a.tagOriginal || "";
-      const tb = b.tagOriginal || "";
-      const hasA = !!ta;
-      const hasB = !!tb;
-      if (hasA && hasB) return cmpTagAsc(ta, tb);
-      if (hasA && !hasB) return -1;
-      if (!hasA && hasB) return 1;
+      const ta = a.tag || "";
+      const tb = b.tag || "";
+      const ha = !!ta;
+      const hb = !!tb;
+      if (ha && hb) return cmpTagAsc(ta, tb);
+      if (ha && !hb) return -1;
+      if (!ha && hb) return 1;
       return a.oldHex.localeCompare(b.oldHex);
     });
 
-    // ---- State ----
-    let colorsOn = true;
-    let bordersOn = true;
-    let textColorModeOn = false; // OFF => original svg text fill
-    let textOpacity = 0.7; // ALWAYS applied
-    let selectedOldHex = null;
-
-    // FIX #3 UX: default suggestion mode OFF
-    let suggestMode = "OFF"; // "OFF" | "SOFT" | "HARD"
-
-    const storedNow = loadStored();
-    const savedUi = storedNow && storedNow.svgSig === sig && storedNow.ui ? storedNow.ui : {};
-    if (typeof savedUi.colorsOn === "boolean") colorsOn = savedUi.colorsOn;
-    if (typeof savedUi.bordersOn === "boolean") bordersOn = savedUi.bordersOn;
-    if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
-    if (typeof savedUi.textOpacity === "number") textOpacity = Math.max(0, Math.min(1, savedUi.textOpacity));
-    if (typeof savedUi.selectedOldHex === "string") selectedOldHex = savedUi.selectedOldHex;
-    if (typeof savedUi.suggestMode === "string" && ["OFF", "SOFT", "HARD"].includes(savedUi.suggestMode)) {
-      suggestMode = savedUi.suggestMode;
-    } else {
-      suggestMode = "OFF"; // enforce default OFF if not present
+    // Load state (per SVG signature)
+    const sig = svgSignature(originalSvg);
+    const state = loadState();
+    if (state.svgSig !== sig) {
+      // reset mappings for new svg
+      state.svgSig = sig;
+      state.mappings = {};
+      state.renames = {};
+      // keep UI prefs
+      saveState(state);
     }
 
-    setColorFills(recolorSvg, colorsOn);
+    // UI prefs
+    const ui = state.ui || {};
+    let colorsOn = (typeof ui.colorsOn === "boolean") ? ui.colorsOn : true;
+    let bordersOn = (typeof ui.bordersOn === "boolean") ? ui.bordersOn : true;
+    let textOpacity = (typeof ui.textOpacity === "number") ? clamp(ui.textOpacity, 0, 1) : 0.70;
+
+    // REQUIRED UX: default suggestion mode OFF
+    let suggestMode = (typeof ui.suggestMode === "string" && ["OFF", "SOFT", "HARD"].includes(ui.suggestMode)) ? ui.suggestMode : "OFF";
+
+    // Apply toggles
+    setShapeFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
+    applyTextOpacity(recolorSvg, textOpacity);
 
-    const usedReplacementHex = new Set();
+    // Controls row
+    const foot = document.createElement("div");
+    foot.className = "foot";
 
-    const controls = document.createElement("div");
-    controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
-    host.appendChild(controls);
+    const warn = document.createElement("div");
+    warn.className = "warn";
+    warn.style.display = (PALETTE_HEXES.length || PALETTE_ITEMS.length) ? "none" : "block";
+    warn.textContent = "⚠️ No encontré PALETTE_ITEMS/PALETTE_168. El picker y sugerencias necesitan la paleta cargada como variable global.";
+    left.appendChild(warn);
 
-    const left = document.createElement("div");
-    left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar + sugerencia)</div>`;
-    controls.appendChild(left);
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    const mkSegBtn = (mode, label) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      const paint = () => b.classList.toggle("active", suggestMode === mode);
+      b.onclick = () => {
+        suggestMode = mode;
+        ui.suggestMode = suggestMode;
+        state.ui = ui;
+        saveState(state);
+        paintAllSeg();
+      };
+      b._paint = paint;
+      return b;
+    };
+    const bOff = mkSegBtn("OFF", "OFF (Closest)");
+    const bSoft = mkSegBtn("SOFT", "SOFT ★");
+    const bHard = mkSegBtn("HARD", "HARD");
+    seg.appendChild(bOff); seg.appendChild(bSoft); seg.appendChild(bHard);
+    function paintAllSeg(){ bOff._paint(); bSoft._paint(); bHard._paint(); }
+    paintAllSeg();
 
+    const btnApplySug = document.createElement("button");
+    btnApplySug.className = "pbn-recolor-btn";
+    btnApplySug.textContent = "Aplicar sugerencias";
+    btnApplySug.onclick = () => applySuggestionsAll();
+
+    const btnDlSvg = document.createElement("button");
+    btnDlSvg.className = "pbn-recolor-btn";
+    btnDlSvg.textContent = "Descargar SVG";
+    btnDlSvg.onclick = () => {
+      const svgText = new XMLSerializer().serializeToString(recolorSvg);
+      forceDownloadBlob(new Blob([svgText], { type: "image/svg+xml;charset=utf-8" }), `pbn-recolor-${ADDON_VERSION}.svg`);
+    };
+
+    const btnDlPng = document.createElement("button");
+    btnDlPng.className = "pbn-recolor-btn";
+    btnDlPng.textContent = "Descargar PNG HQ";
+    btnDlPng.onclick = () => downloadSvgAsPngHQ(recolorSvg, `pbn-recolor-${ADDON_VERSION}.png`, 10);
+
+    const btnColors = document.createElement("button");
+    btnColors.className = "pbn-recolor-btn";
+    const paintColorsBtn = () => btnColors.textContent = `Colores: ${colorsOn ? "ON" : "OFF"}`;
+    paintColorsBtn();
+    btnColors.onclick = () => {
+      colorsOn = !colorsOn;
+      ui.colorsOn = colorsOn;
+      state.ui = ui;
+      saveState(state);
+      setShapeFills(recolorSvg, colorsOn);
+      paintColorsBtn();
+    };
+
+    const btnBorders = document.createElement("button");
+    btnBorders.className = "pbn-recolor-btn";
+    const paintBordersBtn = () => btnBorders.textContent = `Bordes: ${bordersOn ? "ON" : "OFF"}`;
+    paintBordersBtn();
+    btnBorders.onclick = () => {
+      bordersOn = !bordersOn;
+      ui.bordersOn = bordersOn;
+      state.ui = ui;
+      saveState(state);
+      setBorders(recolorSvg, bordersOn);
+      paintBordersBtn();
+    };
+
+    const sliderWrap = document.createElement("div");
+    sliderWrap.className = "slider";
+    sliderWrap.innerHTML = `<div style="font-weight:1000;font-size:12px;">Text opacity</div>`;
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "1";
+    slider.step = "0.01";
+    slider.value = String(textOpacity);
+    const sliderVal = document.createElement("div");
+    sliderVal.style.cssText = "font-weight:1000;font-size:12px;opacity:.75;";
+    sliderVal.textContent = textOpacity.toFixed(2);
+    slider.oninput = () => {
+      textOpacity = clamp(parseFloat(slider.value), 0, 1);
+      sliderVal.textContent = textOpacity.toFixed(2);
+      ui.textOpacity = textOpacity;
+      state.ui = ui;
+      saveState(state);
+      applyTextOpacity(recolorSvg, textOpacity);
+    };
+    sliderWrap.appendChild(slider);
+    sliderWrap.appendChild(sliderVal);
+
+    foot.appendChild(seg);
+    foot.appendChild(btnApplySug);
+    foot.appendChild(btnColors);
+    foot.appendChild(btnBorders);
+    foot.appendChild(sliderWrap);
+    foot.appendChild(btnDlSvg);
+    foot.appendChild(btnDlPng);
+
+    const note = document.createElement("div");
+    note.className = "note";
+    note.textContent = "OFF es el default. SOFT/HARD solo se aplican cuando los activas y haces 'Aplicar sugerencias'.";
+    left.appendChild(foot);
+    left.appendChild(note);
+
+    host.appendChild(left);
+
+    // Right: rows + picker
     const right = document.createElement("div");
-    right.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    right.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Picker (grilla con tags del Excel)</div>`;
-    controls.appendChild(right);
+    right.className = "pbn-panel";
+    right.innerHTML = `<h3>Colores originales → reemplazos (y renombrar)</h3>`;
 
-    const info = document.createElement("div");
-    info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
-    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla (o usa la sugerencia).";
-    right.appendChild(info);
+    const list = document.createElement("div");
+    right.appendChild(list);
 
-    // Row state maps
-    const rowByOldHex = new Map();
-    const renameInputByOldHex = new Map();
-    const labelNodesByOldHex = new Map();
-    const suggestBtnByOldHex = new Map();
+    const pickerPanel = document.createElement("div");
+    pickerPanel.style.marginTop = "10px";
+    pickerPanel.innerHTML = `<h3>Picker (paleta)</h3>`;
+    const picker = document.createElement("div");
+    picker.className = "picker";
+    pickerPanel.appendChild(picker);
+    right.appendChild(pickerPanel);
 
-    function buildTagToReplacementHexMap() {
-      const map = new Map(); // tagLower ->uterto1
-::contentReference[oaicite:0]{index=0}
+    host.appendChild(right);
+
+    // Build palette grid
+    const paletteCache = computePaletteCache();
+    const paletteItems = paletteCache.map(p => ({ hex: p.hex, tag: p.tag }));
+
+    let selectedOldHex = null;
+
+    function usedReplacementSet() {
+      const used = new Set();
+      for (const k of Object.keys(state.mappings || {})) {
+        const v = state.mappings[k];
+        if (v && isHex6(v.hex)) used.add(norm(v.hex));
+      }
+      return used;
+    }
+
+    function renderPaletteGrid() {
+      picker.innerHTML = "";
+      const used = usedReplacementSet();
+      for (const it of paletteItems) {
+        const tile = document.createElement("button");
+        tile.type = "button";
+        tile.className = "tile";
+        tile.style.background = it.hex;
+        tile.title = it.tag ? `${it.tag} — ${it.hex}` : it.hex;
+
+        const tag = document.createElement("div");
+        tag.className = "tag";
+        tag.textContent = it.tag || "";
+        tag.style.cssText = "position:absolute;left:6px;top:6px;font-size:11px;font-weight:1000;background:rgba(255,255,255,.90);border:1px solid rgba(0,0,0,.12);padding:2px 6px;border-radius:999px;max-width:calc(100% - 12px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+        if (it.tag) tile.appendChild(tag);
+
+        const x = document.createElement("div");
+        x.className = "x";
+        x.textContent = "✕";
+        tile.appendChild(x);
+
+        if (used.has(it.hex)) tile.classList.add("used");
+
+        tile.onclick = () => {
+          if (!selectedOldHex) return;
+          setReplacement(selectedOldHex, it.hex, it.tag);
+        };
+
+        picker.appendChild(tile);
+      }
+    }
+
+    function setReplacement(oldHex, newHex, newTag) {
+      if (!state.mappings) state.mappings = {};
+      state.mappings[oldHex] = { hex: norm(newHex), tag: (newTag || "").toString().trim() };
+      saveState(state);
+      applyAllReplacementsToSvg();
+      renderRows();
+      renderPaletteGrid();
+    }
+
+    function setRename(oldHex, renameText) {
+      if (!state.renames) state.renames = {};
+      state.renames[oldHex] = (renameText || "").toString().trim();
+      saveState(state);
+      applyRenamesToSvg();
+    }
+
+    function applyAllReplacementsToSvg() {
+      // Apply fill replacements on recolorSvg
+      const mappings = state.mappings || {};
+      for (const entry of rawEntries) {
+        const oldHex = entry.oldHex;
+        const rep = mappings[oldHex];
+        if (!rep || !isHex6(rep.hex)) continue;
+
+        const newHex = norm(rep.hex);
+        for (const el of entry.nodes) {
+          el.setAttribute("fill", newHex);
+          // remove style fill if present
+          const style = el.getAttribute("style");
+          if (style && /fill\s*:/i.test(style)) {
+            const newStyle = style.replace(/fill\s*:\s*[^;]+;?/ig, "");
+            el.setAttribute("style", newStyle);
+          }
+        }
+      }
+      // reapply toggles
+      setShapeFills(recolorSvg, colorsOn);
+      setBorders(recolorSvg, bordersOn);
+      applyTextOpacity(recolorSvg, textOpacity);
+    }
+
+    function applyRenamesToSvg() {
+      // Rename legend tags if present (best-effort):
+      // replace text nodes that equal original tag with rename
+      const ren = state.renames || {};
+      const mapTagToRename = new Map();
+      for (const e of rawEntries) {
+        const r = ren[e.oldHex];
+        if (r && e.tag) mapTagToRename.set(e.tag, r);
+      }
+
+      const texts = Array.from(recolorSvg.querySelectorAll("text"));
+      for (const t of texts) {
+        const txt = (t.textContent || "").toString().trim();
+        if (!txt) continue;
+        if (mapTagToRename.has(txt)) t.textContent = mapTagToRename.get(txt);
+      }
+    }
+
+    // Build tags array for suggestions
+    function buildTagsForSuggestion() {
+      const tags = [];
+      for (const e of rawEntries) {
+        const labX = hexToLab(e.oldHex);
+        if (!labX) continue;
+        tags.push({
+          tag: e.tag || "",
+          hex: e.oldHex,
+          L: labX.L,
+          a: labX.a,
+          b: labX.b,
+          C: labX.C,
+          h: labX.h,
+          lab: { L: labX.L, a: labX.a, b: labX.b },
+          weight: e.weight || 1
+        });
+      }
+      return tags;
+    }
+
+    const params = { K: 10, wDark: 0.04, wNeu: 0.08, wCtx: 0.25, wReuse: 0.8, ITER: 800, ctxK: 3 };
+
+    // Compute once per modal open
+    const tagsForSug = buildTagsForSuggestion();
+    const { topK, allScores } = computeTopKCandidates(tagsForSug, paletteCache, params);
+    const neighborGraph = buildNeighborGraphFromSVG(recolorSvg, rawEntries, tagsForSug, params);
+
+    function applySuggestionsAll() {
+      if (!paletteCache.length) return;
+
+      const ctx = { tags: tagsForSug, paletteCache, topK, allScores, neighborGraph, params };
+      const assign = suggestMapping(suggestMode, ctx); // array of palIdx per tag index
+
+      for (let i = 0; i < tagsForSug.length; i++) {
+        const oldHex = tagsForSug[i].hex;
+        const pal = paletteCache[assign[i]];
+        if (!pal) continue;
+        setReplacement(oldHex, pal.hex, pal.tag);
+      }
+    }
+
+    // Rows render
+    function textColorForBg(hex) {
+      const h = (hex || "").replace("#", "");
+      if (h.length !== 6) return "#000";
+      const r = parseInt(h.slice(0, 2), 16);
+      const g = parseInt(h.slice(2, 4), 16);
+      const b = parseInt(h.slice(4, 6), 16);
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      return y > 140 ? "#000" : "#fff";
+    }
+
+    function renderRows() {
+      list.innerHTML = "";
+      const mappings = state.mappings || {};
+      const ren = state.renames || {};
+
+      for (const e of rawEntries) {
+        const row = document.createElement("div");
+        row.className = "pbn-row";
+
+        // Tag label
+        const tagBox = document.createElement("div");
+        tagBox.style.cssText = "font-weight:1000;font-size:12px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+        tagBox.textContent = e.tag ? `TAG: ${e.tag}` : `HEX: ${e.oldHex}`;
+
+        // Original swatch
+        const swO = document.createElement("div");
+        swO.className = "sw";
+        swO.style.background = e.oldHex;
+        swO.style.color = textColorForBg(e.oldHex);
+        swO.innerHTML = `<div class="tag">${e.tag || ""}</div><div>${e.oldHex}</div>`;
+        swO.onclick = () => { selectedOldHex = e.oldHex; };
+
+        // Replacement swatch
+        const rep = mappings[e.oldHex];
+        const repHex = (rep && isHex6(rep.hex)) ? norm(rep.hex) : "";
+        const swR = document.createElement("div");
+        swR.className = "sw";
+        swR.style.background = repHex || "rgba(0,0,0,.06)";
+        swR.style.color = repHex ? textColorForBg(repHex) : "rgba(0,0,0,.70)";
+        const repTag = rep?.tag ? `<div class="tag">${rep.tag}</div>` : "";
+        swR.innerHTML = `${repTag}<div>${repHex || "—"}</div>`;
+        swR.title = "Click para seleccionar este color original y luego elegir en el picker";
+        swR.onclick = () => { selectedOldHex = e.oldHex; };
+
+        // Rename input
+        const inp = document.createElement("input");
+        inp.className = "pbn-rename";
+        inp.placeholder = "Renombrar TAG…";
+        inp.value = ren[e.oldHex] || "";
+        inp.onchange = () => setRename(e.oldHex, inp.value);
+
+        // Suggest (single) button: applies suggestion for this one tag only, based on current mode
+        const btnS = document.createElement("button");
+        btnS.className = "pbn-suggest";
+        btnS.textContent = "Sugerir";
+        btnS.onclick = () => {
+          // compute assignment for this tag index only (cheap): use mapping array and set one
+          const idx = tagsForSug.findIndex(t => t.hex === e.oldHex);
+          if (idx < 0) return;
+          const ctx = { tags: tagsForSug, paletteCache, topK, allScores, neighborGraph, params };
+          const assign = suggestMapping(suggestMode, ctx);
+          const pal = paletteCache[assign[idx]];
+          if (pal) setReplacement(e.oldHex, pal.hex, pal.tag);
+        };
+
+        row.appendChild(tagBox);
+        row.appendChild(swO);
+        row.appendChild(swR);
+
+        const rightCell = document.createElement("div");
+        rightCell.style.cssText = "display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;";
+        rightCell.appendChild(inp);
+        rightCell.appendChild(btnS);
+
+        row.appendChild(rightCell);
+        list.appendChild(row);
+      }
+    }
+
+    // Initial render/apply
+    applyAllReplacementsToSvg();
+    applyRenamesToSvg();
+    renderRows();
+    renderPaletteGrid();
+  }
+
+  // ============================================================
+  // FAB launcher
+  // ============================================================
+  function ensureFab() {
+    ensureStyle();
+    let fab = document.getElementById("pbn-recolor-fab");
+    if (fab) return fab;
+
+    fab = document.createElement("button");
+    fab.id = "pbn-recolor-fab";
+    fab.className = "pbn-recolor-fab";
+    fab.type = "button";
+    fab.innerHTML = `<span>Recolor</span><small>${ADDON_VERSION}</small>`;
+    document.body.appendChild(fab);
+
+    fab.addEventListener("click", () => {
+      if (!isGeneratorReady()) return;
+      const svg = findFinalOutputSvg();
+      if (svg) openModal(svg);
+    });
+
+    return fab;
+  }
+
+  function refreshFabState() {
+    const fab = ensureFab();
+    const ready = isGeneratorReady();
+    fab.disabled = !ready;
+    fab.title = ready ? "Abrir recolorador" : "Procesa una imagen para generar SVG y luego abre el recolorador";
+  }
+
+  // ============================================================
+  // Boot
+  // ============================================================
+  function boot() {
+    injectVersionTitleAboveH1();
+    ensureFab();
+    refreshFabState();
+
+    const mo = new MutationObserver(debounce(() => {
+      injectVersionTitleAboveH1();
+      refreshFabState();
+    }, 200));
+
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
+  }
+
+})();
