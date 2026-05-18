@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v2.3"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v2.4"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -938,7 +938,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v23";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v24";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1179,7 +1179,7 @@
   .page { width:216mm; height:330mm; box-sizing:border-box; position:relative; background:#fff; overflow:hidden; }
   .sheet { position:absolute; inset:7mm; background:#fff; overflow:hidden; }
   .bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
-  .qr-wrap { position:absolute; right:32mm; top:16mm; width:21mm; height:21mm; padding:1.05mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.94); border:.28mm solid rgba(0,0,0,.05); border-radius:2.2mm; box-shadow:0 .9mm 2.6mm rgba(0,0,0,.07), 0 .2mm .55mm rgba(0,0,0,.045); }
+  .qr-wrap { position:absolute; left:160.4mm; top:9.4mm; width:18.6mm; height:18.6mm; padding:.95mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.92); border:.28mm solid rgba(0,0,0,.05); border-radius:2.2mm; box-shadow:0 .9mm 2.6mm rgba(0,0,0,.07), 0 .2mm .55mm rgba(0,0,0,.045); }
   .qr { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; display:block; }
   .image-frame { position:absolute; left:24.3mm; top:80.2mm; width:154.6mm; height:109.2mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:visible; background:transparent; border:none; border-radius:0; box-shadow:none; }
   .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; border-radius:0; }
