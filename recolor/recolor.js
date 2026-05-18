@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.6"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v1.7"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -938,7 +938,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v6";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v7";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1175,18 +1175,18 @@
 <title>${safeName || 'plantilla-referencia'}</title>
 <style>
   @page { size: 216mm 330mm; margin: 0; }
-  html, body { margin:0; padding:0; background:#fff; font-family: Arial, Helvetica, sans-serif; }
+  html, body { margin:0; padding:0; background:#fff; font-family: Inter, Arial, Helvetica, sans-serif; }
   .page { width:216mm; height:330mm; box-sizing:border-box; position:relative; background:white; overflow:hidden; }
   .sheet { position:absolute; inset:7mm; background:#fff; overflow:hidden; }
   .bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
-  .qr-wrap { position:absolute; right:16mm; top:12mm; width:34mm; display:flex; flex-direction:column; align-items:center; gap:2mm; }
-  .qr { width:28mm; height:28mm; object-fit:contain; display:block; }
-  .image-frame { position:absolute; left:25mm; top:82mm; width:152mm; height:110mm; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .qr-wrap { position:absolute; right:18.5mm; top:10.5mm; width:31mm; height:37mm; display:flex; align-items:center; justify-content:center; }
+  .qr { width:27mm; height:27mm; object-fit:contain; display:block; }
+  .image-frame { position:absolute; left:24mm; top:81mm; width:154mm; height:108mm; display:flex; align-items:center; justify-content:center; overflow:hidden; }
   .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; }
-  .markers { position:absolute; left:19mm; right:19mm; top:207mm; min-height:26mm; background:transparent; box-sizing:border-box; }
-  .markers-title { font-size:6.2mm; line-height:1.1; font-weight:700; color:#2f2f2f; margin-bottom:4.5mm; }
-  .markers-grid { display:flex; flex-wrap:wrap; gap:3mm; align-content:flex-start; }
-  .marker-chip { min-width:14mm; height:9mm; padding:0 3.4mm; border:none; border-radius:2mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:4.2mm; font-weight:800; box-shadow:none; }
+  .markers { position:absolute; left:20mm; right:20mm; top:205mm; min-height:30mm; background:transparent; box-sizing:border-box; }
+  .markers-title { font-size:5.2mm; line-height:1.1; font-weight:800; color:#2b2b2b; margin-bottom:4.2mm; letter-spacing:.01em; }
+  .markers-grid { display:flex; flex-wrap:wrap; gap:2.8mm; align-content:flex-start; }
+  .marker-chip { min-width:13.5mm; height:8.4mm; padding:0 3.2mm; border:none; border-radius:1.8mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-family: Inter, Arial, Helvetica, sans-serif; font-size:3.55mm; font-weight:800; letter-spacing:.01em; box-shadow:none; }
   .empty-markers { font-size:9pt; color:#777; margin-top:2mm; }
   @media screen { body { background:#d9d9d9; padding: 10px 0; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
 </style>
@@ -1723,7 +1723,13 @@
 
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar + sugerencia)</div>`;
+    const leftHeader = document.createElement("div");
+    leftHeader.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;";
+    const leftTitle = document.createElement("div");
+    leftTitle.textContent = "Colores originales (TAG + reemplazo + renombrar + sugerencia)";
+    leftTitle.style.cssText = "font-weight:800;";
+    leftHeader.appendChild(leftTitle);
+    left.appendChild(leftHeader);
     controls.appendChild(left);
 
     const right = document.createElement("div");
@@ -2071,6 +2077,47 @@
       recomputeModeMapIfNeeded();
       for (const e of rawEntries) updateSuggestionTile(e.oldHex);
     }
+
+    function quickApplyAllSuggestions() {
+      let applied = 0;
+      recomputeModeMapIfNeeded();
+      for (const e of rawEntries) {
+        const s = getSuggestionForOldHex(e.oldHex);
+        const sh = norm(s && s.hex ? s.hex : "");
+        const st = (s && s.tag ? s.tag : "").toString().trim();
+        if (!isHex6(sh)) continue;
+        applyReplacementToOldHex(e.oldHex, sh, st, { autoRename: true });
+        applied += 1;
+      }
+      picker.refreshUsedX();
+      updateAllSuggestionTiles();
+      applyTextColors();
+      saveAllState();
+      setExportProgress(`Quick apply: ${applied} sugerencias aplicadas.`);
+      return applied;
+    }
+
+    const btnQuickApply = document.createElement("button");
+    btnQuickApply.type = "button";
+    btnQuickApply.textContent = "QUICK APPLY SUGGESTIONS";
+    btnQuickApply.title = "Aplica todas las sugerencias visibles de una vez y renombra los números automáticamente";
+    btnQuickApply.style.cssText = "padding:8px 11px; border-radius:10px; border:1px solid rgba(0,0,0,.20); background:#111; color:white; cursor:pointer; font-size:11px; font-weight:900; letter-spacing:.2px; white-space:nowrap;";
+    enhanceButton(btnQuickApply);
+    btnQuickApply.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setButtonLoading(btnQuickApply, true);
+      try {
+        const applied = quickApplyAllSuggestions();
+        if (!applied) alert("No encontré sugerencias aplicables todavía.");
+      } catch (err) {
+        console.error(err);
+        alert(err && err.message ? err.message : "No pude aplicar las sugerencias.");
+      } finally {
+        setTimeout(() => setButtonLoading(btnQuickApply, false), 220);
+      }
+    });
+    leftHeader.appendChild(btnQuickApply);
 
     // ---- Build list rows ----
     if (!rawEntries.length) {
