@@ -130,6 +130,15 @@
     const to2 = (n) => n.toString(16).padStart(2, "0");
     return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
   }
+  function hexToRgb(hex) {
+    const h = (hex || "").replace("#", "").trim();
+    if (h.length !== 6) return null;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    if (![r, g, b].every(Number.isFinite)) return null;
+    return { r, g, b };
+  }
   function textColorForBg(hex) {
     const h = (hex || "").replace("#", "");
     if (h.length !== 6) return "#000";
@@ -870,6 +879,206 @@
     forceDownloadBlob(blob, filename);
   }
 
+
+  // ---------- PBN production exports (markers + printable reference PDF) ----------
+  function slugifyName(value, fallback = "paintbynumber") {
+    const raw = (value || "").toString().trim() || fallback;
+    return raw
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9-_]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase()
+      .slice(0, 80) || fallback;
+  }
+
+  function escapeCsvCell(value) {
+    const s = (value == null ? "" : String(value));
+    return /[",\n\r;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  function downloadCsv(filename, rows) {
+    const csv = rows.map((r) => r.map(escapeCsvCell).join(",")).join("\n");
+    downloadText(filename, "\ufeff" + csv, "text/csv;charset=utf-8");
+  }
+
+  function loadExternalScript(src, globalCheck) {
+    if (globalCheck && globalCheck()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const existing = Array.from(document.querySelectorAll("script")).find((s) => s.src === src);
+      if (existing) {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error("No se pudo cargar " + src)), { once: true });
+        if (globalCheck && globalCheck()) resolve();
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("No se pudo cargar " + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  function getUploadConfig() {
+    const saved = safeJsonParse(localStorage.getItem("pbn_upload_config") || "null") || {};
+    const cfg = Object.assign({}, window.PBN_UPLOAD_CONFIG || {}, saved || {});
+    return {
+      cloudName: (cfg.cloudName || "").toString().trim(),
+      unsignedPreset: (cfg.unsignedPreset || cfg.uploadPreset || "").toString().trim(),
+      folder: (cfg.folder || "paintbynumber-referencias").toString().trim()
+    };
+  }
+
+  function setUploadConfig(cfg) {
+    try { localStorage.setItem("pbn_upload_config", JSON.stringify(cfg)); } catch (_) {}
+  }
+
+  async function ensureUploadConfig() {
+    let cfg = getUploadConfig();
+    if (cfg.cloudName && cfg.unsignedPreset) return cfg;
+
+    const cloudName = prompt("Cloudinary cloud name (una sola vez):", cfg.cloudName || "");
+    if (!cloudName) throw new Error("Falta Cloudinary cloud name.");
+    const unsignedPreset = prompt("Cloudinary unsigned upload preset (una sola vez):", cfg.unsignedPreset || "");
+    if (!unsignedPreset) throw new Error("Falta unsigned upload preset.");
+    const folder = prompt("Carpeta Cloudinary:", cfg.folder || "paintbynumber-referencias") || "paintbynumber-referencias";
+    cfg = { cloudName: cloudName.trim(), unsignedPreset: unsignedPreset.trim(), folder: folder.trim() };
+    setUploadConfig(cfg);
+    return cfg;
+  }
+
+  function getReferenceCanvasDataUrl() {
+    const c = document.getElementById("canvas");
+    if (!c || !c.width || !c.height) throw new Error("No encuentro la imagen de referencia en el canvas de entrada.");
+    try { return c.toDataURL("image/jpeg", 0.92); }
+    catch (e) { throw new Error("No pude leer la imagen de referencia. Vuelve a cargarla desde archivo local y prueba de nuevo."); }
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    const parts = dataUrl.split(",");
+    const mime = (parts[0].match(/:(.*?);/) || [])[1] || "application/octet-stream";
+    const bin = atob(parts[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  async function uploadReferenceImageToCloudinary(dataUrl, imageName) {
+    const cfg = await ensureUploadConfig();
+    const blob = dataUrlToBlob(dataUrl);
+    const publicId = `${slugifyName(imageName, "referencia")}-${Date.now()}`;
+    const form = new FormData();
+    form.append("file", blob, `${publicId}.jpg`);
+    form.append("upload_preset", cfg.unsignedPreset);
+    form.append("public_id", publicId);
+    if (cfg.folder) form.append("folder", cfg.folder);
+
+    const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/image/upload`;
+    const res = await fetch(endpoint, { method: "POST", body: form });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.secure_url) {
+      console.error("Cloudinary upload error", json);
+      throw new Error(json.error && json.error.message ? json.error.message : "Falló la subida a Cloudinary.");
+    }
+    return json.secure_url;
+  }
+
+  function uniqueMarkers(markerRows) {
+    const map = new Map();
+    markerRows.forEach((r) => {
+      if (!r.replacementTag) return;
+      const key = r.replacementTag;
+      if (!map.has(key)) map.set(key, { tag: r.replacementTag, hex: r.replacementHex || "#ffffff" });
+    });
+    return Array.from(map.values()).sort((a, b) => String(a.tag).localeCompare(String(b.tag), undefined, { numeric: true }));
+  }
+
+  async function generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
+    await loadExternalScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF);
+    await loadExternalScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js", () => window.QRCode && window.QRCode.toDataURL);
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 12;
+
+    // Header
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.text("Paint by", margin, 20);
+    doc.text("Number", margin, 29);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("ESCANEA QR", pageW - margin - 42, 16);
+    doc.text("PARA HACERLE ZOOM", pageW - margin - 42, 50);
+
+    const qrUrl = await window.QRCode.toDataURL(referenceUrl, { margin: 1, width: 420, errorCorrectionLevel: "M" });
+    doc.addImage(qrUrl, "PNG", pageW - margin - 38, 20, 32, 32);
+
+    doc.setFont("times", "italic");
+    doc.setFontSize(28);
+    doc.text("Imagen de Referencia", pageW / 2, 48, { align: "center" });
+
+    // Reference image area
+    const imgBox = { x: 22, y: 58, w: pageW - 44, h: 158 };
+    const img = new Image();
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = referenceDataUrl; });
+    const ratio = Math.min(imgBox.w / img.naturalWidth, imgBox.h / img.naturalHeight);
+    const drawW = img.naturalWidth * ratio;
+    const drawH = img.naturalHeight * ratio;
+    const drawX = imgBox.x + (imgBox.w - drawW) / 2;
+    const drawY = imgBox.y + (imgBox.h - drawH) / 2;
+    doc.addImage(referenceDataUrl, "JPEG", drawX, drawY, drawW, drawH);
+
+    // Marker mini box
+    const markers = uniqueMarkers(markerRows);
+    const boxY = 222;
+    const boxH = 38;
+    doc.setDrawColor(215, 215, 215);
+    doc.setFillColor(250, 250, 250);
+    doc.roundedRect(margin, boxY, pageW - margin * 2, boxH, 3, 3, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(20, 20, 20);
+    doc.text("Marcadores incluidos", margin + 4, boxY + 7);
+
+    const cellW = 13;
+    const cellH = 8;
+    let x = margin + 4;
+    let y = boxY + 12;
+    markers.slice(0, 60).forEach((m) => {
+      if (x + cellW > pageW - margin - 4) { x = margin + 4; y += cellH + 2; }
+      if (y + cellH > boxY + boxH - 3) return;
+      const rgb = hexToRgb(norm(m.hex) || "#ffffff") || { r: 255, g: 255, b: 255 };
+      doc.setFillColor(rgb.r, rgb.g, rgb.b);
+      doc.setDrawColor(150, 150, 150);
+      doc.roundedRect(x, y, cellW, cellH, 1.6, 1.6, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(6.5);
+      const tc = textColorForBg(m.hex || "#ffffff") === "#fff" ? 255 : 0;
+      doc.setTextColor(tc, tc, tc);
+      doc.text(String(m.tag), x + cellW / 2, y + 5.5, { align: "center" });
+      x += cellW + 2;
+    });
+
+    // Tip + footer
+    doc.setTextColor(30, 30, 30);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("TIP:", margin, pageH - 22);
+    doc.setFont("helvetica", "normal");
+    doc.text("Antes de comenzar, coloca una hoja o cartón debajo del papel para proteger tu mesa de posibles manchas.", margin + 7, pageH - 22);
+    doc.setFontSize(8);
+    doc.text("+56959369220", margin, pageH - 10);
+    doc.text("paintbynumbercl@gmail.com", pageW / 2, pageH - 10, { align: "center" });
+    doc.text("www.paintbynumber.cl", pageW - margin, pageH - 10, { align: "right" });
+
+    doc.save(`${slugifyName(imageName, "plantilla-referencia")}-plantilla-referencia.pdf`);
+  }
+
   async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
     const MAX_SIDE = 20000;
     const MAX_PIXELS = 220e6;
@@ -1377,6 +1586,39 @@
         map.set(norm(tag), replHex);
       }
       return map;
+    }
+
+
+    function collectCurrentMarkerRows() {
+      const rows = [];
+      for (const [oldHex, row] of rowByOldHex.entries()) {
+        const meta = row.querySelector(".row-text");
+        const replHex = norm(row.getAttribute("data-replhex") || "");
+        const replTag = (row.getAttribute("data-repltag") || "").toString().trim();
+        const inp = renameInputByOldHex.get(oldHex);
+        const finalTag = inp ? (inp.value || "").toString().trim() : "";
+        const originalTagNode = row.firstChild;
+        const originalTag = originalTagNode ? (originalTagNode.textContent || "").toString().trim() : "";
+        rows.push({
+          originalTag,
+          originalHex: oldHex,
+          replacementTag: replTag || finalTag,
+          replacementHex: replHex,
+          finalTag,
+          description: meta ? (meta.textContent || "").trim() : ""
+        });
+      }
+      return rows;
+    }
+
+    function downloadCurrentMarkerListCsv(imageName) {
+      const rows = collectCurrentMarkerRows();
+      const csvRows = [["Tag original", "Color original", "Marcador reemplazo", "Color marcador", "Tag final en dibujo"]];
+      rows.forEach((r) => csvRows.push([r.originalTag, r.originalHex, r.replacementTag, r.replacementHex, r.finalTag]));
+      const uniques = uniqueMarkers(rows).map((m) => m.tag).join(" ");
+      csvRows.push([]);
+      csvRows.push(["Marcadores incluidos", uniques]);
+      downloadCsv(`${slugifyName(imageName || "listado-marcadores")}-marcadores-reemplazo.csv`, csvRows);
     }
 
     function stripStyleProps(styleStr, props) {
@@ -1899,8 +2141,60 @@
       }
     });
 
+
+    const nameInputWrap = document.createElement("div");
+    nameInputWrap.style.cssText = "display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:12px; border:1px solid rgba(0,0,0,.14); background:white;";
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "Nombre imagen";
+    nameLabel.style.cssText = "font-size:12px; font-weight:900; color:rgba(0,0,0,.72); white-space:nowrap;";
+    const imageNameInput = document.createElement("input");
+    imageNameInput.type = "text";
+    imageNameInput.placeholder = "ej: florencia-60x40";
+    imageNameInput.style.cssText = "height:28px; width:190px; border:0; outline:none; font-size:13px; background:transparent;";
+    nameInputWrap.appendChild(nameLabel);
+    nameInputWrap.appendChild(imageNameInput);
+
+    const btnMarkers = document.createElement("button");
+    btnMarkers.type = "button";
+    btnMarkers.textContent = "DOWNLOAD MARKER LIST CSV";
+    btnMarkers.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnMarkers);
+    btnMarkers.addEventListener("click", () => {
+      setButtonLoading(btnMarkers, true);
+      try {
+        downloadCurrentMarkerListCsv(imageNameInput.value || "listado-marcadores");
+      } finally {
+        setTimeout(() => setButtonLoading(btnMarkers, false), 220);
+      }
+    });
+
+    const btnTemplatePdf = document.createElement("button");
+    btnTemplatePdf.type = "button";
+    btnTemplatePdf.textContent = "DOWNLOAD PRINT TEMPLATE PDF";
+    btnTemplatePdf.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnTemplatePdf);
+    btnTemplatePdf.addEventListener("click", async () => {
+      setButtonLoading(btnTemplatePdf, true);
+      try {
+        const imageName = (imageNameInput.value || "referencia-paintbynumber").toString().trim();
+        if (!imageName) return alert("Ponle un nombre a la imagen antes de subirla.");
+        const markerRows = collectCurrentMarkerRows();
+        const referenceDataUrl = getReferenceCanvasDataUrl();
+        const referenceUrl = await uploadReferenceImageToCloudinary(referenceDataUrl, imageName);
+        await generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows });
+      } catch (e) {
+        console.error(e);
+        alert(e && e.message ? e.message : "No pude generar la plantilla PDF.");
+      } finally {
+        setButtonLoading(btnTemplatePdf, false);
+      }
+    });
+
     dl.appendChild(btnSvg);
     dl.appendChild(btnPng);
+    dl.appendChild(nameInputWrap);
+    dl.appendChild(btnMarkers);
+    dl.appendChild(btnTemplatePdf);
   }
 
   // ---------- Floating launcher ----------
