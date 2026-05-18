@@ -1,13 +1,14 @@
 # Paint by Number — Recolor Export Add-on
 
-Versión visible actual: **Recolor v2.2**
+Versión visible actual: **Recolor v2.3**
 
 ## Incluye en esta versión
 - Mantiene todos los fixes anteriores.
-- Se eliminó el marco / contenedor visual de la imagen principal del PDF.
-- El QR mantiene su contenedor premium, pero se reposicionó y redujo para no tapar los textos impresos de la plantilla.
+- QR reposicionado exactamente en el espacio entre `ESCANEA QR` y `PARA HACERLE ZOOM`, centrado respecto a esos textos.
+- Se mantiene el contenedor premium del QR, con autoescala interna.
+- La imagen principal no tiene marco/contenedor visual.
 - Formato de impresión: **Oficio vertical**.
-- En la plantilla PDF y en el JPG de marcadores, el título muestra la cantidad total de colores: `Marcadores incluidos (N colores)`.
+- `Marcadores incluidos (N colores)`.
 - SVG defaults: `SVG size multiplier = 7` y `Label font color = #C4C4C4`.
 
 ## Al guardar el PDF
