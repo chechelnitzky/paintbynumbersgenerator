@@ -1,5 +1,5 @@
-/* Recolor add-on (v1.0 - TITLE VERSION LABEL + OFF/SOFT/HARD SUGGESTIONS, UI UNCHANGED)
-   ✅ Adds small “Recolor v1.0” label above “Paint by number generator” title (page)
+/* Recolor add-on (v1.1 - JPG MARKER LIST + PDF PROGRESS + EXPLICIT TEMPLATE RULES)
+   ✅ Adds small visible version label above “Paint by number generator” title (page)
    ✅ Code always has a VERSION constant
    ✅ Suggestion selector: OFF (Closest) [DEFAULT] / SOFT (recommended) / HARD (experimental)
    ✅ SOFT/HARD only apply when user activates them
@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.0"; // Next edits: v2, v3, v4, ...
+  const VERSION = "v1.1"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -982,6 +982,16 @@
     return cfg;
   }
 
+  function setExportProgress(message) {
+    const el = document.getElementById("pbn-export-progress");
+    if (!el) return;
+    el.textContent = message || "";
+    el.style.display = message ? "block" : "none";
+  }
+
+  function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+  function elapsedText(start) { return `${Math.max(1, Math.round((nowMs() - start) / 1000))}s`; }
+
   function getReferenceCanvasDataUrl() {
     const c = document.getElementById("canvas");
     if (!c || !c.width || !c.height) throw new Error("No encuentro la imagen de referencia en el canvas de entrada.");
@@ -1000,6 +1010,7 @@
 
   async function uploadReferenceImageToCloudinary(dataUrl, imageName) {
     const cfg = await ensureUploadConfig();
+    setExportProgress("Etapa 2/5: subiendo imagen a Cloudinary para crear URL pública del QR…");
     const blob = dataUrlToBlob(dataUrl);
     const publicId = `${slugifyName(imageName, "referencia")}-${Date.now()}`;
     const form = new FormData();
@@ -1037,8 +1048,10 @@
   }
 
   async function generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
+    setExportProgress("Etapa 3/5: cargando librerías PDF y QR en el navegador…");
     await loadExternalScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF);
     await loadExternalScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js", () => window.QRCode && window.QRCode.toDataURL);
+    setExportProgress("Etapa 4/5: generando QR localmente y armando plantilla A4…");
 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -1056,6 +1069,7 @@
     doc.text("ESCANEA QR", pageW - margin - 42, 16);
     doc.text("PARA HACERLE ZOOM", pageW - margin - 42, 50);
 
+    // QR generado 100% en el navegador con la librería qrcode desde CDN. No usa plataforma externa de QR.
     const qrUrl = await window.QRCode.toDataURL(referenceUrl, { margin: 1, width: 420, errorCorrectionLevel: "M" });
     doc.addImage(qrUrl, "PNG", pageW - margin - 38, 20, 32, 32);
 
@@ -1067,7 +1081,8 @@
     doc.setTextColor(90, 90, 90);
     doc.text(String(imageName || "").slice(0, 70), pageW / 2, 52, { align: "center" });
 
-    // Reference image area
+    // Reference image area: no rotation; centered; fit-contained; preserves original aspect ratio.
+    // A4 portrait. If the image is horizontal, it stays horizontal inside this box.
     const imgBox = { x: 22, y: 58, w: pageW - 44, h: 158 };
     const img = new Image();
     await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = referenceDataUrl; });
@@ -1121,6 +1136,7 @@
     doc.text("paintbynumbercl@gmail.com", pageW / 2, pageH - 10, { align: "center" });
     doc.text("www.paintbynumber.cl", pageW - margin, pageH - 10, { align: "right" });
 
+    setExportProgress("Etapa 5/5: descargando PDF final…");
     doc.save(`${slugifyName(imageName, "plantilla-referencia")}-plantilla-referencia.pdf`);
   }
 
@@ -1656,14 +1672,78 @@
       return rows;
     }
 
-    function downloadCurrentMarkerListCsv(imageName) {
+    function downloadCurrentMarkerListJpg(imageName) {
       const rows = collectCurrentMarkerRows();
-      const csvRows = [["Tag original", "Color original", "Marcador reemplazo", "Color marcador", "Tag final en dibujo"]];
-      rows.forEach((r) => csvRows.push([r.originalTag, r.originalHex, r.replacementTag, r.replacementHex, r.finalTag]));
-      const uniques = uniqueMarkers(rows).map((m) => m.tag).join(" ");
-      csvRows.push([]);
-      csvRows.push(["Marcadores incluidos", uniques]);
-      downloadCsv(`${slugifyName(imageName || "listado-marcadores")}-marcadores-reemplazo.csv`, csvRows);
+      const markers = uniqueMarkers(rows);
+      if (!markers.length) return alert("No hay marcadores detectados todavía. Primero procesa/recolorea la imagen.");
+
+      const cols = 8;
+      const cellW = 110;
+      const cellH = 86;
+      const pad = 48;
+      const titleH = 92;
+      const w = pad * 2 + cols * cellW;
+      const h = titleH + pad + Math.ceil(markers.length / cols) * cellH + 50;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#111111";
+      ctx.font = "bold 34px Arial, sans-serif";
+      ctx.fillText("Marcadores incluidos", pad, 50);
+      ctx.font = "18px Arial, sans-serif";
+      ctx.fillStyle = "#666666";
+      ctx.fillText(String(imageName || "Paint by Number").slice(0, 80), pad, 78);
+
+      markers.forEach((m, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const x = pad + col * cellW;
+        const y = titleH + row * cellH;
+        const hex = isHex6(norm(m.hex)) ? norm(m.hex) : "#ffffff";
+        const rgb = hexToRgb(hex) || { r: 255, g: 255, b: 255 };
+
+        ctx.fillStyle = "#f7f7f7";
+        roundRect(ctx, x, y, 88, 66, 12, true, false);
+        ctx.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+        roundRect(ctx, x + 6, y + 6, 76, 54, 10, true, false);
+        ctx.strokeStyle = "rgba(0,0,0,.18)";
+        ctx.lineWidth = 2;
+        roundRect(ctx, x + 6, y + 6, 76, 54, 10, false, true);
+
+        const textWhite = textColorForBg(hex) === "#fff";
+        ctx.fillStyle = textWhite ? "#ffffff" : "#111111";
+        ctx.font = "bold 26px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(m.tag), x + 44, y + 34);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      });
+
+      ctx.fillStyle = "#777777";
+      ctx.font = "14px Arial, sans-serif";
+      ctx.fillText("www.paintbynumber.cl", pad, h - 22);
+
+      canvas.toBlob((blob) => {
+        if (!blob) return alert("No pude generar el JPG del listado de marcadores.");
+        forceDownloadBlob(blob, `${slugifyName(imageName || "listado-marcadores")}-marcadores-incluidos.jpg`);
+      }, "image/jpeg", 0.94);
+    }
+
+    function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+      const rr = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+      if (fill) ctx.fill();
+      if (stroke) ctx.stroke();
     }
 
     function stripStyleProps(styleStr, props) {
@@ -2219,13 +2299,13 @@
 
     const btnMarkers = document.createElement("button");
     btnMarkers.type = "button";
-    btnMarkers.textContent = "DOWNLOAD MARKER LIST CSV";
+    btnMarkers.textContent = "DOWNLOAD MARKER LIST JPG";
     btnMarkers.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
     enhanceButton(btnMarkers);
     btnMarkers.addEventListener("click", () => {
       setButtonLoading(btnMarkers, true);
       try {
-        downloadCurrentMarkerListCsv(imageNameInput.value || "listado-marcadores");
+        downloadCurrentMarkerListJpg(imageNameInput.value || "listado-marcadores");
       } finally {
         setTimeout(() => setButtonLoading(btnMarkers, false), 220);
       }
@@ -2236,17 +2316,26 @@
     btnTemplatePdf.textContent = "DOWNLOAD PRINT TEMPLATE PDF";
     btnTemplatePdf.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
     enhanceButton(btnTemplatePdf);
+
+    const exportProgress = document.createElement("div");
+    exportProgress.id = "pbn-export-progress";
+    exportProgress.style.cssText = "display:none; flex-basis:100%; margin:4px 0 0 2px; padding:8px 10px; border-radius:10px; background:#fff8d8; color:#5b4a00; font-size:12px; font-weight:800;";
+
     btnTemplatePdf.addEventListener("click", async () => {
+      const startedAt = nowMs();
       setButtonLoading(btnTemplatePdf, true);
       try {
         const imageName = (imageNameInput.value || "referencia-paintbynumber").toString().trim();
         if (!imageName) return alert("Ponle un nombre a la imagen antes de subirla.");
+        setExportProgress("Etapa 1/5: leyendo imagen de referencia y marcadores actuales…");
         const markerRows = collectCurrentMarkerRows();
         const referenceDataUrl = getReferenceCanvasDataUrl();
         const referenceUrl = await uploadReferenceImageToCloudinary(referenceDataUrl, imageName);
         await generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows });
+        setExportProgress(`Listo: PDF generado en ${elapsedText(startedAt)}. Si no se descargó, revisa bloqueo de descargas del navegador.`);
       } catch (e) {
         console.error(e);
+        setExportProgress("Error: " + (e && e.message ? e.message : "No pude generar la plantilla PDF."));
         alert(e && e.message ? e.message : "No pude generar la plantilla PDF.");
       } finally {
         setButtonLoading(btnTemplatePdf, false);
@@ -2259,6 +2348,7 @@
     dl.appendChild(btnStorageConfig);
     dl.appendChild(btnMarkers);
     dl.appendChild(btnTemplatePdf);
+    dl.appendChild(exportProgress);
   }
 
   // ---------- Floating launcher ----------
