@@ -1,45 +1,41 @@
-# Paint by Number export improvements
+# PBN exports integrados
 
-Se agregaron estas mejoras en `recolor/recolor.js`:
+Esta versión agrega:
 
-1. Botón `DOWNLOAD MARKER LIST CSV`.
-   - Descarga el listado de reemplazos activos.
-   - Incluye tag original, color original, marcador reemplazo, color marcador y tag final.
-   - Al final incluye una fila resumen con los marcadores únicos incluidos.
+1. Campo **Nombre imagen**.
+2. Botón **DOWNLOAD MARKER LIST CSV**.
+3. Botón **CONFIG STORAGE**.
+4. Botón **DOWNLOAD PRINT TEMPLATE PDF**.
 
-2. Campo `Nombre imagen`.
-   - Se usa para nombrar la imagen subida y el PDF final.
+## Configuración Cloudinary ya integrada
 
-3. Botón `DOWNLOAD PRINT TEMPLATE PDF`.
-   - Toma la imagen original desde el canvas de entrada.
-   - La sube a Cloudinary mediante unsigned upload.
-   - Genera un QR con la URL pública de Cloudinary.
-   - Genera un PDF A4 con imagen de referencia, QR, datos de contacto y un cuadro pequeño con los marcadores incluidos.
+Esta versión ya viene preconfigurada con:
 
-## Configuración Cloudinary
+- Cloud name: `df4fayh1q`
+- Unsigned upload preset: `pbn_unsigned`
+- Folder: `paintbynumber-referencias`
 
-Como la app corre en navegador/GitHub Pages, no conviene usar claves secretas. Por eso se usa Cloudinary con unsigned upload preset.
+Por eso, si el preset `pbn_unsigned` existe en tu cuenta Cloudinary y está en modo **Unsigned**, no debería pedirte datos para generar el PDF.
 
-La primera vez que aprietes `DOWNLOAD PRINT TEMPLATE PDF`, el navegador pedirá:
+## Qué hace el PDF
 
-- Cloudinary cloud name
-- Cloudinary unsigned upload preset
-- Carpeta Cloudinary
+Al apretar **DOWNLOAD PRINT TEMPLATE PDF**:
 
-Queda guardado en `localStorage` del navegador.
+1. Toma la imagen original/reference del canvas.
+2. La sube a Cloudinary usando el preset unsigned.
+3. Obtiene una URL pública permanente.
+4. Genera un QR con esa URL.
+5. Crea un PDF imprimible con:
+   - imagen de referencia,
+   - nombre de imagen,
+   - QR,
+   - cuadro compacto de marcadores incluidos,
+   - datos de contacto.
 
-También puedes definirlo manualmente antes de cargar `recolor.js`:
+## Si falla el upload
 
-```html
-<script>
-  window.PBN_UPLOAD_CONFIG = {
-    cloudName: "TU_CLOUD_NAME",
-    unsignedPreset: "TU_UNSIGNED_PRESET",
-    folder: "paintbynumber-referencias"
-  };
-</script>
-```
+- Si dice `Upload preset not found`, revisa que el preset se llame exactamente `pbn_unsigned`.
+- Si dice algo relacionado a firma/signature, revisa que el preset esté configurado como **Unsigned**.
+- Si cambias el cloud name o el preset, usa el botón **CONFIG STORAGE** para sobrescribir la configuración en ese navegador.
 
-## Nota importante
-
-El PDF se recrea en código imitando la plantilla visual actual. No edita directamente el PDF base existente. Esto evita depender de un backend pesado y permite que funcione desde GitHub Pages.
+No necesitas pegar API key ni API secret en el programa.

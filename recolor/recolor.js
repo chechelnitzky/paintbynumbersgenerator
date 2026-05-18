@@ -921,9 +921,19 @@
     });
   }
 
+  const DEFAULT_PBN_UPLOAD_CONFIG = {
+    cloudName: "df4fayh1q",
+    unsignedPreset: "pbn_unsigned",
+    folder: "paintbynumber-referencias"
+  };
+
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v3";
+
   function getUploadConfig() {
-    const saved = safeJsonParse(localStorage.getItem("pbn_upload_config") || "null") || {};
-    const cfg = Object.assign({}, window.PBN_UPLOAD_CONFIG || {}, saved || {});
+    // v3 intentionally ignores older saved config keys so a previously mistyped
+    // cloud_name does not keep breaking the new integrated version.
+    const saved = safeJsonParse(localStorage.getItem(PBN_UPLOAD_CONFIG_STORAGE_KEY) || "null") || {};
+    const cfg = Object.assign({}, DEFAULT_PBN_UPLOAD_CONFIG, window.PBN_UPLOAD_CONFIG || {}, saved || {});
     return {
       cloudName: (cfg.cloudName || "").toString().trim(),
       unsignedPreset: (cfg.unsignedPreset || cfg.uploadPreset || "").toString().trim(),
@@ -932,18 +942,41 @@
   }
 
   function setUploadConfig(cfg) {
-    try { localStorage.setItem("pbn_upload_config", JSON.stringify(cfg)); } catch (_) {}
+    try { localStorage.setItem(PBN_UPLOAD_CONFIG_STORAGE_KEY, JSON.stringify(cfg)); } catch (_) {}
   }
 
-  async function ensureUploadConfig() {
-    let cfg = getUploadConfig();
-    if (cfg.cloudName && cfg.unsignedPreset) return cfg;
+  function clearUploadConfig() {
+    try { localStorage.removeItem(PBN_UPLOAD_CONFIG_STORAGE_KEY); } catch (_) {}
+  }
 
-    const cloudName = prompt("Cloudinary cloud name (una sola vez):", cfg.cloudName || "");
-    if (!cloudName) throw new Error("Falta Cloudinary cloud name.");
-    const unsignedPreset = prompt("Cloudinary unsigned upload preset (una sola vez):", cfg.unsignedPreset || "");
-    if (!unsignedPreset) throw new Error("Falta unsigned upload preset.");
-    const folder = prompt("Carpeta Cloudinary:", cfg.folder || "paintbynumber-referencias") || "paintbynumber-referencias";
+  function explainCloudinaryConfig() {
+    return [
+      "Para automatizar el QR, la imagen debe subirse a un hosting público.",
+      "",
+      "Usaremos Cloudinary con unsigned upload:",
+      "1) Cloud name: el nombre corto de tu cuenta Cloudinary. No es tu email ni tu usuario de GitHub.",
+      "2) Unsigned upload preset: un preset activo creado en Cloudinary > Settings > Upload > Upload presets, con Signing Mode = Unsigned.",
+      "3) Carpeta: opcional. Ej: paintbynumber-referencias.",
+      "",
+      "Esta versión ya trae integrada tu configuración inicial:",
+      "Cloud name: df4fayh1q",
+      "Upload preset: pbn_unsigned",
+      "Folder: paintbynumber-referencias",
+      "",
+      "Puedes cambiarla con CONFIG STORAGE si alguna vez modificas el preset."
+    ].join("\n");
+  }
+
+  async function ensureUploadConfig(forceAsk = false) {
+    let cfg = getUploadConfig();
+    if (!forceAsk && cfg.cloudName && cfg.unsignedPreset) return cfg;
+
+    alert(explainCloudinaryConfig());
+    const cloudName = prompt("Cloudinary CLOUD NAME\nEjemplo: si tu dashboard dice Cloud name = abc123, escribe abc123", cfg.cloudName || "");
+    if (!cloudName) throw new Error("Falta Cloudinary cloud name. Sin esto no puedo subir la imagen ni generar un QR público automático.");
+    const unsignedPreset = prompt("Cloudinary UNSIGNED UPLOAD PRESET\nDebe existir en Cloudinary y estar activo como Unsigned.", cfg.unsignedPreset || "");
+    if (!unsignedPreset) throw new Error("Falta unsigned upload preset. Debe ser un preset activo con Signing Mode = Unsigned.");
+    const folder = prompt("Carpeta Cloudinary opcional", cfg.folder || "paintbynumber-referencias") || "paintbynumber-referencias";
     cfg = { cloudName: cloudName.trim(), unsignedPreset: unsignedPreset.trim(), folder: folder.trim() };
     setUploadConfig(cfg);
     return cfg;
@@ -980,7 +1013,15 @@
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.secure_url) {
       console.error("Cloudinary upload error", json);
-      throw new Error(json.error && json.error.message ? json.error.message : "Falló la subida a Cloudinary.");
+      const msg = json.error && json.error.message ? json.error.message : "Falló la subida a Cloudinary.";
+      if (/cloud_name is disabled|Invalid cloud name|Unknown cloud/i.test(msg)) {
+        clearUploadConfig();
+        throw new Error("Cloudinary rechazó el cloud name. Probablemente escribiste mal el Cloud name, pegaste tu email/usuario en vez del Cloud name, o esa cuenta está deshabilitada. Borré la configuración guardada: vuelve a apretar el botón y pega el Cloud name correcto desde tu Dashboard de Cloudinary.");
+      }
+      if (/Upload preset not found|upload preset/i.test(msg)) {
+        throw new Error("Cloudinary rechazó el upload preset. Revisa que el preset exista, esté activo y tenga Signing Mode = Unsigned.");
+      }
+      throw new Error(msg);
     }
     return json.secure_url;
   }
@@ -1020,7 +1061,11 @@
 
     doc.setFont("times", "italic");
     doc.setFontSize(28);
-    doc.text("Imagen de Referencia", pageW / 2, 48, { align: "center" });
+    doc.text("Imagen de Referencia", pageW / 2, 46, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(90, 90, 90);
+    doc.text(String(imageName || "").slice(0, 70), pageW / 2, 52, { align: "center" });
 
     // Reference image area
     const imgBox = { x: 22, y: 58, w: pageW - 44, h: 158 };
@@ -2154,6 +2199,24 @@
     nameInputWrap.appendChild(nameLabel);
     nameInputWrap.appendChild(imageNameInput);
 
+    const btnStorageConfig = document.createElement("button");
+    btnStorageConfig.type = "button";
+    btnStorageConfig.textContent = "CONFIG STORAGE";
+    btnStorageConfig.title = "Configura Cloudinary para subir automáticamente la imagen y generar el QR público";
+    btnStorageConfig.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnStorageConfig);
+    btnStorageConfig.addEventListener("click", async () => {
+      setButtonLoading(btnStorageConfig, true);
+      try {
+        await ensureUploadConfig(true);
+        alert("Storage configurado. Ahora puedes usar DOWNLOAD PRINT TEMPLATE PDF.\n\nCloud name: " + getUploadConfig().cloudName + "\nPreset: " + getUploadConfig().unsignedPreset + "\nFolder: " + getUploadConfig().folder);
+      } catch (e) {
+        alert(e && e.message ? e.message : "No pude guardar la configuración.");
+      } finally {
+        setButtonLoading(btnStorageConfig, false);
+      }
+    });
+
     const btnMarkers = document.createElement("button");
     btnMarkers.type = "button";
     btnMarkers.textContent = "DOWNLOAD MARKER LIST CSV";
@@ -2193,6 +2256,7 @@
     dl.appendChild(btnSvg);
     dl.appendChild(btnPng);
     dl.appendChild(nameInputWrap);
+    dl.appendChild(btnStorageConfig);
     dl.appendChild(btnMarkers);
     dl.appendChild(btnTemplatePdf);
   }
