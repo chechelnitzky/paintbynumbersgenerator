@@ -1,12 +1,12 @@
 # Paint by Number — Recolor Export Add-on
 
-Versión visible actual: **Recolor v1.1**
+Versión visible actual: **Recolor v1.2**
 
 IMPORTANTE PARA FUTURAS MODIFICACIONES:
 Cada vez que se entregue un ZIP nuevo, cambiar en `recolor/recolor.js`:
 
 ```js
-const VERSION = "v1.1";
+const VERSION = "v1.2";
 ```
 
 a `v1.2`, `v1.3`, etc. Así Joseph puede confirmar visualmente arriba a la izquierda que el navegador está usando la versión nueva y no una versión cacheada.
@@ -91,3 +91,13 @@ El PDF también incluye un cuadro pequeño con los marcadores incluidos.
 
 - `recolor/recolor.js`
 - `PBN_EXPORTS_README.md`
+
+
+## v1.2 - mejoras de velocidad y diagnóstico
+
+- El PDF ya no intenta subir/incrustar la imagen gigante original: crea una copia optimizada de máximo 2400 px por lado en JPG 86%.
+- La subida a Cloudinary muestra el peso aproximado del archivo.
+- La subida tiene timeout de 45 segundos para evitar que el botón quede procesando infinito.
+- jsPDF y QRCode se cargan en paralelo y se pre-cargan silenciosamente al abrir el panel de recoloreo.
+- El QR se genera localmente en el navegador con la librería `qrcode`; no se usa una web externa de QR.
+- Reglas del PDF: A4 vertical, imagen sin rotar, sin recortar, centrada y ajustada proporcionalmente dentro del área de referencia.

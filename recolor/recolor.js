@@ -1,4 +1,4 @@
-/* Recolor add-on (v1.1 - JPG MARKER LIST + PDF PROGRESS + EXPLICIT TEMPLATE RULES)
+/* Recolor add-on (v1.2 - FAST PDF EXPORT + TIMEOUTS + PROGRESS)
    ✅ Adds small visible version label above “Paint by number generator” title (page)
    ✅ Code always has a VERSION constant
    ✅ Suggestion selector: OFF (Closest) [DEFAULT] / SOFT (recommended) / HARD (experimental)
@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.1"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v1.2"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -902,21 +902,32 @@
     downloadText(filename, "\ufeff" + csv, "text/csv;charset=utf-8");
   }
 
-  function loadExternalScript(src, globalCheck) {
+  function loadExternalScript(src, globalCheck, timeoutMs = 20000) {
     if (globalCheck && globalCheck()) return Promise.resolve();
     return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (fn, value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        fn(value);
+      };
+      const timer = setTimeout(() => {
+        finish(reject, new Error("Se demoró demasiado cargando una librería externa: " + src + ". Revisa conexión/CDN o recarga la página."));
+      }, timeoutMs);
+
       const existing = Array.from(document.querySelectorAll("script")).find((s) => s.src === src);
       if (existing) {
-        existing.addEventListener("load", () => resolve(), { once: true });
-        existing.addEventListener("error", () => reject(new Error("No se pudo cargar " + src)), { once: true });
-        if (globalCheck && globalCheck()) resolve();
+        if (globalCheck && globalCheck()) return finish(resolve);
+        existing.addEventListener("load", () => finish(resolve), { once: true });
+        existing.addEventListener("error", () => finish(reject, new Error("No se pudo cargar " + src)), { once: true });
         return;
       }
       const s = document.createElement("script");
       s.src = src;
       s.async = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error("No se pudo cargar " + src));
+      s.onload = () => finish(resolve);
+      s.onerror = () => finish(reject, new Error("No se pudo cargar " + src));
       document.head.appendChild(s);
     });
   }
@@ -992,11 +1003,34 @@
   function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
   function elapsedText(start) { return `${Math.max(1, Math.round((nowMs() - start) / 1000))}s`; }
 
-  function getReferenceCanvasDataUrl() {
+  function getReferenceCanvasDataUrl(maxSide = 2400, quality = 0.86) {
     const c = document.getElementById("canvas");
     if (!c || !c.width || !c.height) throw new Error("No encuentro la imagen de referencia en el canvas de entrada.");
-    try { return c.toDataURL("image/jpeg", 0.92); }
-    catch (e) { throw new Error("No pude leer la imagen de referencia. Vuelve a cargarla desde archivo local y prueba de nuevo."); }
+
+    // FAST EXPORT: no subimos ni incrustamos la imagen gigante original.
+    // Para el QR y el PDF basta una referencia optimizada de máximo 2400 px por lado.
+    // Esto baja mucho el peso, acelera Cloudinary y evita que jsPDF se quede pegado.
+    const srcW = c.width;
+    const srcH = c.height;
+    const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
+    const outW = Math.max(1, Math.round(srcW * scale));
+    const outH = Math.max(1, Math.round(srcH * scale));
+
+    try {
+      if (scale >= 0.999) return c.toDataURL("image/jpeg", quality);
+      const tmp = document.createElement("canvas");
+      tmp.width = outW;
+      tmp.height = outH;
+      const ctx = tmp.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(c, 0, 0, outW, outH);
+      return tmp.toDataURL("image/jpeg", quality);
+    } catch (e) {
+      throw new Error("No pude leer la imagen de referencia. Vuelve a cargarla desde archivo local y prueba de nuevo.");
+    }
   }
 
   function dataUrlToBlob(dataUrl) {
@@ -1010,8 +1044,10 @@
 
   async function uploadReferenceImageToCloudinary(dataUrl, imageName) {
     const cfg = await ensureUploadConfig();
-    setExportProgress("Etapa 2/5: subiendo imagen a Cloudinary para crear URL pública del QR…");
+    setExportProgress("Etapa 2/5: subiendo imagen optimizada a Cloudinary para crear URL pública del QR…");
     const blob = dataUrlToBlob(dataUrl);
+    const sizeMb = (blob.size / (1024 * 1024)).toFixed(2);
+    setExportProgress(`Etapa 2/5: subiendo a Cloudinary (${sizeMb} MB aprox.)…`);
     const publicId = `${slugifyName(imageName, "referencia")}-${Date.now()}`;
     const form = new FormData();
     form.append("file", blob, `${publicId}.jpg`);
@@ -1020,7 +1056,17 @@
     if (cfg.folder) form.append("folder", cfg.folder);
 
     const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/image/upload`;
-    const res = await fetch(endpoint, { method: "POST", body: form });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+    let res;
+    try {
+      res = await fetch(endpoint, { method: "POST", body: form, signal: controller.signal });
+    } catch (err) {
+      if (err && err.name === "AbortError") throw new Error("La subida a Cloudinary demoró más de 45 segundos y se canceló. Revisa conexión, preset Unsigned o baja el tamaño de la imagen.");
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     const json = await res.json().catch(() => ({}));
     if (!res.ok || !json.secure_url) {
       console.error("Cloudinary upload error", json);
@@ -1048,10 +1094,12 @@
   }
 
   async function generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
-    setExportProgress("Etapa 3/5: cargando librerías PDF y QR en el navegador…");
-    await loadExternalScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF);
-    await loadExternalScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js", () => window.QRCode && window.QRCode.toDataURL);
-    setExportProgress("Etapa 4/5: generando QR localmente y armando plantilla A4…");
+    setExportProgress("Etapa 3/5: cargando librerías PDF y QR en paralelo…");
+    await Promise.all([
+      loadExternalScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF, 20000),
+      loadExternalScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js", () => window.QRCode && window.QRCode.toDataURL, 20000)
+    ]);
+    setExportProgress("Etapa 4/5: generando QR localmente y armando plantilla A4 sin rotar ni recortar…");
 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -2321,15 +2369,21 @@
     exportProgress.id = "pbn-export-progress";
     exportProgress.style.cssText = "display:none; flex-basis:100%; margin:4px 0 0 2px; padding:8px 10px; border-radius:10px; background:#fff8d8; color:#5b4a00; font-size:12px; font-weight:800;";
 
+    // Pre-carga silenciosa para que el botón de PDF no espere tanto después del click.
+    setTimeout(() => {
+      loadExternalScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF, 20000).catch(() => {});
+      loadExternalScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js", () => window.QRCode && window.QRCode.toDataURL, 20000).catch(() => {});
+    }, 800);
+
     btnTemplatePdf.addEventListener("click", async () => {
       const startedAt = nowMs();
       setButtonLoading(btnTemplatePdf, true);
       try {
         const imageName = (imageNameInput.value || "referencia-paintbynumber").toString().trim();
         if (!imageName) return alert("Ponle un nombre a la imagen antes de subirla.");
-        setExportProgress("Etapa 1/5: leyendo imagen de referencia y marcadores actuales…");
+        setExportProgress("Etapa 1/5: leyendo imagen y creando versión optimizada para QR/PDF…");
         const markerRows = collectCurrentMarkerRows();
-        const referenceDataUrl = getReferenceCanvasDataUrl();
+        const referenceDataUrl = getReferenceCanvasDataUrl(2400, 0.86);
         const referenceUrl = await uploadReferenceImageToCloudinary(referenceDataUrl, imageName);
         await generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows });
         setExportProgress(`Listo: PDF generado en ${elapsedText(startedAt)}. Si no se descargó, revisa bloqueo de descargas del navegador.`);
