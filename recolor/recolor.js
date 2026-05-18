@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.4"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v1.6"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -938,7 +938,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v4";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v6";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1167,34 +1167,38 @@
     const safeName = String(imageName || '').replace(/[<>&"]/g, (c) => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
     const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=10&data=${encodeURIComponent(artworkUrl)}`;
     const markerHtml = markerBoxesHtml(markerRows);
-    const bgUrl = new URL('./assets/pbn_template_bg.png', window.location.href).href;
+    const bgUrl = new URL('./assets/clean_template_v3.png', window.location.href).href;
     return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <title>${safeName || 'plantilla-referencia'}</title>
 <style>
-  @page { size: A4 portrait; margin: 0; }
+  @page { size: 216mm 330mm; margin: 0; }
   html, body { margin:0; padding:0; background:#fff; font-family: Arial, Helvetica, sans-serif; }
-  .page { width:210mm; height:297mm; box-sizing:border-box; position:relative; background:white; overflow:hidden; }
-  .bg { position:absolute; inset:0; width:210mm; height:297mm; object-fit:cover; display:block; }
-  .qr { position:absolute; right:16mm; top:12.5mm; width:28mm; height:28mm; object-fit:contain; }
-  .image-box { position:absolute; left:24mm; top:42mm; width:162mm; height:176mm; display:flex; align-items:center; justify-content:center; }
-  .artwork { max-width:100%; max-height:100%; object-fit:contain; display:block; }
-  .markers { position:absolute; left:12mm; right:12mm; top:225mm; min-height:28mm; border:1px solid rgba(0,0,0,.18); border-radius:4mm; background:rgba(255,255,255,.92); box-sizing:border-box; padding:6mm 4mm 3mm; }
-  .markers-title { position:absolute; top:2.5mm; left:4mm; font-size:10pt; font-weight:700; color:#222; }
-  .markers-grid { display:flex; flex-wrap:wrap; gap:2mm; align-content:flex-start; margin-top:4mm; }
-  .marker-chip { width:13mm; height:8mm; border:1px solid rgba(0,0,0,.25); border-radius:1.6mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:6.5pt; font-weight:800; }
-  .empty-markers { font-size:9pt; color:#777; margin-top:6mm; }
-  @media screen { body { background:#ddd; padding: 12px 0; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
+  .page { width:216mm; height:330mm; box-sizing:border-box; position:relative; background:white; overflow:hidden; }
+  .sheet { position:absolute; inset:7mm; background:#fff; overflow:hidden; }
+  .bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .qr-wrap { position:absolute; right:16mm; top:12mm; width:34mm; display:flex; flex-direction:column; align-items:center; gap:2mm; }
+  .qr { width:28mm; height:28mm; object-fit:contain; display:block; }
+  .image-frame { position:absolute; left:25mm; top:82mm; width:152mm; height:110mm; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; }
+  .markers { position:absolute; left:19mm; right:19mm; top:207mm; min-height:26mm; background:transparent; box-sizing:border-box; }
+  .markers-title { font-size:6.2mm; line-height:1.1; font-weight:700; color:#2f2f2f; margin-bottom:4.5mm; }
+  .markers-grid { display:flex; flex-wrap:wrap; gap:3mm; align-content:flex-start; }
+  .marker-chip { min-width:14mm; height:9mm; padding:0 3.4mm; border:none; border-radius:2mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:4.2mm; font-weight:800; box-shadow:none; }
+  .empty-markers { font-size:9pt; color:#777; margin-top:2mm; }
+  @media screen { body { background:#d9d9d9; padding: 10px 0; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
 </style>
 </head>
 <body>
   <div class="page">
-    <img class="bg" src="${bgUrl}" alt="Plantilla base">
-    <img class="qr" src="${qrSrc}" alt="QR">
-    <div class="image-box"><img class="artwork" src="${artworkDataUrl}" alt="Arte recoloreado"></div>
-    <div class="markers"><div class="markers-title">Marcadores incluidos</div><div class="markers-grid">${markerHtml}</div></div>
+    <div class="sheet">
+      <img class="bg" src="${bgUrl}" alt="Plantilla base limpia">
+      <div class="qr-wrap"><img class="qr" src="${qrSrc}" alt="QR"></div>
+      <div class="image-frame"><img class="artwork" src="${artworkDataUrl}" alt="Arte recoloreado"></div>
+      <div class="markers"><div class="markers-title">Marcadores incluidos</div><div class="markers-grid">${markerHtml}</div></div>
+    </div>
   </div>
 </body>
 </html>`;
@@ -1227,7 +1231,7 @@
       });
       setTimeout(resolve, 6000);
     });
-    setExportProgress("Etapa 5/5: se abrirá impresión. Elige 'Guardar como PDF' y DESACTIVA 'Encabezados y pies de página' para que no aparezcan fecha/URL. Tamaño: A4 vertical, escala 100%, márgenes ninguno.");
+    setExportProgress("Etapa 5/5: se abrirá impresión. Elige 'Guardar como PDF', papel OFICIO y DESACTIVA 'Encabezados y pies de página' para que no aparezcan fecha/URL. Orientación vertical, escala 100%, márgenes ninguno.");
     try {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
@@ -1237,7 +1241,7 @@
   }
 
   async function generatePrintableReferencePdf({ imageName, artworkDataUrl, artworkUrl, markerRows }) {
-    setExportProgress("Etapa 4/5: armando plantilla con tu diseño base + QR + marcadores…");
+    setExportProgress("Etapa 4/5: armando plantilla OFICIO con tu diseño base + QR + marcadores…");
     const html = buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows });
     await printHtmlAsPdf(html, imageName);
   }
@@ -2438,7 +2442,7 @@
         const artworkDataUrl = await rasterizeSvgToPngDataUrlHQ(recolorSvg, 3600);
         const artworkUrl = await uploadArtworkToCloudinary(artworkDataUrl, imageName);
         await generatePrintableReferencePdf({ imageName, artworkDataUrl, artworkUrl, markerRows });
-        setExportProgress(`Listo: plantilla preparada en ${elapsedText(startedAt)}. Si ves fecha/URL al imprimir, desactiva 'Encabezados y pies de página' en el diálogo de impresión.`);
+        setExportProgress(`Listo: plantilla OFICIO preparada en ${elapsedText(startedAt)}. Si ves fecha/URL al imprimir, desactiva 'Encabezados y pies de página' en el diálogo de impresión.`);
       } catch (e) {
         console.error(e);
         setExportProgress("Error: " + (e && e.message ? e.message : "No pude generar la plantilla PDF."));
