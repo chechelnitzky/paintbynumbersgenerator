@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v2.4"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v2.5"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -938,7 +938,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v24";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v25";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1179,10 +1179,13 @@
   .page { width:216mm; height:330mm; box-sizing:border-box; position:relative; background:#fff; overflow:hidden; }
   .sheet { position:absolute; inset:7mm; background:#fff; overflow:hidden; }
   .bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
-  .qr-wrap { position:absolute; left:160.4mm; top:9.4mm; width:18.6mm; height:18.6mm; padding:.95mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.92); border:.28mm solid rgba(0,0,0,.05); border-radius:2.2mm; box-shadow:0 .9mm 2.6mm rgba(0,0,0,.07), 0 .2mm .55mm rgba(0,0,0,.045); }
+  .qr-cleaner { position:absolute; right:4mm; top:0mm; width:56mm; height:47mm; background:rgba(255,255,255,.97); border-radius:0 0 7mm 7mm; }
+  .qr-module { position:absolute; right:7.2mm; top:4.2mm; width:48mm; height:38.5mm; box-sizing:border-box; display:grid; grid-template-rows:4.2mm 23mm 4.2mm; row-gap:3.55mm; align-items:center; justify-items:center; text-align:center; }
+  .qr-label-top, .qr-label-bottom { width:100%; font-family:Inter, Arial, Helvetica, sans-serif; font-size:3.15mm; line-height:1; font-weight:850; letter-spacing:.03em; color:#333; text-transform:uppercase; white-space:nowrap; }
+  .qr-card { width:23mm; height:23mm; padding:1.25mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.95); border:.28mm solid rgba(0,0,0,.055); border-radius:2.3mm; box-shadow:0 .85mm 2.5mm rgba(0,0,0,.07), 0 .18mm .55mm rgba(0,0,0,.045); }
   .qr { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; display:block; }
-  .image-frame { position:absolute; left:24.3mm; top:80.2mm; width:154.6mm; height:109.2mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:visible; background:transparent; border:none; border-radius:0; box-shadow:none; }
-  .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; border-radius:0; }
+  .image-frame { position:absolute; left:50%; top:77.5mm; transform:translateX(-50%); width:163mm; height:115mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:visible; background:transparent; border:none; border-radius:0; box-shadow:none; padding:0; }
+  .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; border:none; box-shadow:none; border-radius:0; }
   .markers { position:absolute; left:20mm; right:20mm; top:207.5mm; min-height:31mm; background:transparent; box-sizing:border-box; }
   .markers-title { font-size:4.1mm; line-height:1.1; font-weight:760; color:#2c2c2c; margin-bottom:3.2mm; letter-spacing:.004em; }
   .markers-grid { display:flex; flex-wrap:wrap; gap:2.9mm 2.8mm; align-content:flex-start; }
@@ -1195,7 +1198,7 @@
   <div class="page">
     <div class="sheet">
       <img class="bg" src="${bgUrl}" alt="Plantilla base limpia">
-      <div class="qr-wrap"><img class="qr" src="${qrSrc}" alt="QR"></div>
+      <div class="qr-cleaner" aria-hidden="true"></div><div class="qr-module"><div class="qr-label-top">ESCANEA QR</div><div class="qr-card"><img class="qr" src="${qrSrc}" alt="QR"></div><div class="qr-label-bottom">PARA HACERLE ZOOM</div></div>
       <div class="image-frame"><img class="artwork" src="${artworkDataUrl}" alt="Arte recoloreado"></div>
       <div class="markers"><div class="markers-title">Marcadores incluidos (${uniqueMarkers(markerRows).length} ${uniqueMarkers(markerRows).length === 1 ? "color" : "colores"})</div><div class="markers-grid">${markerHtml}</div></div>
     </div>
