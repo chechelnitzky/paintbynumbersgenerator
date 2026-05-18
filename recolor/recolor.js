@@ -1,5 +1,5 @@
-/* Recolor add-on (v1.0 - TITLE VERSION LABEL + OFF/SOFT/HARD SUGGESTIONS, UI UNCHANGED)
-   ✅ Adds small “Recolor v1.0” label above “Paint by number generator” title (page)
+/* Recolor add-on (v1.4 - TEMPLATE BACKGROUND + RECOLORED-ARTWORK QR + CLEAN PRINT)
+   ✅ Adds small visible version label above “Paint by number generator” title (page)
    ✅ Code always has a VERSION constant
    ✅ Suggestion selector: OFF (Closest) [DEFAULT] / SOFT (recommended) / HARD (experimental)
    ✅ SOFT/HARD only apply when user activates them
@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.0"; // Next edits: v2, v3, v4, ...
+  const VERSION = "v2.6"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -129,6 +129,15 @@
     const r = Number(m[1]), g = Number(m[2]), b = Number(m[3]);
     const to2 = (n) => n.toString(16).padStart(2, "0");
     return `#${to2(r)}${to2(g)}${to2(b)}`.toLowerCase();
+  }
+  function hexToRgb(hex) {
+    const h = (hex || "").replace("#", "").trim();
+    if (h.length !== 6) return null;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    if (![r, g, b].every(Number.isFinite)) return null;
+    return { r, g, b };
   }
   function textColorForBg(hex) {
     const h = (hex || "").replace("#", "");
@@ -870,6 +879,376 @@
     forceDownloadBlob(blob, filename);
   }
 
+
+  // ---------- PBN production exports (markers + printable reference PDF) ----------
+  function slugifyName(value, fallback = "paintbynumber") {
+    const raw = (value || "").toString().trim() || fallback;
+    return raw
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9-_]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase()
+      .slice(0, 80) || fallback;
+  }
+
+  function escapeCsvCell(value) {
+    const s = (value == null ? "" : String(value));
+    return /[",\n\r;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  function downloadCsv(filename, rows) {
+    const csv = rows.map((r) => r.map(escapeCsvCell).join(",")).join("\n");
+    downloadText(filename, "\ufeff" + csv, "text/csv;charset=utf-8");
+  }
+
+  function loadExternalScript(src, globalCheck, timeoutMs = 20000) {
+    if (globalCheck && globalCheck()) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const finish = (fn, value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        fn(value);
+      };
+      const timer = setTimeout(() => {
+        finish(reject, new Error("Se demoró demasiado cargando una librería externa: " + src + ". Revisa conexión/CDN o recarga la página."));
+      }, timeoutMs);
+
+      const existing = Array.from(document.querySelectorAll("script")).find((s) => s.src === src);
+      if (existing) {
+        if (globalCheck && globalCheck()) return finish(resolve);
+        existing.addEventListener("load", () => finish(resolve), { once: true });
+        existing.addEventListener("error", () => finish(reject, new Error("No se pudo cargar " + src)), { once: true });
+        return;
+      }
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.onload = () => finish(resolve);
+      s.onerror = () => finish(reject, new Error("No se pudo cargar " + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  const DEFAULT_PBN_UPLOAD_CONFIG = {
+    cloudName: "df4fayh1q",
+    unsignedPreset: "pbn_unsigned",
+    folder: "paintbynumber-referencias"
+  };
+
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v26";
+
+  function getUploadConfig() {
+    // v3 intentionally ignores older saved config keys so a previously mistyped
+    // cloud_name does not keep breaking the new integrated version.
+    const saved = safeJsonParse(localStorage.getItem(PBN_UPLOAD_CONFIG_STORAGE_KEY) || "null") || {};
+    const cfg = Object.assign({}, DEFAULT_PBN_UPLOAD_CONFIG, window.PBN_UPLOAD_CONFIG || {}, saved || {});
+    return {
+      cloudName: (cfg.cloudName || "").toString().trim(),
+      unsignedPreset: (cfg.unsignedPreset || cfg.uploadPreset || "").toString().trim(),
+      folder: (cfg.folder || "paintbynumber-referencias").toString().trim()
+    };
+  }
+
+  function setUploadConfig(cfg) {
+    try { localStorage.setItem(PBN_UPLOAD_CONFIG_STORAGE_KEY, JSON.stringify(cfg)); } catch (_) {}
+  }
+
+  function clearUploadConfig() {
+    try { localStorage.removeItem(PBN_UPLOAD_CONFIG_STORAGE_KEY); } catch (_) {}
+  }
+
+  function explainCloudinaryConfig() {
+    return [
+      "Para automatizar el QR, la imagen debe subirse a un hosting público.",
+      "",
+      "Usaremos Cloudinary con unsigned upload:",
+      "1) Cloud name: el nombre corto de tu cuenta Cloudinary. No es tu email ni tu usuario de GitHub.",
+      "2) Unsigned upload preset: un preset activo creado en Cloudinary > Settings > Upload > Upload presets, con Signing Mode = Unsigned.",
+      "3) Carpeta: opcional. Ej: paintbynumber-referencias.",
+      "",
+      "Esta versión ya trae integrada tu configuración inicial:",
+      "Cloud name: df4fayh1q",
+      "Upload preset: pbn_unsigned",
+      "Folder: paintbynumber-referencias",
+      "",
+      "Puedes cambiarla con CONFIG STORAGE si alguna vez modificas el preset."
+    ].join("\n");
+  }
+
+  async function ensureUploadConfig(forceAsk = false) {
+    let cfg = getUploadConfig();
+    if (!forceAsk && cfg.cloudName && cfg.unsignedPreset) return cfg;
+
+    alert(explainCloudinaryConfig());
+    const cloudName = prompt("Cloudinary CLOUD NAME\nEjemplo: si tu dashboard dice Cloud name = abc123, escribe abc123", cfg.cloudName || "");
+    if (!cloudName) throw new Error("Falta Cloudinary cloud name. Sin esto no puedo subir la imagen ni generar un QR público automático.");
+    const unsignedPreset = prompt("Cloudinary UNSIGNED UPLOAD PRESET\nDebe existir en Cloudinary y estar activo como Unsigned.", cfg.unsignedPreset || "");
+    if (!unsignedPreset) throw new Error("Falta unsigned upload preset. Debe ser un preset activo con Signing Mode = Unsigned.");
+    const folder = prompt("Carpeta Cloudinary opcional", cfg.folder || "paintbynumber-referencias") || "paintbynumber-referencias";
+    cfg = { cloudName: cloudName.trim(), unsignedPreset: unsignedPreset.trim(), folder: folder.trim() };
+    setUploadConfig(cfg);
+    return cfg;
+  }
+
+  function setExportProgress(message) {
+    const el = document.getElementById("pbn-export-progress");
+    if (!el) return;
+    el.textContent = message || "";
+    el.style.display = message ? "block" : "none";
+  }
+
+  function nowMs() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+  function elapsedText(start) { return `${Math.max(1, Math.round((nowMs() - start) / 1000))}s`; }
+
+  function getReferenceCanvasDataUrl(maxSide = 2400, quality = 0.86) {
+    const c = document.getElementById("canvas");
+    if (!c || !c.width || !c.height) throw new Error("No encuentro la imagen de referencia en el canvas de entrada.");
+
+    const srcW = c.width;
+    const srcH = c.height;
+    const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
+    const outW = Math.max(1, Math.round(srcW * scale));
+    const outH = Math.max(1, Math.round(srcH * scale));
+
+    try {
+      if (scale >= 0.999) return c.toDataURL("image/jpeg", quality);
+      const tmp = document.createElement("canvas");
+      tmp.width = outW;
+      tmp.height = outH;
+      const ctx = tmp.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(c, 0, 0, outW, outH);
+      return tmp.toDataURL("image/jpeg", quality);
+    } catch (e) {
+      throw new Error("No pude leer la imagen de referencia. Vuelve a cargarla desde archivo local y prueba de nuevo.");
+    }
+  }
+
+  async function rasterizeSvgToPngDataUrlHQ(svgEl, maxSide = 3600) {
+    const MAX_SIDE = 20000;
+    const MAX_PIXELS = 220e6;
+    const { w: baseW, h: baseH } = getSvgSize(svgEl);
+    if (!baseW || !baseH) throw new Error("No pude leer el tamaño del SVG recoloreado.");
+
+    const scaleBase = Math.max(1, maxSide / Math.max(baseW, baseH));
+    let outW = Math.max(1, Math.round(baseW * scaleBase));
+    let outH = Math.max(1, Math.round(baseH * scaleBase));
+
+    if (outW > MAX_SIDE || outH > MAX_SIDE) {
+      const s = Math.min(MAX_SIDE / outW, MAX_SIDE / outH);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
+    const pixels = outW * outH;
+    if (pixels > MAX_PIXELS) {
+      const s = Math.sqrt(MAX_PIXELS / pixels);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
+
+    const svgClone = svgEl.cloneNode(true);
+    const svgText = new XMLSerializer().serializeToString(svgClone);
+    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+
+    const drawIntoCanvas = async (imgOrBitmap) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(imgOrBitmap, 0, 0, outW, outH);
+      return canvas.toDataURL("image/png");
+    };
+
+    try {
+      if (typeof createImageBitmap === "function") {
+        const bitmap = await createImageBitmap(svgBlob);
+        return await drawIntoCanvas(bitmap);
+      }
+    } catch (_) {}
+
+    const url = URL.createObjectURL(svgBlob);
+    try {
+      const img = new Image();
+      img.decoding = "async";
+      img.crossOrigin = "anonymous";
+      await new Promise((res, rej) => {
+        img.onload = () => res();
+        img.onerror = (e) => rej(e);
+        img.src = url;
+      });
+      return await drawIntoCanvas(img);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    const parts = dataUrl.split(",");
+    const mime = (parts[0].match(/:(.*?);/) || [])[1] || "application/octet-stream";
+    const bin = atob(parts[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  async function uploadArtworkToCloudinary(dataUrl, imageName) {
+    const cfg = await ensureUploadConfig();
+    setExportProgress("Etapa 3/5: subiendo arte recoloreado HD a Cloudinary para crear URL pública del QR…");
+    const blob = dataUrlToBlob(dataUrl);
+    const sizeMb = (blob.size / (1024 * 1024)).toFixed(2);
+    setExportProgress(`Etapa 3/5: subiendo archivo HD a Cloudinary (${sizeMb} MB aprox.)…`);
+    const publicId = `${slugifyName(imageName, "recolor")}-${Date.now()}`;
+    const ext = /png/i.test(blob.type) ? "png" : "jpg";
+    const form = new FormData();
+    form.append("file", blob, `${publicId}.${ext}`);
+    form.append("upload_preset", cfg.unsignedPreset);
+    form.append("public_id", publicId);
+    if (cfg.folder) form.append("folder", cfg.folder);
+
+    const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/image/upload`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
+    let res;
+    try {
+      res = await fetch(endpoint, { method: "POST", body: form, signal: controller.signal });
+    } catch (err) {
+      if (err && err.name === "AbortError") throw new Error("La subida a Cloudinary demoró más de 60 segundos y se canceló. Revisa conexión, preset Unsigned o baja el tamaño de la imagen.");
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.secure_url) {
+      console.error("Cloudinary upload error", json);
+      const msg = json.error && json.error.message ? json.error.message : "Falló la subida a Cloudinary.";
+      if (/cloud_name is disabled|Invalid cloud name|Unknown cloud/i.test(msg)) {
+        clearUploadConfig();
+        throw new Error("Cloudinary rechazó el cloud name. Probablemente escribiste mal el Cloud name, pegaste tu email/usuario en vez del Cloud name, o esa cuenta está deshabilitada. Borré la configuración guardada: vuelve a apretar el botón y pega el Cloud name correcto desde tu Dashboard de Cloudinary.");
+      }
+      if (/Upload preset not found|upload preset/i.test(msg)) {
+        throw new Error("Cloudinary rechazó el upload preset. Revisa que el preset exista, esté activo y tenga Signing Mode = Unsigned.");
+      }
+      throw new Error(msg);
+    }
+    return json.secure_url;
+  }
+
+  function uniqueMarkers(markerRows) {
+    const map = new Map();
+    markerRows.forEach((r) => {
+      if (!r.replacementTag) return;
+      const key = r.replacementTag;
+      if (!map.has(key)) map.set(key, { tag: r.replacementTag, hex: r.replacementHex || "#ffffff" });
+    });
+    return Array.from(map.values()).sort((a, b) => String(a.tag).localeCompare(String(b.tag), undefined, { numeric: true }));
+  }
+
+  function markerBoxesHtml(markerRows) {
+    const markers = uniqueMarkers(markerRows);
+    if (!markers.length) return '<div class="empty-markers">Sin marcadores detectados.</div>';
+    return markers.slice(0, 72).map((m) => {
+      const hex = norm(m.hex) || '#ffffff';
+      const txt = textColorForBg(hex) === '#fff' ? '#fff' : '#111';
+      return `<div class="marker-chip" style="background:${hex};color:${txt};"><span>${String(m.tag)}</span></div>`;
+    }).join('');
+  }
+
+  function buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows }) {
+    const safeName = String(imageName || '').replace(/[<>&"]/g, (c) => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
+    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=10&data=${encodeURIComponent(artworkUrl)}`;
+    const markerHtml = markerBoxesHtml(markerRows);
+    const bgUrl = new URL('./assets/clean_template_v3.png', window.location.href).href;
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${safeName || 'plantilla-referencia'}</title>
+<style>
+  @page { size: 216mm 330mm; margin: 0; }
+  html, body { margin:0; padding:0; background:#fff; font-family: Inter, Arial, Helvetica, sans-serif; }
+  .page { width:216mm; height:330mm; box-sizing:border-box; position:relative; background:#fff; overflow:hidden; }
+  .sheet { position:absolute; inset:7mm; background:#fff; overflow:hidden; }
+  .bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .qr-cleaner { position:absolute; right:4mm; top:0mm; width:56mm; height:47mm; background:rgba(255,255,255,.97); border-radius:0 0 7mm 7mm; }
+  .qr-module { position:absolute; right:7.2mm; top:4.2mm; width:48mm; height:38.5mm; box-sizing:border-box; display:grid; grid-template-rows:4.2mm 23mm 4.2mm; row-gap:3.55mm; align-items:center; justify-items:center; text-align:center; }
+  .qr-label-top, .qr-label-bottom { width:100%; font-family:Inter, Arial, Helvetica, sans-serif; font-size:3.15mm; line-height:1; font-weight:850; letter-spacing:.03em; color:#333; text-transform:uppercase; white-space:nowrap; }
+  .qr-card { width:23mm; height:23mm; padding:1.25mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.95); border:.28mm solid rgba(0,0,0,.055); border-radius:2.3mm; box-shadow:0 .85mm 2.5mm rgba(0,0,0,.07), 0 .18mm .55mm rgba(0,0,0,.045); }
+  .qr { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; display:block; }
+  .image-frame { position:absolute; left:50%; top:73.8mm; transform:translateX(-50%); width:171mm; height:160mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:visible; background:transparent; border:none; border-radius:0; box-shadow:none; padding:0; }
+  .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; border:none; box-shadow:none; border-radius:0; }
+  .markers { position:absolute; left:20mm; right:20mm; top:239.5mm; min-height:28mm; background:transparent; box-sizing:border-box; }
+  .markers-title { font-size:4.1mm; line-height:1.05; font-weight:760; color:#2c2c2c; margin-bottom:2.6mm; letter-spacing:.004em; }
+  .markers-grid { display:flex; flex-wrap:wrap; gap:2.9mm 2.8mm; align-content:flex-start; }
+  .marker-chip { min-width:12.1mm; height:7.4mm; padding:0 2.8mm; border:none; border-radius:1.7mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-family: Inter, Arial, Helvetica, sans-serif; font-size:2.95mm; font-weight:820; letter-spacing:.01em; box-shadow:inset 0 .2mm .35mm rgba(255,255,255,.24), 0 .42mm 1.1mm rgba(0,0,0,.08); }
+  .empty-markers { font-size:9pt; color:#777; margin-top:2mm; }
+  @media screen { body { background:#d9d9d9; padding: 10px 0; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="sheet">
+      <img class="bg" src="${bgUrl}" alt="Plantilla base limpia">
+      <div class="qr-cleaner" aria-hidden="true"></div><div class="qr-module"><div class="qr-label-top">ESCANEA QR</div><div class="qr-card"><img class="qr" src="${qrSrc}" alt="QR"></div><div class="qr-label-bottom">PARA HACERLE ZOOM</div></div>
+      <div class="image-frame"><img class="artwork" src="${artworkDataUrl}" alt="Arte recoloreado"></div>
+      <div class="markers"><div class="markers-title">Marcadores incluidos (${uniqueMarkers(markerRows).length} ${uniqueMarkers(markerRows).length === 1 ? "color" : "colores"})</div><div class="markers-grid">${markerHtml}</div></div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  async function printHtmlAsPdf(html, imageName) {
+    setExportProgress("Etapa 4/5: abriendo plantilla OFICIO en modo impresión del navegador…");
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.setAttribute("aria-hidden", "true");
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    await new Promise((resolve) => {
+      const imgs = Array.from(doc.images || []);
+      if (!imgs.length) return resolve();
+      let remaining = imgs.length;
+      const done = () => { remaining -= 1; if (remaining <= 0) resolve(); };
+      imgs.forEach((img) => {
+        if (img.complete) return done();
+        img.onload = done;
+        img.onerror = done;
+      });
+      setTimeout(resolve, 6000);
+    });
+    setExportProgress("Etapa 5/5: se abrirá impresión. Elige 'Guardar como PDF', papel OFICIO y DESACTIVA 'Encabezados y pies de página' para que no aparezcan fecha/URL. Orientación vertical, escala 100%, márgenes ninguno.");
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } finally {
+      setTimeout(() => iframe.remove(), 60000);
+    }
+  }
+
+  async function generatePrintableReferencePdf({ imageName, artworkDataUrl, artworkUrl, markerRows }) {
+    setExportProgress("Etapa 4/5: armando plantilla OFICIO con tu diseño base + QR + marcadores…");
+    const html = buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows });
+    await printHtmlAsPdf(html, imageName);
+  }
+
   async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
     const MAX_SIDE = 20000;
     const MAX_PIXELS = 220e6;
@@ -1031,7 +1410,21 @@
     return x;
   }
 
-  function renderGridPicker({ onPick, isUsed }) {
+  function makePickerBlockedX() {
+    const x = document.createElement("div");
+    x.className = "tile-blocked-x";
+    x.style.cssText = `
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      font-weight:1000; font-size:31px; color: rgba(220,0,0,.88);
+      text-shadow: 0 1px 0 rgba(255,255,255,.75), 0 0 3px rgba(255,255,255,.7);
+      pointer-events:none; opacity:0; transition: opacity 120ms ease;
+      transform: rotate(-8deg);
+    `;
+    x.textContent = "✕";
+    return x;
+  }
+
+  function renderGridPicker({ onPick, isUsed, isBlocked, onToggleBlocked, getBlockMode }) {
     const grid = document.createElement("div");
     grid.style.cssText = `
       display:grid; grid-template-columns: repeat(10, minmax(0, 1fr));
@@ -1056,22 +1449,45 @@
 
       if (tag) tile.appendChild(makeBadgeCorner(tag));
       const x = makePickerTileX();
+      const bx = makePickerBlockedX();
       tile.appendChild(x);
+      tile.appendChild(bx);
 
-      tile.addEventListener("click", () => onPick({ hex, tag }));
+      tile.addEventListener("click", (ev) => {
+        const blockIntent = (getBlockMode && getBlockMode()) || ev.altKey || ev.shiftKey;
+        if (blockIntent) { onToggleBlocked({ hex, tag }); return; }
+        if (isBlocked && isBlocked(hex)) {
+          alert("Ese marcador está marcado como NO DISPONIBLE. Desbloquéalo o usa otro color.");
+          return;
+        }
+        onPick({ hex, tag });
+      });
+      tile.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        onToggleBlocked({ hex, tag });
+      });
       grid.appendChild(tile);
       tilesByHex.set(hex, tile);
     });
 
-    function refreshUsedX() {
+    function refreshStates() {
       for (const [hex, tile] of tilesByHex.entries()) {
-        const x = tile.querySelector(".tile-used-x");
-        if (!x) continue;
-        x.style.opacity = isUsed(hex) ? "1" : "0";
+        const usedX = tile.querySelector(".tile-used-x");
+        const blockedX = tile.querySelector(".tile-blocked-x");
+        const blocked = isBlocked && isBlocked(hex);
+        if (usedX) usedX.style.opacity = (!blocked && isUsed(hex)) ? "1" : "0";
+        if (blockedX) blockedX.style.opacity = blocked ? "1" : "0";
+        tile.style.opacity = blocked ? ".48" : "1";
+        tile.style.filter = blocked ? "grayscale(.18)" : "none";
+        tile.style.border = blocked ? "2px solid rgba(220,0,0,.72)" : "1px solid rgba(0,0,0,.16)";
+        const tag = tile.querySelector('.tag-badge') ? (tile.querySelector('.tag-badge').textContent || '').trim() : '';
+        tile.title = blocked
+          ? `${tag ? tag + " — " : ""}${hex} — NO DISPONIBLE. Click derecho o modo bloquear para desbloquear.`
+          : `${tag ? tag + " — " : ""}${hex}`;
       }
     }
-    refreshUsedX();
-    return { grid, refreshUsedX };
+    refreshStates();
+    return { grid, refreshUsedX: refreshStates, refreshStates };
   }
 
   // ---------- ORIGINAL TAG MAPPING ----------
@@ -1335,6 +1751,8 @@
     if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
     if (typeof savedUi.textOpacity === "number") textOpacity = Math.max(0, Math.min(1, savedUi.textOpacity));
     if (typeof savedUi.selectedOldHex === "string") selectedOldHex = savedUi.selectedOldHex;
+    const blockedPaletteHexes = new Set(Array.isArray(savedUi.blockedPaletteHexes) ? savedUi.blockedPaletteHexes.map(norm).filter(isHex6) : []);
+    let blockUnavailableMode = false;
 
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
@@ -1347,7 +1765,13 @@
 
     const left = document.createElement("div");
     left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    left.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Colores originales (TAG + reemplazo + renombrar + sugerencia)</div>`;
+    const leftHeader = document.createElement("div");
+    leftHeader.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;";
+    const leftTitle = document.createElement("div");
+    leftTitle.textContent = "Colores originales (TAG + reemplazo + renombrar + sugerencia)";
+    leftTitle.style.cssText = "font-weight:800;";
+    leftHeader.appendChild(leftTitle);
+    left.appendChild(leftHeader);
     controls.appendChild(left);
 
     const right = document.createElement("div");
@@ -1357,8 +1781,37 @@
 
     const info = document.createElement("div");
     info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
-    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla (o usa la sugerencia).";
+    info.textContent = "Click en un color original (izquierda). Luego elige reemplazo. Para marcar un marcador como NO DISPONIBLE: activa BLOQUEAR o usa click derecho/Shift+click en la grilla.";
     right.appendChild(info);
+
+    const pickerTools = document.createElement("div");
+    pickerTools.style.cssText = "display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;";
+    const btnBlockMode = document.createElement("button");
+    btnBlockMode.type = "button";
+    btnBlockMode.textContent = "BLOQUEAR NO DISPONIBLES: OFF";
+    btnBlockMode.title = "Activa este modo y luego haz click en colores de la grilla para marcarlos como no disponibles. También puedes usar click derecho o Shift+click.";
+    btnBlockMode.style.cssText = "padding:8px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.20); background:white; cursor:pointer; font-size:11px; font-weight:900;";
+    enhanceButton(btnBlockMode);
+    const btnClearBlocked = document.createElement("button");
+    btnClearBlocked.type = "button";
+    btnClearBlocked.textContent = "LIMPIAR BLOQUEOS";
+    btnClearBlocked.style.cssText = "padding:8px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.14); background:rgba(0,0,0,.04); cursor:pointer; font-size:11px; font-weight:900;";
+    enhanceButton(btnClearBlocked);
+    const blockedCount = document.createElement("span");
+    blockedCount.style.cssText = "font-size:11px; color:rgba(0,0,0,.62); font-weight:800;";
+    pickerTools.appendChild(btnBlockMode);
+    pickerTools.appendChild(btnClearBlocked);
+    pickerTools.appendChild(blockedCount);
+    right.appendChild(pickerTools);
+
+    function paintBlockTools() {
+      btnBlockMode.textContent = `BLOQUEAR NO DISPONIBLES: ${blockUnavailableMode ? "ON" : "OFF"}`;
+      btnBlockMode.style.background = blockUnavailableMode ? "#fff0f0" : "white";
+      btnBlockMode.style.borderColor = blockUnavailableMode ? "rgba(220,0,0,.55)" : "rgba(0,0,0,.20)";
+      btnBlockMode.style.color = blockUnavailableMode ? "#b00000" : "#111";
+      blockedCount.textContent = blockedPaletteHexes.size ? `${blockedPaletteHexes.size} bloqueado(s)` : "sin bloqueos";
+    }
+    paintBlockTools();
 
     // Row state maps
     const rowByOldHex = new Map();
@@ -1377,6 +1830,104 @@
         map.set(norm(tag), replHex);
       }
       return map;
+    }
+
+
+    function collectCurrentMarkerRows() {
+      const rows = [];
+      for (const [oldHex, row] of rowByOldHex.entries()) {
+        const meta = row.querySelector(".row-text");
+        const replHex = norm(row.getAttribute("data-replhex") || "");
+        const replTag = (row.getAttribute("data-repltag") || "").toString().trim();
+        const inp = renameInputByOldHex.get(oldHex);
+        const finalTag = inp ? (inp.value || "").toString().trim() : "";
+        const originalTagNode = row.firstChild;
+        const originalTag = originalTagNode ? (originalTagNode.textContent || "").toString().trim() : "";
+        rows.push({
+          originalTag,
+          originalHex: oldHex,
+          replacementTag: replTag || finalTag,
+          replacementHex: replHex,
+          finalTag,
+          description: meta ? (meta.textContent || "").trim() : ""
+        });
+      }
+      return rows;
+    }
+
+    function downloadCurrentMarkerListJpg(imageName) {
+      const rows = collectCurrentMarkerRows();
+      const markers = uniqueMarkers(rows);
+      if (!markers.length) return alert("No hay marcadores detectados todavía. Primero procesa/recolorea la imagen.");
+
+      const cols = 8;
+      const cellW = 110;
+      const cellH = 86;
+      const pad = 48;
+      const titleH = 92;
+      const w = pad * 2 + cols * cellW;
+      const h = titleH + pad + Math.ceil(markers.length / cols) * cellH + 50;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#111111";
+      ctx.font = "bold 34px Arial, sans-serif";
+      const markerCount = unique.length;
+      ctx.fillText(`Marcadores incluidos (${markerCount} ${markerCount === 1 ? "color" : "colores"})`, pad, 50);
+      ctx.font = "18px Arial, sans-serif";
+      ctx.fillStyle = "#666666";
+      ctx.fillText(String(imageName || "Paint by Number").slice(0, 80), pad, 78);
+
+      markers.forEach((m, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const x = pad + col * cellW;
+        const y = titleH + row * cellH;
+        const hex = isHex6(norm(m.hex)) ? norm(m.hex) : "#ffffff";
+        const rgb = hexToRgb(hex) || { r: 255, g: 255, b: 255 };
+
+        ctx.fillStyle = "#f7f7f7";
+        roundRect(ctx, x, y, 88, 66, 12, true, false);
+        ctx.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+        roundRect(ctx, x + 6, y + 6, 76, 54, 10, true, false);
+        ctx.strokeStyle = "rgba(0,0,0,.18)";
+        ctx.lineWidth = 2;
+        roundRect(ctx, x + 6, y + 6, 76, 54, 10, false, true);
+
+        const textWhite = textColorForBg(hex) === "#fff";
+        ctx.fillStyle = textWhite ? "#ffffff" : "#111111";
+        ctx.font = "bold 26px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(m.tag), x + 44, y + 34);
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+      });
+
+      ctx.fillStyle = "#777777";
+      ctx.font = "14px Arial, sans-serif";
+      ctx.fillText("www.paintbynumber.cl", pad, h - 22);
+
+      canvas.toBlob((blob) => {
+        if (!blob) return alert("No pude generar el JPG del listado de marcadores.");
+        forceDownloadBlob(blob, `${slugifyName(imageName || "listado-marcadores")}-marcadores-incluidos.jpg`);
+      }, "image/jpeg", 0.94);
+    }
+
+    function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+      const rr = Math.min(r, w / 2, h / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+      if (fill) ctx.fill();
+      if (stroke) ctx.stroke();
     }
 
     function stripStyleProps(styleStr, props) {
@@ -1446,7 +1997,7 @@
           if (replHex || rename || replTag) mappings[oldHex] = { replHex, replTag, rename };
         }
         cur.mappings = mappings;
-        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "" };
+        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "", blockedPaletteHexes: Array.from(blockedPaletteHexes) };
         return cur;
       });
     }
@@ -1500,15 +2051,45 @@
       else { applyTextColors(); saveAllState(); }
     }
 
-    const picker = renderGridPicker({
+    let picker;
+    function toggleBlockedPaletteHex(hex) {
+      const h = norm(hex);
+      if (!isHex6(h)) return;
+      if (blockedPaletteHexes.has(h)) blockedPaletteHexes.delete(h);
+      else blockedPaletteHexes.add(h);
+      recomputeSuggestionData();
+      if (picker) picker.refreshStates();
+      updateAllSuggestionTiles();
+      paintBlockTools();
+      saveAllState();
+    }
+
+    picker = renderGridPicker({
       isUsed: (hex) => usedReplacementHex.has(norm(hex)),
+      isBlocked: (hex) => blockedPaletteHexes.has(norm(hex)),
+      getBlockMode: () => blockUnavailableMode,
+      onToggleBlocked: ({ hex }) => toggleBlockedPaletteHex(hex),
       onPick: ({ hex, tag }) => {
         if (!selectedOldHex) { alert("Primero selecciona un color original (panel izquierdo)."); return; }
         applyReplacementToOldHex(selectedOldHex, hex, tag, { autoRename: true });
-        picker.refreshUsedX();
+        picker.refreshStates();
       },
     });
     right.appendChild(picker.grid);
+
+    btnBlockMode.addEventListener("click", () => {
+      blockUnavailableMode = !blockUnavailableMode;
+      paintBlockTools();
+    });
+    btnClearBlocked.addEventListener("click", () => {
+      if (!blockedPaletteHexes.size) return;
+      blockedPaletteHexes.clear();
+      recomputeSuggestionData();
+      picker.refreshStates();
+      updateAllSuggestionTiles();
+      paintBlockTools();
+      saveAllState();
+    });
 
     const list = document.createElement("div");
     list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
@@ -1545,20 +2126,30 @@
       }))
     );
 
-    const topK = computeTopKCandidates(originalCache, computePaletteCache(), SUG_PARAMS);
     const neighborGraph = buildNeighborGraphFromSVG(recolorSvg, fillGroups, originalCache, SUG_PARAMS);
 
+    function computeAvailablePaletteCache() {
+      const available = computePaletteCache().filter((p) => !blockedPaletteHexes.has(norm(p.hex)));
+      return available.length ? available : computePaletteCache();
+    }
+
+    let topK = computeTopKCandidates(originalCache, computeAvailablePaletteCache(), SUG_PARAMS);
     let modeMap = null; // for SOFT/HARD only
+
+    function recomputeSuggestionData() {
+      topK = computeTopKCandidates(originalCache, computeAvailablePaletteCache(), SUG_PARAMS);
+      modeMap = null;
+    }
 
     function computeSuggestionLocal(oldHex) {
       const labT = hexToLab(oldHex);
       if (!labT) return { hex: "", tag: "", meta: null };
-      return matchToPaletteColorLocal(labT, computePaletteCache());
+      return matchToPaletteColorLocal(labT, computeAvailablePaletteCache());
     }
 
     function recomputeModeMapIfNeeded() {
       if (suggestMode === "off") { modeMap = null; return; }
-      modeMap = suggestMapping(suggestMode, originalCache, computePaletteCache(), topK, neighborGraph, SUG_PARAMS);
+      modeMap = suggestMapping(suggestMode, originalCache, computeAvailablePaletteCache(), topK, neighborGraph, SUG_PARAMS);
     }
 
     function getSuggestionForOldHex(oldHex) {
@@ -1598,6 +2189,47 @@
       recomputeModeMapIfNeeded();
       for (const e of rawEntries) updateSuggestionTile(e.oldHex);
     }
+
+    function quickApplyAllSuggestions() {
+      let applied = 0;
+      recomputeModeMapIfNeeded();
+      for (const e of rawEntries) {
+        const s = getSuggestionForOldHex(e.oldHex);
+        const sh = norm(s && s.hex ? s.hex : "");
+        const st = (s && s.tag ? s.tag : "").toString().trim();
+        if (!isHex6(sh)) continue;
+        applyReplacementToOldHex(e.oldHex, sh, st, { autoRename: true });
+        applied += 1;
+      }
+      picker.refreshStates();
+      updateAllSuggestionTiles();
+      applyTextColors();
+      saveAllState();
+      setExportProgress(`Quick apply: ${applied} sugerencias aplicadas.`);
+      return applied;
+    }
+
+    const btnQuickApply = document.createElement("button");
+    btnQuickApply.type = "button";
+    btnQuickApply.textContent = "QUICK APPLY SUGGESTIONS";
+    btnQuickApply.title = "Aplica todas las sugerencias visibles de una vez y renombra los números automáticamente";
+    btnQuickApply.style.cssText = "padding:8px 11px; border-radius:10px; border:1px solid rgba(0,0,0,.20); background:#111; color:white; cursor:pointer; font-size:11px; font-weight:900; letter-spacing:.2px; white-space:nowrap;";
+    enhanceButton(btnQuickApply);
+    btnQuickApply.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setButtonLoading(btnQuickApply, true);
+      try {
+        const applied = quickApplyAllSuggestions();
+        if (!applied) alert("No encontré sugerencias aplicables todavía.");
+      } catch (err) {
+        console.error(err);
+        alert(err && err.message ? err.message : "No pude aplicar las sugerencias.");
+      } finally {
+        setTimeout(() => setButtonLoading(btnQuickApply, false), 220);
+      }
+    });
+    leftHeader.appendChild(btnQuickApply);
 
     // ---- Build list rows ----
     if (!rawEntries.length) {
@@ -1678,7 +2310,7 @@
           if (!isHex6(sh)) return;
           selectedOldHex = oldHex;
           applyReplacementToOldHex(oldHex, sh, st, { autoRename: true });
-          picker.refreshUsedX();
+          picker.refreshStates();
           highlightRow(oldHex);
         });
 
@@ -1750,7 +2382,7 @@
       const sel = st.ui && st.ui.selectedOldHex ? norm(st.ui.selectedOldHex) : "";
       if (sel && rowByOldHex.has(sel)) { selectedOldHex = sel; highlightRow(sel); }
 
-      picker.refreshUsedX();
+      picker.refreshStates();
       applyTextColors();
     }
 
@@ -1899,8 +2531,93 @@
       }
     });
 
+
+    const nameInputWrap = document.createElement("div");
+    nameInputWrap.style.cssText = "display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:12px; border:1px solid rgba(0,0,0,.14); background:white;";
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "Nombre imagen";
+    nameLabel.style.cssText = "font-size:12px; font-weight:900; color:rgba(0,0,0,.72); white-space:nowrap;";
+    const imageNameInput = document.createElement("input");
+    imageNameInput.type = "text";
+    imageNameInput.placeholder = "ej: florencia-60x40";
+    imageNameInput.style.cssText = "height:28px; width:190px; border:0; outline:none; font-size:13px; background:transparent;";
+    nameInputWrap.appendChild(nameLabel);
+    nameInputWrap.appendChild(imageNameInput);
+
+    const btnStorageConfig = document.createElement("button");
+    btnStorageConfig.type = "button";
+    btnStorageConfig.textContent = "CONFIG STORAGE";
+    btnStorageConfig.title = "Configura Cloudinary para subir automáticamente la imagen y generar el QR público";
+    btnStorageConfig.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnStorageConfig);
+    btnStorageConfig.addEventListener("click", async () => {
+      setButtonLoading(btnStorageConfig, true);
+      try {
+        await ensureUploadConfig(true);
+        alert("Storage configurado. Ahora puedes usar DOWNLOAD PRINT TEMPLATE PDF.\n\nCloud name: " + getUploadConfig().cloudName + "\nPreset: " + getUploadConfig().unsignedPreset + "\nFolder: " + getUploadConfig().folder);
+      } catch (e) {
+        alert(e && e.message ? e.message : "No pude guardar la configuración.");
+      } finally {
+        setButtonLoading(btnStorageConfig, false);
+      }
+    });
+
+    const btnMarkers = document.createElement("button");
+    btnMarkers.type = "button";
+    btnMarkers.textContent = "DOWNLOAD MARKER LIST JPG";
+    btnMarkers.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnMarkers);
+    btnMarkers.addEventListener("click", () => {
+      setButtonLoading(btnMarkers, true);
+      try {
+        downloadCurrentMarkerListJpg(imageNameInput.value || "listado-marcadores");
+      } finally {
+        setTimeout(() => setButtonLoading(btnMarkers, false), 220);
+      }
+    });
+
+    const btnTemplatePdf = document.createElement("button");
+    btnTemplatePdf.type = "button";
+    btnTemplatePdf.textContent = "DOWNLOAD PRINT TEMPLATE PDF";
+    btnTemplatePdf.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    enhanceButton(btnTemplatePdf);
+
+    const exportProgress = document.createElement("div");
+    exportProgress.id = "pbn-export-progress";
+    exportProgress.style.cssText = "display:none; flex-basis:100%; margin:4px 0 0 2px; padding:8px 10px; border-radius:10px; background:#fff8d8; color:#5b4a00; font-size:12px; font-weight:800;";
+
+    // v1.3: no pre-carga jsPDF/QRCode desde CDN. La plantilla usa impresión nativa del navegador.
+
+    btnTemplatePdf.addEventListener("click", async () => {
+      const startedAt = nowMs();
+      setButtonLoading(btnTemplatePdf, true);
+      try {
+        const imageName = (imageNameInput.value || "referencia-paintbynumber").toString().trim();
+        if (!imageName) return alert("Ponle un nombre a la imagen antes de subirla.");
+        setExportProgress("Etapa 1/5: leyendo marcadores activos…");
+        const markerRows = collectCurrentMarkerRows();
+        setExportProgress("Etapa 2/5: rasterizando el SVG recoloreado en HD para el QR y la plantilla…");
+        applyTextColors();
+        const artworkDataUrl = await rasterizeSvgToPngDataUrlHQ(recolorSvg, 3600);
+        const artworkUrl = await uploadArtworkToCloudinary(artworkDataUrl, imageName);
+        await generatePrintableReferencePdf({ imageName, artworkDataUrl, artworkUrl, markerRows });
+        setExportProgress(`Listo: plantilla OFICIO preparada en ${elapsedText(startedAt)}. Si ves fecha/URL al imprimir, desactiva 'Encabezados y pies de página' en el diálogo de impresión.`);
+      } catch (e) {
+        console.error(e);
+        setExportProgress("Error: " + (e && e.message ? e.message : "No pude generar la plantilla PDF."));
+        alert(e && e.message ? e.message : "No pude generar la plantilla PDF.");
+      } finally {
+        setButtonLoading(btnTemplatePdf, false);
+      }
+    });
+
     dl.appendChild(btnSvg);
     dl.appendChild(btnPng);
+    dl.appendChild(nameInputWrap);
+    dl.appendChild(btnStorageConfig);
+    dl.appendChild(btnMarkers);
+    dl.appendChild(btnTemplatePdf);
+    dl.appendChild(exportProgress);
   }
 
   // ---------- Floating launcher ----------
