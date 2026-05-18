@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.7"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v1.8"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -938,7 +938,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v7";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v8";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1179,14 +1179,14 @@
   .page { width:216mm; height:330mm; box-sizing:border-box; position:relative; background:white; overflow:hidden; }
   .sheet { position:absolute; inset:7mm; background:#fff; overflow:hidden; }
   .bg { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
-  .qr-wrap { position:absolute; right:18.5mm; top:10.5mm; width:31mm; height:37mm; display:flex; align-items:center; justify-content:center; }
-  .qr { width:27mm; height:27mm; object-fit:contain; display:block; }
-  .image-frame { position:absolute; left:24mm; top:81mm; width:154mm; height:108mm; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .qr-wrap { position:absolute; right:18.2mm; top:9.2mm; width:30mm; height:40mm; display:flex; align-items:center; justify-content:center; }
+  .qr { width:26.5mm; height:26.5mm; object-fit:contain; display:block; }
+  .image-frame { position:absolute; left:23mm; top:79mm; width:156mm; height:111mm; display:flex; align-items:center; justify-content:center; overflow:hidden; }
   .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; }
-  .markers { position:absolute; left:20mm; right:20mm; top:205mm; min-height:30mm; background:transparent; box-sizing:border-box; }
-  .markers-title { font-size:5.2mm; line-height:1.1; font-weight:800; color:#2b2b2b; margin-bottom:4.2mm; letter-spacing:.01em; }
-  .markers-grid { display:flex; flex-wrap:wrap; gap:2.8mm; align-content:flex-start; }
-  .marker-chip { min-width:13.5mm; height:8.4mm; padding:0 3.2mm; border:none; border-radius:1.8mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-family: Inter, Arial, Helvetica, sans-serif; font-size:3.55mm; font-weight:800; letter-spacing:.01em; box-shadow:none; }
+  .markers { position:absolute; left:20mm; right:20mm; top:204mm; min-height:32mm; background:transparent; box-sizing:border-box; }
+  .markers-title { font-size:4.65mm; line-height:1.1; font-weight:800; color:#252525; margin-bottom:4mm; letter-spacing:.005em; }
+  .markers-grid { display:flex; flex-wrap:wrap; gap:2.6mm 2.9mm; align-content:flex-start; }
+  .marker-chip { min-width:12.8mm; height:8mm; padding:0 3mm; border:none; border-radius:1.9mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-family: Inter, Arial, Helvetica, sans-serif; font-size:3.25mm; font-weight:850; letter-spacing:.005em; box-shadow:none; }
   .empty-markers { font-size:9pt; color:#777; margin-top:2mm; }
   @media screen { body { background:#d9d9d9; padding: 10px 0; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
 </style>
@@ -1205,7 +1205,7 @@
   }
 
   async function printHtmlAsPdf(html, imageName) {
-    setExportProgress("Etapa 4/5: abriendo plantilla A4 en modo impresión del navegador…");
+    setExportProgress("Etapa 4/5: abriendo plantilla OFICIO en modo impresión del navegador…");
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.right = "0";
@@ -1407,7 +1407,21 @@
     return x;
   }
 
-  function renderGridPicker({ onPick, isUsed }) {
+  function makePickerBlockedX() {
+    const x = document.createElement("div");
+    x.className = "tile-blocked-x";
+    x.style.cssText = `
+      position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      font-weight:1000; font-size:31px; color: rgba(220,0,0,.88);
+      text-shadow: 0 1px 0 rgba(255,255,255,.75), 0 0 3px rgba(255,255,255,.7);
+      pointer-events:none; opacity:0; transition: opacity 120ms ease;
+      transform: rotate(-8deg);
+    `;
+    x.textContent = "✕";
+    return x;
+  }
+
+  function renderGridPicker({ onPick, isUsed, isBlocked, onToggleBlocked, getBlockMode }) {
     const grid = document.createElement("div");
     grid.style.cssText = `
       display:grid; grid-template-columns: repeat(10, minmax(0, 1fr));
@@ -1432,22 +1446,45 @@
 
       if (tag) tile.appendChild(makeBadgeCorner(tag));
       const x = makePickerTileX();
+      const bx = makePickerBlockedX();
       tile.appendChild(x);
+      tile.appendChild(bx);
 
-      tile.addEventListener("click", () => onPick({ hex, tag }));
+      tile.addEventListener("click", (ev) => {
+        const blockIntent = (getBlockMode && getBlockMode()) || ev.altKey || ev.shiftKey;
+        if (blockIntent) { onToggleBlocked({ hex, tag }); return; }
+        if (isBlocked && isBlocked(hex)) {
+          alert("Ese marcador está marcado como NO DISPONIBLE. Desbloquéalo o usa otro color.");
+          return;
+        }
+        onPick({ hex, tag });
+      });
+      tile.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        onToggleBlocked({ hex, tag });
+      });
       grid.appendChild(tile);
       tilesByHex.set(hex, tile);
     });
 
-    function refreshUsedX() {
+    function refreshStates() {
       for (const [hex, tile] of tilesByHex.entries()) {
-        const x = tile.querySelector(".tile-used-x");
-        if (!x) continue;
-        x.style.opacity = isUsed(hex) ? "1" : "0";
+        const usedX = tile.querySelector(".tile-used-x");
+        const blockedX = tile.querySelector(".tile-blocked-x");
+        const blocked = isBlocked && isBlocked(hex);
+        if (usedX) usedX.style.opacity = (!blocked && isUsed(hex)) ? "1" : "0";
+        if (blockedX) blockedX.style.opacity = blocked ? "1" : "0";
+        tile.style.opacity = blocked ? ".48" : "1";
+        tile.style.filter = blocked ? "grayscale(.18)" : "none";
+        tile.style.border = blocked ? "2px solid rgba(220,0,0,.72)" : "1px solid rgba(0,0,0,.16)";
+        const tag = tile.querySelector('.tag-badge') ? (tile.querySelector('.tag-badge').textContent || '').trim() : '';
+        tile.title = blocked
+          ? `${tag ? tag + " — " : ""}${hex} — NO DISPONIBLE. Click derecho o modo bloquear para desbloquear.`
+          : `${tag ? tag + " — " : ""}${hex}`;
       }
     }
-    refreshUsedX();
-    return { grid, refreshUsedX };
+    refreshStates();
+    return { grid, refreshUsedX: refreshStates, refreshStates };
   }
 
   // ---------- ORIGINAL TAG MAPPING ----------
@@ -1711,6 +1748,8 @@
     if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
     if (typeof savedUi.textOpacity === "number") textOpacity = Math.max(0, Math.min(1, savedUi.textOpacity));
     if (typeof savedUi.selectedOldHex === "string") selectedOldHex = savedUi.selectedOldHex;
+    const blockedPaletteHexes = new Set(Array.isArray(savedUi.blockedPaletteHexes) ? savedUi.blockedPaletteHexes.map(norm).filter(isHex6) : []);
+    let blockUnavailableMode = false;
 
     setColorFills(recolorSvg, colorsOn);
     setBorders(recolorSvg, bordersOn);
@@ -1739,8 +1778,37 @@
 
     const info = document.createElement("div");
     info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
-    info.textContent = "Click en un color original (izquierda). Luego elige el color nuevo en la grilla (o usa la sugerencia).";
+    info.textContent = "Click en un color original (izquierda). Luego elige reemplazo. Para marcar un marcador como NO DISPONIBLE: activa BLOQUEAR o usa click derecho/Shift+click en la grilla.";
     right.appendChild(info);
+
+    const pickerTools = document.createElement("div");
+    pickerTools.style.cssText = "display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;";
+    const btnBlockMode = document.createElement("button");
+    btnBlockMode.type = "button";
+    btnBlockMode.textContent = "BLOQUEAR NO DISPONIBLES: OFF";
+    btnBlockMode.title = "Activa este modo y luego haz click en colores de la grilla para marcarlos como no disponibles. También puedes usar click derecho o Shift+click.";
+    btnBlockMode.style.cssText = "padding:8px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.20); background:white; cursor:pointer; font-size:11px; font-weight:900;";
+    enhanceButton(btnBlockMode);
+    const btnClearBlocked = document.createElement("button");
+    btnClearBlocked.type = "button";
+    btnClearBlocked.textContent = "LIMPIAR BLOQUEOS";
+    btnClearBlocked.style.cssText = "padding:8px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.14); background:rgba(0,0,0,.04); cursor:pointer; font-size:11px; font-weight:900;";
+    enhanceButton(btnClearBlocked);
+    const blockedCount = document.createElement("span");
+    blockedCount.style.cssText = "font-size:11px; color:rgba(0,0,0,.62); font-weight:800;";
+    pickerTools.appendChild(btnBlockMode);
+    pickerTools.appendChild(btnClearBlocked);
+    pickerTools.appendChild(blockedCount);
+    right.appendChild(pickerTools);
+
+    function paintBlockTools() {
+      btnBlockMode.textContent = `BLOQUEAR NO DISPONIBLES: ${blockUnavailableMode ? "ON" : "OFF"}`;
+      btnBlockMode.style.background = blockUnavailableMode ? "#fff0f0" : "white";
+      btnBlockMode.style.borderColor = blockUnavailableMode ? "rgba(220,0,0,.55)" : "rgba(0,0,0,.20)";
+      btnBlockMode.style.color = blockUnavailableMode ? "#b00000" : "#111";
+      blockedCount.textContent = blockedPaletteHexes.size ? `${blockedPaletteHexes.size} bloqueado(s)` : "sin bloqueos";
+    }
+    paintBlockTools();
 
     // Row state maps
     const rowByOldHex = new Map();
@@ -1925,7 +1993,7 @@
           if (replHex || rename || replTag) mappings[oldHex] = { replHex, replTag, rename };
         }
         cur.mappings = mappings;
-        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "" };
+        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "", blockedPaletteHexes: Array.from(blockedPaletteHexes) };
         return cur;
       });
     }
@@ -1979,15 +2047,45 @@
       else { applyTextColors(); saveAllState(); }
     }
 
-    const picker = renderGridPicker({
+    let picker;
+    function toggleBlockedPaletteHex(hex) {
+      const h = norm(hex);
+      if (!isHex6(h)) return;
+      if (blockedPaletteHexes.has(h)) blockedPaletteHexes.delete(h);
+      else blockedPaletteHexes.add(h);
+      recomputeSuggestionData();
+      if (picker) picker.refreshStates();
+      updateAllSuggestionTiles();
+      paintBlockTools();
+      saveAllState();
+    }
+
+    picker = renderGridPicker({
       isUsed: (hex) => usedReplacementHex.has(norm(hex)),
+      isBlocked: (hex) => blockedPaletteHexes.has(norm(hex)),
+      getBlockMode: () => blockUnavailableMode,
+      onToggleBlocked: ({ hex }) => toggleBlockedPaletteHex(hex),
       onPick: ({ hex, tag }) => {
         if (!selectedOldHex) { alert("Primero selecciona un color original (panel izquierdo)."); return; }
         applyReplacementToOldHex(selectedOldHex, hex, tag, { autoRename: true });
-        picker.refreshUsedX();
+        picker.refreshStates();
       },
     });
     right.appendChild(picker.grid);
+
+    btnBlockMode.addEventListener("click", () => {
+      blockUnavailableMode = !blockUnavailableMode;
+      paintBlockTools();
+    });
+    btnClearBlocked.addEventListener("click", () => {
+      if (!blockedPaletteHexes.size) return;
+      blockedPaletteHexes.clear();
+      recomputeSuggestionData();
+      picker.refreshStates();
+      updateAllSuggestionTiles();
+      paintBlockTools();
+      saveAllState();
+    });
 
     const list = document.createElement("div");
     list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
@@ -2024,20 +2122,30 @@
       }))
     );
 
-    const topK = computeTopKCandidates(originalCache, computePaletteCache(), SUG_PARAMS);
     const neighborGraph = buildNeighborGraphFromSVG(recolorSvg, fillGroups, originalCache, SUG_PARAMS);
 
+    function computeAvailablePaletteCache() {
+      const available = computePaletteCache().filter((p) => !blockedPaletteHexes.has(norm(p.hex)));
+      return available.length ? available : computePaletteCache();
+    }
+
+    let topK = computeTopKCandidates(originalCache, computeAvailablePaletteCache(), SUG_PARAMS);
     let modeMap = null; // for SOFT/HARD only
+
+    function recomputeSuggestionData() {
+      topK = computeTopKCandidates(originalCache, computeAvailablePaletteCache(), SUG_PARAMS);
+      modeMap = null;
+    }
 
     function computeSuggestionLocal(oldHex) {
       const labT = hexToLab(oldHex);
       if (!labT) return { hex: "", tag: "", meta: null };
-      return matchToPaletteColorLocal(labT, computePaletteCache());
+      return matchToPaletteColorLocal(labT, computeAvailablePaletteCache());
     }
 
     function recomputeModeMapIfNeeded() {
       if (suggestMode === "off") { modeMap = null; return; }
-      modeMap = suggestMapping(suggestMode, originalCache, computePaletteCache(), topK, neighborGraph, SUG_PARAMS);
+      modeMap = suggestMapping(suggestMode, originalCache, computeAvailablePaletteCache(), topK, neighborGraph, SUG_PARAMS);
     }
 
     function getSuggestionForOldHex(oldHex) {
@@ -2089,7 +2197,7 @@
         applyReplacementToOldHex(e.oldHex, sh, st, { autoRename: true });
         applied += 1;
       }
-      picker.refreshUsedX();
+      picker.refreshStates();
       updateAllSuggestionTiles();
       applyTextColors();
       saveAllState();
@@ -2198,7 +2306,7 @@
           if (!isHex6(sh)) return;
           selectedOldHex = oldHex;
           applyReplacementToOldHex(oldHex, sh, st, { autoRename: true });
-          picker.refreshUsedX();
+          picker.refreshStates();
           highlightRow(oldHex);
         });
 
@@ -2270,7 +2378,7 @@
       const sel = st.ui && st.ui.selectedOldHex ? norm(st.ui.selectedOldHex) : "";
       if (sel && rowByOldHex.has(sel)) { selectedOldHex = sel; highlightRow(sel); }
 
-      picker.refreshUsedX();
+      picker.refreshStates();
       applyTextColors();
     }
 
