@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v2.0"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v2.1"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -938,7 +938,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v9";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v21";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1197,7 +1197,7 @@
       <img class="bg" src="${bgUrl}" alt="Plantilla base limpia">
       <div class="qr-wrap"><img class="qr" src="${qrSrc}" alt="QR"></div>
       <div class="image-frame"><img class="artwork" src="${artworkDataUrl}" alt="Arte recoloreado"></div>
-      <div class="markers"><div class="markers-title">Marcadores incluidos</div><div class="markers-grid">${markerHtml}</div></div>
+      <div class="markers"><div class="markers-title">Marcadores incluidos (${uniqueMarkers(markerRows).length} ${uniqueMarkers(markerRows).length === 1 ? "color" : "colores"})</div><div class="markers-grid">${markerHtml}</div></div>
     </div>
   </div>
 </body>
@@ -1872,7 +1872,8 @@
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = "#111111";
       ctx.font = "bold 34px Arial, sans-serif";
-      ctx.fillText("Marcadores incluidos", pad, 50);
+      const markerCount = unique.length;
+      ctx.fillText(`Marcadores incluidos (${markerCount} ${markerCount === 1 ? "color" : "colores"})`, pad, 50);
       ctx.font = "18px Arial, sans-serif";
       ctx.fillStyle = "#666666";
       ctx.fillText(String(imageName || "Paint by Number").slice(0, 80), pad, 78);
