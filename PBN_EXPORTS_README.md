@@ -1,92 +1,42 @@
 # Paint by Number — Recolor Export Add-on
 
-Versión visible actual: **Recolor v1.3**
+Versión visible actual: **Recolor v1.4**
 
-## Regla obligatoria de versiones
-
+## Importante
 Cada vez que se modifique este ZIP, cambiar la constante `VERSION` en `recolor/recolor.js`.
+Así el texto rojo que aparece arriba del título principal cambia visualmente y sabes que realmente cargaste la nueva versión.
 
-Ubicación:
+## Qué hace esta versión
+- Mantiene visible la versión arriba: `Recolor v1.4`.
+- El botón **DOWNLOAD MARKER LIST JPG** exporta el listado de marcadores como JPG.
+- El botón **DOWNLOAD PRINT TEMPLATE PDF** ahora usa:
+  - el **arte recoloreado** (no la foto original) como imagen principal;
+  - ese mismo arte recoloreado en HD para subirlo a Cloudinary y generar el QR;
+  - la **plantilla visual original** del PDF que subiste, integrada como fondo local del sistema (`assets/pbn_template_bg.png`), para que la hoja final se vea como tu diseño.
+- En la plantilla ya no se agrega arriba la fecha/hora, ni el nombre, ni abajo la URL fallback dentro del documento.
 
-```js
-const VERSION = "v1.3";
-```
+## Flujo del botón DOWNLOAD PRINT TEMPLATE PDF
+1. Lee los marcadores activos.
+2. Rasteriza el SVG recoloreado a PNG HD.
+3. Sube ese PNG HD a Cloudinary.
+4. Genera el QR con la URL pública de Cloudinary.
+5. Abre la plantilla A4 para imprimir/guardar como PDF.
 
-La versión aparece arriba del título principal de la app. Esto permite confirmar visualmente que la versión nueva sí cargó y que el navegador no está mostrando una versión antigua en caché.
+## Ojo con la impresión del navegador
+La línea superior con fecha y la inferior con URL **no las agrega el código**, las agrega el diálogo de impresión del navegador si está activa la opción de encabezados y pies de página.
 
----
+Al guardar el PDF, usar:
+- **Guardar como PDF**
+- **Tamaño A4**
+- **Vertical**
+- **Escala 100%**
+- **Márgenes: ninguno / predeterminado según navegador**
+- **Desactivar “Encabezados y pies de página”**
 
-## Cambios v1.3
+## Storage integrado por defecto
+La versión viene precargada con:
+- Cloud name: `df4fayh1q`
+- Upload preset: `pbn_unsigned`
+- Folder: `paintbynumber-referencias`
 
-### 1. Se eliminó la dependencia crítica de jsPDF/CDN
-
-La v1.2 podía quedarse pegada en:
-
-```txt
-https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js
-```
-
-Eso no era el procesamiento de la imagen, sino una librería externa que no cargaba desde el CDN.
-
-En v1.3, la plantilla imprimible usa el motor nativo del navegador:
-
-1. Sube la imagen optimizada a Cloudinary.
-2. Genera el QR como imagen.
-3. Arma una plantilla A4 vertical en HTML.
-4. Abre el diálogo de impresión.
-5. El usuario debe elegir **Guardar como PDF**.
-
-Esto es más robusto en GitHub Pages porque no depende de cargar jsPDF desde un CDN.
-
-### 2. Marker list en JPG
-
-El botón `DOWNLOAD MARKER LIST JPG` exporta una imagen JPG con los marcadores incluidos.
-
-### 3. Plantilla A4
-
-Reglas actuales:
-
-- A4 vertical.
-- Imagen de referencia centrada.
-- La imagen no se gira.
-- La imagen no se recorta.
-- Se ajusta proporcionalmente dentro del área disponible.
-- QR arriba a la derecha.
-- Cuadro de marcadores incluido en el mismo PDF/plantilla.
-- Footer con teléfono, correo y web.
-
-### 4. QR
-
-El QR apunta a la URL pública de Cloudinary de la imagen optimizada.
-
-El QR se dibuja como una imagen dentro de la plantilla antes de imprimir. Si el servicio externo de QR fallara momentáneamente, la URL pública queda impresa en texto pequeño como respaldo.
-
----
-
-## Configuración Cloudinary integrada
-
-Valores por defecto:
-
-```txt
-Cloud name: df4fayh1q
-Unsigned upload preset: pbn_unsigned
-Folder: paintbynumber-referencias
-```
-
-El preset debe existir en Cloudinary y debe estar configurado como **Unsigned**.
-
-No usar API Key ni API Secret en GitHub Pages.
-
----
-
-## Recomendación al guardar PDF
-
-Cuando se abra el diálogo de impresión:
-
-- Destino: **Guardar como PDF**
-- Tamaño: **A4**
-- Orientación: **Vertical**
-- Escala: **100%**
-- Márgenes: **Ninguno** o **Predeterminado**, según cómo lo muestre el navegador
-- Activar gráficos de fondo si el navegador lo pregunta
-
+Si cambias el preset o la cuenta, usa el botón **CONFIG STORAGE**.

@@ -1,4 +1,4 @@
-/* Recolor add-on (v1.3 - NO jsPDF CDN + PRINT-TO-PDF FALLBACK + PROGRESS)
+/* Recolor add-on (v1.4 - TEMPLATE BACKGROUND + RECOLORED-ARTWORK QR + CLEAN PRINT)
    ✅ Adds small visible version label above “Paint by number generator” title (page)
    ✅ Code always has a VERSION constant
    ✅ Suggestion selector: OFF (Closest) [DEFAULT] / SOFT (recommended) / HARD (experimental)
@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.3"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v1.4"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -938,7 +938,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v3";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v4";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1007,9 +1007,6 @@
     const c = document.getElementById("canvas");
     if (!c || !c.width || !c.height) throw new Error("No encuentro la imagen de referencia en el canvas de entrada.");
 
-    // FAST EXPORT: no subimos ni incrustamos la imagen gigante original.
-    // Para el QR y el PDF basta una referencia optimizada de máximo 2400 px por lado.
-    // Esto baja mucho el peso, acelera Cloudinary y evita que jsPDF se quede pegado.
     const srcW = c.width;
     const srcH = c.height;
     const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
@@ -1033,6 +1030,68 @@
     }
   }
 
+  async function rasterizeSvgToPngDataUrlHQ(svgEl, maxSide = 3600) {
+    const MAX_SIDE = 20000;
+    const MAX_PIXELS = 220e6;
+    const { w: baseW, h: baseH } = getSvgSize(svgEl);
+    if (!baseW || !baseH) throw new Error("No pude leer el tamaño del SVG recoloreado.");
+
+    const scaleBase = Math.max(1, maxSide / Math.max(baseW, baseH));
+    let outW = Math.max(1, Math.round(baseW * scaleBase));
+    let outH = Math.max(1, Math.round(baseH * scaleBase));
+
+    if (outW > MAX_SIDE || outH > MAX_SIDE) {
+      const s = Math.min(MAX_SIDE / outW, MAX_SIDE / outH);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
+    const pixels = outW * outH;
+    if (pixels > MAX_PIXELS) {
+      const s = Math.sqrt(MAX_PIXELS / pixels);
+      outW = Math.max(1, Math.round(outW * s));
+      outH = Math.max(1, Math.round(outH * s));
+    }
+
+    const svgClone = svgEl.cloneNode(true);
+    const svgText = new XMLSerializer().serializeToString(svgClone);
+    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+
+    const drawIntoCanvas = async (imgOrBitmap) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, outW, outH);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(imgOrBitmap, 0, 0, outW, outH);
+      return canvas.toDataURL("image/png");
+    };
+
+    try {
+      if (typeof createImageBitmap === "function") {
+        const bitmap = await createImageBitmap(svgBlob);
+        return await drawIntoCanvas(bitmap);
+      }
+    } catch (_) {}
+
+    const url = URL.createObjectURL(svgBlob);
+    try {
+      const img = new Image();
+      img.decoding = "async";
+      img.crossOrigin = "anonymous";
+      await new Promise((res, rej) => {
+        img.onload = () => res();
+        img.onerror = (e) => rej(e);
+        img.src = url;
+      });
+      return await drawIntoCanvas(img);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   function dataUrlToBlob(dataUrl) {
     const parts = dataUrl.split(",");
     const mime = (parts[0].match(/:(.*?);/) || [])[1] || "application/octet-stream";
@@ -1042,27 +1101,28 @@
     return new Blob([arr], { type: mime });
   }
 
-  async function uploadReferenceImageToCloudinary(dataUrl, imageName) {
+  async function uploadArtworkToCloudinary(dataUrl, imageName) {
     const cfg = await ensureUploadConfig();
-    setExportProgress("Etapa 2/5: subiendo imagen optimizada a Cloudinary para crear URL pública del QR…");
+    setExportProgress("Etapa 3/5: subiendo arte recoloreado HD a Cloudinary para crear URL pública del QR…");
     const blob = dataUrlToBlob(dataUrl);
     const sizeMb = (blob.size / (1024 * 1024)).toFixed(2);
-    setExportProgress(`Etapa 2/5: subiendo a Cloudinary (${sizeMb} MB aprox.)…`);
-    const publicId = `${slugifyName(imageName, "referencia")}-${Date.now()}`;
+    setExportProgress(`Etapa 3/5: subiendo archivo HD a Cloudinary (${sizeMb} MB aprox.)…`);
+    const publicId = `${slugifyName(imageName, "recolor")}-${Date.now()}`;
+    const ext = /png/i.test(blob.type) ? "png" : "jpg";
     const form = new FormData();
-    form.append("file", blob, `${publicId}.jpg`);
+    form.append("file", blob, `${publicId}.${ext}`);
     form.append("upload_preset", cfg.unsignedPreset);
     form.append("public_id", publicId);
     if (cfg.folder) form.append("folder", cfg.folder);
 
     const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/image/upload`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
+    const timer = setTimeout(() => controller.abort(), 60000);
     let res;
     try {
       res = await fetch(endpoint, { method: "POST", body: form, signal: controller.signal });
     } catch (err) {
-      if (err && err.name === "AbortError") throw new Error("La subida a Cloudinary demoró más de 45 segundos y se canceló. Revisa conexión, preset Unsigned o baja el tamaño de la imagen.");
+      if (err && err.name === "AbortError") throw new Error("La subida a Cloudinary demoró más de 60 segundos y se canceló. Revisa conexión, preset Unsigned o baja el tamaño de la imagen.");
       throw err;
     } finally {
       clearTimeout(timer);
@@ -1103,10 +1163,11 @@
     }).join('');
   }
 
-  function buildPrintableTemplateHtml({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
+  function buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows }) {
     const safeName = String(imageName || '').replace(/[<>&"]/g, (c) => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
-    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=10&data=${encodeURIComponent(referenceUrl)}`;
+    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=10&data=${encodeURIComponent(artworkUrl)}`;
     const markerHtml = markerBoxesHtml(markerRows);
+    const bgUrl = new URL('./assets/pbn_template_bg.png', window.location.href).href;
     return `<!doctype html>
 <html>
 <head>
@@ -1115,40 +1176,25 @@
 <style>
   @page { size: A4 portrait; margin: 0; }
   html, body { margin:0; padding:0; background:#fff; font-family: Arial, Helvetica, sans-serif; }
-  .page { width:210mm; height:297mm; box-sizing:border-box; padding:12mm; position:relative; background:white; overflow:hidden; }
-  .brand { position:absolute; left:12mm; top:10mm; font-weight:700; font-size:22pt; line-height:.9; color:#333; letter-spacing:-.5px; }
-  .qr-label-top { position:absolute; right:22mm; top:8mm; font-size:9pt; color:#333; letter-spacing:.2px; }
-  .qr-label-bottom { position:absolute; right:18mm; top:45mm; font-size:9pt; color:#333; letter-spacing:.2px; }
-  .qr { position:absolute; right:13mm; top:15mm; width:32mm; height:32mm; object-fit:contain; }
-  .title { position:absolute; left:0; right:0; top:32mm; text-align:center; font-family: Georgia, 'Times New Roman', serif; font-style:italic; font-size:27pt; color:#161616; }
-  .name { position:absolute; left:20mm; right:20mm; top:48mm; text-align:center; font-size:8pt; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .image-box { position:absolute; left:22mm; top:58mm; width:166mm; height:158mm; display:flex; align-items:center; justify-content:center; }
-  .reference { max-width:100%; max-height:100%; object-fit:contain; display:block; }
-  .markers { position:absolute; left:12mm; right:12mm; top:222mm; min-height:38mm; border:1px solid #d8d8d8; border-radius:4mm; background:#fafafa; box-sizing:border-box; padding:6mm 4mm 3mm; }
+  .page { width:210mm; height:297mm; box-sizing:border-box; position:relative; background:white; overflow:hidden; }
+  .bg { position:absolute; inset:0; width:210mm; height:297mm; object-fit:cover; display:block; }
+  .qr { position:absolute; right:16mm; top:12.5mm; width:28mm; height:28mm; object-fit:contain; }
+  .image-box { position:absolute; left:24mm; top:42mm; width:162mm; height:176mm; display:flex; align-items:center; justify-content:center; }
+  .artwork { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+  .markers { position:absolute; left:12mm; right:12mm; top:225mm; min-height:28mm; border:1px solid rgba(0,0,0,.18); border-radius:4mm; background:rgba(255,255,255,.92); box-sizing:border-box; padding:6mm 4mm 3mm; }
   .markers-title { position:absolute; top:2.5mm; left:4mm; font-size:10pt; font-weight:700; color:#222; }
   .markers-grid { display:flex; flex-wrap:wrap; gap:2mm; align-content:flex-start; margin-top:4mm; }
   .marker-chip { width:13mm; height:8mm; border:1px solid rgba(0,0,0,.25); border-radius:1.6mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:6.5pt; font-weight:800; }
   .empty-markers { font-size:9pt; color:#777; margin-top:6mm; }
-  .tip { position:absolute; left:12mm; right:12mm; bottom:19mm; font-size:8pt; color:#222; white-space:nowrap; }
-  .tip b { font-weight:800; }
-  .footer { position:absolute; left:12mm; right:12mm; bottom:8mm; display:flex; justify-content:space-between; font-size:8pt; color:#333; }
-  .url-fallback { position:absolute; right:13mm; top:54mm; width:45mm; font-size:5pt; color:#aaa; text-align:center; word-break:break-all; }
-  @media screen { body { background:#ddd; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
+  @media screen { body { background:#ddd; padding: 12px 0; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
 </style>
 </head>
 <body>
   <div class="page">
-    <div class="brand">Paint by<br>Number</div>
-    <div class="qr-label-top">ESCANEA QR</div>
+    <img class="bg" src="${bgUrl}" alt="Plantilla base">
     <img class="qr" src="${qrSrc}" alt="QR">
-    <div class="qr-label-bottom">PARA HACERLE ZOOM</div>
-    <div class="title">Imagen de Referencia</div>
-    <div class="name">${safeName}</div>
-    <div class="image-box"><img class="reference" src="${referenceDataUrl}" alt="Imagen de referencia"></div>
+    <div class="image-box"><img class="artwork" src="${artworkDataUrl}" alt="Arte recoloreado"></div>
     <div class="markers"><div class="markers-title">Marcadores incluidos</div><div class="markers-grid">${markerHtml}</div></div>
-    <div class="tip"><b>TIP:</b> Antes de comenzar, coloca una hoja o cartón debajo del papel para proteger tu mesa de posibles manchas.</div>
-    <div class="footer"><span>+56959369220</span><span>paintbynumbercl@gmail.com</span><span>www.paintbynumber.cl</span></div>
-    <div class="url-fallback">${referenceUrl}</div>
   </div>
 </body>
 </html>`;
@@ -1181,7 +1227,7 @@
       });
       setTimeout(resolve, 6000);
     });
-    setExportProgress("Etapa 5/5: se abrirá impresión. Elige 'Guardar como PDF'. Tamaño: A4 vertical, escala 100%, márgenes ninguno.");
+    setExportProgress("Etapa 5/5: se abrirá impresión. Elige 'Guardar como PDF' y DESACTIVA 'Encabezados y pies de página' para que no aparezcan fecha/URL. Tamaño: A4 vertical, escala 100%, márgenes ninguno.");
     try {
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
@@ -1190,12 +1236,9 @@
     }
   }
 
-  async function generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
-    // v1.3: no depende de jsPDF ni de cdn.jsdelivr. Usa el motor nativo de impresión del navegador.
-    // Esto elimina el bloqueo que te dio: "se demoró demasiado cargando jsPDF".
-    // Resultado: se abre el diálogo de impresión y debes elegir "Guardar como PDF".
-    setExportProgress("Etapa 3/5: generando QR y plantilla A4 sin cargar librerías externas pesadas…");
-    const html = buildPrintableTemplateHtml({ imageName, referenceDataUrl, referenceUrl, markerRows });
+  async function generatePrintableReferencePdf({ imageName, artworkDataUrl, artworkUrl, markerRows }) {
+    setExportProgress("Etapa 4/5: armando plantilla con tu diseño base + QR + marcadores…");
+    const html = buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows });
     await printHtmlAsPdf(html, imageName);
   }
 
@@ -2388,12 +2431,14 @@
       try {
         const imageName = (imageNameInput.value || "referencia-paintbynumber").toString().trim();
         if (!imageName) return alert("Ponle un nombre a la imagen antes de subirla.");
-        setExportProgress("Etapa 1/5: leyendo imagen y creando versión optimizada para QR/PDF…");
+        setExportProgress("Etapa 1/5: leyendo marcadores activos…");
         const markerRows = collectCurrentMarkerRows();
-        const referenceDataUrl = getReferenceCanvasDataUrl(2400, 0.86);
-        const referenceUrl = await uploadReferenceImageToCloudinary(referenceDataUrl, imageName);
-        await generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows });
-        setExportProgress(`Listo: PDF generado en ${elapsedText(startedAt)}. Si no se descargó, revisa bloqueo de descargas del navegador.`);
+        setExportProgress("Etapa 2/5: rasterizando el SVG recoloreado en HD para el QR y la plantilla…");
+        applyTextColors();
+        const artworkDataUrl = await rasterizeSvgToPngDataUrlHQ(recolorSvg, 3600);
+        const artworkUrl = await uploadArtworkToCloudinary(artworkDataUrl, imageName);
+        await generatePrintableReferencePdf({ imageName, artworkDataUrl, artworkUrl, markerRows });
+        setExportProgress(`Listo: plantilla preparada en ${elapsedText(startedAt)}. Si ves fecha/URL al imprimir, desactiva 'Encabezados y pies de página' en el diálogo de impresión.`);
       } catch (e) {
         console.error(e);
         setExportProgress("Error: " + (e && e.message ? e.message : "No pude generar la plantilla PDF."));
