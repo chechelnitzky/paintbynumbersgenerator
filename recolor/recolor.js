@@ -1,4 +1,4 @@
-/* Recolor add-on (v1.2 - FAST PDF EXPORT + TIMEOUTS + PROGRESS)
+/* Recolor add-on (v1.3 - NO jsPDF CDN + PRINT-TO-PDF FALLBACK + PROGRESS)
    ✅ Adds small visible version label above “Paint by number generator” title (page)
    ✅ Code always has a VERSION constant
    ✅ Suggestion selector: OFF (Closest) [DEFAULT] / SOFT (recommended) / HARD (experimental)
@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v1.2"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v1.3"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -1093,99 +1093,110 @@
     return Array.from(map.values()).sort((a, b) => String(a.tag).localeCompare(String(b.tag), undefined, { numeric: true }));
   }
 
-  async function generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
-    setExportProgress("Etapa 3/5: cargando librerías PDF y QR en paralelo…");
-    await Promise.all([
-      loadExternalScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF, 20000),
-      loadExternalScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js", () => window.QRCode && window.QRCode.toDataURL, 20000)
-    ]);
-    setExportProgress("Etapa 4/5: generando QR localmente y armando plantilla A4 sin rotar ni recortar…");
-
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const margin = 12;
-
-    // Header
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(24);
-    doc.text("Paint by", margin, 20);
-    doc.text("Number", margin, 29);
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text("ESCANEA QR", pageW - margin - 42, 16);
-    doc.text("PARA HACERLE ZOOM", pageW - margin - 42, 50);
-
-    // QR generado 100% en el navegador con la librería qrcode desde CDN. No usa plataforma externa de QR.
-    const qrUrl = await window.QRCode.toDataURL(referenceUrl, { margin: 1, width: 420, errorCorrectionLevel: "M" });
-    doc.addImage(qrUrl, "PNG", pageW - margin - 38, 20, 32, 32);
-
-    doc.setFont("times", "italic");
-    doc.setFontSize(28);
-    doc.text("Imagen de Referencia", pageW / 2, 46, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(90, 90, 90);
-    doc.text(String(imageName || "").slice(0, 70), pageW / 2, 52, { align: "center" });
-
-    // Reference image area: no rotation; centered; fit-contained; preserves original aspect ratio.
-    // A4 portrait. If the image is horizontal, it stays horizontal inside this box.
-    const imgBox = { x: 22, y: 58, w: pageW - 44, h: 158 };
-    const img = new Image();
-    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = referenceDataUrl; });
-    const ratio = Math.min(imgBox.w / img.naturalWidth, imgBox.h / img.naturalHeight);
-    const drawW = img.naturalWidth * ratio;
-    const drawH = img.naturalHeight * ratio;
-    const drawX = imgBox.x + (imgBox.w - drawW) / 2;
-    const drawY = imgBox.y + (imgBox.h - drawH) / 2;
-    doc.addImage(referenceDataUrl, "JPEG", drawX, drawY, drawW, drawH);
-
-    // Marker mini box
+  function markerBoxesHtml(markerRows) {
     const markers = uniqueMarkers(markerRows);
-    const boxY = 222;
-    const boxH = 38;
-    doc.setDrawColor(215, 215, 215);
-    doc.setFillColor(250, 250, 250);
-    doc.roundedRect(margin, boxY, pageW - margin * 2, boxH, 3, 3, "FD");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(20, 20, 20);
-    doc.text("Marcadores incluidos", margin + 4, boxY + 7);
+    if (!markers.length) return '<div class="empty-markers">Sin marcadores detectados.</div>';
+    return markers.slice(0, 72).map((m) => {
+      const hex = norm(m.hex) || '#ffffff';
+      const txt = textColorForBg(hex) === '#fff' ? '#fff' : '#111';
+      return `<div class="marker-chip" style="background:${hex};color:${txt};"><span>${String(m.tag)}</span></div>`;
+    }).join('');
+  }
 
-    const cellW = 13;
-    const cellH = 8;
-    let x = margin + 4;
-    let y = boxY + 12;
-    markers.slice(0, 60).forEach((m) => {
-      if (x + cellW > pageW - margin - 4) { x = margin + 4; y += cellH + 2; }
-      if (y + cellH > boxY + boxH - 3) return;
-      const rgb = hexToRgb(norm(m.hex) || "#ffffff") || { r: 255, g: 255, b: 255 };
-      doc.setFillColor(rgb.r, rgb.g, rgb.b);
-      doc.setDrawColor(150, 150, 150);
-      doc.roundedRect(x, y, cellW, cellH, 1.6, 1.6, "FD");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(6.5);
-      const tc = textColorForBg(m.hex || "#ffffff") === "#fff" ? 255 : 0;
-      doc.setTextColor(tc, tc, tc);
-      doc.text(String(m.tag), x + cellW / 2, y + 5.5, { align: "center" });
-      x += cellW + 2;
+  function buildPrintableTemplateHtml({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
+    const safeName = String(imageName || '').replace(/[<>&"]/g, (c) => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
+    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=10&data=${encodeURIComponent(referenceUrl)}`;
+    const markerHtml = markerBoxesHtml(markerRows);
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${safeName || 'plantilla-referencia'}</title>
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  html, body { margin:0; padding:0; background:#fff; font-family: Arial, Helvetica, sans-serif; }
+  .page { width:210mm; height:297mm; box-sizing:border-box; padding:12mm; position:relative; background:white; overflow:hidden; }
+  .brand { position:absolute; left:12mm; top:10mm; font-weight:700; font-size:22pt; line-height:.9; color:#333; letter-spacing:-.5px; }
+  .qr-label-top { position:absolute; right:22mm; top:8mm; font-size:9pt; color:#333; letter-spacing:.2px; }
+  .qr-label-bottom { position:absolute; right:18mm; top:45mm; font-size:9pt; color:#333; letter-spacing:.2px; }
+  .qr { position:absolute; right:13mm; top:15mm; width:32mm; height:32mm; object-fit:contain; }
+  .title { position:absolute; left:0; right:0; top:32mm; text-align:center; font-family: Georgia, 'Times New Roman', serif; font-style:italic; font-size:27pt; color:#161616; }
+  .name { position:absolute; left:20mm; right:20mm; top:48mm; text-align:center; font-size:8pt; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .image-box { position:absolute; left:22mm; top:58mm; width:166mm; height:158mm; display:flex; align-items:center; justify-content:center; }
+  .reference { max-width:100%; max-height:100%; object-fit:contain; display:block; }
+  .markers { position:absolute; left:12mm; right:12mm; top:222mm; min-height:38mm; border:1px solid #d8d8d8; border-radius:4mm; background:#fafafa; box-sizing:border-box; padding:6mm 4mm 3mm; }
+  .markers-title { position:absolute; top:2.5mm; left:4mm; font-size:10pt; font-weight:700; color:#222; }
+  .markers-grid { display:flex; flex-wrap:wrap; gap:2mm; align-content:flex-start; margin-top:4mm; }
+  .marker-chip { width:13mm; height:8mm; border:1px solid rgba(0,0,0,.25); border-radius:1.6mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-size:6.5pt; font-weight:800; }
+  .empty-markers { font-size:9pt; color:#777; margin-top:6mm; }
+  .tip { position:absolute; left:12mm; right:12mm; bottom:19mm; font-size:8pt; color:#222; white-space:nowrap; }
+  .tip b { font-weight:800; }
+  .footer { position:absolute; left:12mm; right:12mm; bottom:8mm; display:flex; justify-content:space-between; font-size:8pt; color:#333; }
+  .url-fallback { position:absolute; right:13mm; top:54mm; width:45mm; font-size:5pt; color:#aaa; text-align:center; word-break:break-all; }
+  @media screen { body { background:#ddd; } .page { margin: 0 auto; box-shadow: 0 0 18px rgba(0,0,0,.18); } }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="brand">Paint by<br>Number</div>
+    <div class="qr-label-top">ESCANEA QR</div>
+    <img class="qr" src="${qrSrc}" alt="QR">
+    <div class="qr-label-bottom">PARA HACERLE ZOOM</div>
+    <div class="title">Imagen de Referencia</div>
+    <div class="name">${safeName}</div>
+    <div class="image-box"><img class="reference" src="${referenceDataUrl}" alt="Imagen de referencia"></div>
+    <div class="markers"><div class="markers-title">Marcadores incluidos</div><div class="markers-grid">${markerHtml}</div></div>
+    <div class="tip"><b>TIP:</b> Antes de comenzar, coloca una hoja o cartón debajo del papel para proteger tu mesa de posibles manchas.</div>
+    <div class="footer"><span>+56959369220</span><span>paintbynumbercl@gmail.com</span><span>www.paintbynumber.cl</span></div>
+    <div class="url-fallback">${referenceUrl}</div>
+  </div>
+</body>
+</html>`;
+  }
+
+  async function printHtmlAsPdf(html, imageName) {
+    setExportProgress("Etapa 4/5: abriendo plantilla A4 en modo impresión del navegador…");
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.setAttribute("aria-hidden", "true");
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    await new Promise((resolve) => {
+      const imgs = Array.from(doc.images || []);
+      if (!imgs.length) return resolve();
+      let remaining = imgs.length;
+      const done = () => { remaining -= 1; if (remaining <= 0) resolve(); };
+      imgs.forEach((img) => {
+        if (img.complete) return done();
+        img.onload = done;
+        img.onerror = done;
+      });
+      setTimeout(resolve, 6000);
     });
+    setExportProgress("Etapa 5/5: se abrirá impresión. Elige 'Guardar como PDF'. Tamaño: A4 vertical, escala 100%, márgenes ninguno.");
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } finally {
+      setTimeout(() => iframe.remove(), 60000);
+    }
+  }
 
-    // Tip + footer
-    doc.setTextColor(30, 30, 30);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("TIP:", margin, pageH - 22);
-    doc.setFont("helvetica", "normal");
-    doc.text("Antes de comenzar, coloca una hoja o cartón debajo del papel para proteger tu mesa de posibles manchas.", margin + 7, pageH - 22);
-    doc.setFontSize(8);
-    doc.text("+56959369220", margin, pageH - 10);
-    doc.text("paintbynumbercl@gmail.com", pageW / 2, pageH - 10, { align: "center" });
-    doc.text("www.paintbynumber.cl", pageW - margin, pageH - 10, { align: "right" });
-
-    setExportProgress("Etapa 5/5: descargando PDF final…");
-    doc.save(`${slugifyName(imageName, "plantilla-referencia")}-plantilla-referencia.pdf`);
+  async function generatePrintableReferencePdf({ imageName, referenceDataUrl, referenceUrl, markerRows }) {
+    // v1.3: no depende de jsPDF ni de cdn.jsdelivr. Usa el motor nativo de impresión del navegador.
+    // Esto elimina el bloqueo que te dio: "se demoró demasiado cargando jsPDF".
+    // Resultado: se abre el diálogo de impresión y debes elegir "Guardar como PDF".
+    setExportProgress("Etapa 3/5: generando QR y plantilla A4 sin cargar librerías externas pesadas…");
+    const html = buildPrintableTemplateHtml({ imageName, referenceDataUrl, referenceUrl, markerRows });
+    await printHtmlAsPdf(html, imageName);
   }
 
   async function downloadSvgAsPngHQ(svgEl, filename, scale = 10) {
@@ -2369,11 +2380,7 @@
     exportProgress.id = "pbn-export-progress";
     exportProgress.style.cssText = "display:none; flex-basis:100%; margin:4px 0 0 2px; padding:8px 10px; border-radius:10px; background:#fff8d8; color:#5b4a00; font-size:12px; font-weight:800;";
 
-    // Pre-carga silenciosa para que el botón de PDF no espere tanto después del click.
-    setTimeout(() => {
-      loadExternalScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF, 20000).catch(() => {});
-      loadExternalScript("https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js", () => window.QRCode && window.QRCode.toDataURL, 20000).catch(() => {});
-    }, 800);
+    // v1.3: no pre-carga jsPDF/QRCode desde CDN. La plantilla usa impresión nativa del navegador.
 
     btnTemplatePdf.addEventListener("click", async () => {
       const startedAt = nowMs();
