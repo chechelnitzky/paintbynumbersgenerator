@@ -1675,29 +1675,29 @@
 
     const overlay = document.createElement("div");
     overlay.id = "recolor-modal";
-    overlay.style.cssText = `position: fixed; inset: 0; background: rgba(18,16,14,.58); backdrop-filter: blur(12px); z-index: 2147483647; overflow: auto; padding: 18px;`;
+    overlay.style.cssText = `position: fixed; inset: 0; background: rgba(245,245,247,.74); backdrop-filter: blur(22px) saturate(180%); z-index: 2147483647; overflow: auto; padding: 18px;`;
 
     const card = document.createElement("div");
     card.style.cssText = `
-      max-width: 1540px; margin: 0 auto;
-      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,247,241,.98));
-      border: 1px solid rgba(255,255,255,.52);
+      max-width: 1560px; margin: 0 auto;
+      background: rgba(255,255,255,.92);
+      border: 1px solid rgba(0,0,0,.10);
       border-radius: 28px;
-      box-shadow: 0 34px 100px rgba(0,0,0,.30);
-      padding: 16px;
+      box-shadow: 0 24px 80px rgba(0,0,0,.16);
+      padding: 14px;
     `;
 
     const topbar = document.createElement("div");
-    topbar.style.cssText = "position:sticky; top:0; z-index:3; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:8px 8px 14px; background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(255,255,255,.88)); backdrop-filter:blur(14px); border-radius:22px;";
+    topbar.style.cssText = "position:sticky; top:0; z-index:3; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:8px 8px 12px; background:rgba(255,255,255,.86); backdrop-filter:blur(18px) saturate(180%); border-radius:22px;";
 
     const title = document.createElement("div");
-    title.style.cssText = "font-weight:950; letter-spacing:-.03em; font-size:22px;";
+    title.style.cssText = "font-weight:680; letter-spacing:-.035em; font-size:22px;";
     title.textContent = `Recoloreo (paleta ${PALETTE.length})`;
 
     const close = document.createElement("button");
     close.type = "button";
     close.textContent = "Cerrar";
-    close.style.cssText = "padding:11px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#111; color:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    close.style.cssText = "padding:10px 16px; border-radius:999px; border:0; background:#0071e3; color:white; cursor:pointer; font-weight:650; display:inline-flex; align-items:center;";
     enhanceButton(close);
     close.addEventListener("click", () => overlay.remove());
 
@@ -1708,9 +1708,9 @@
     const host = document.createElement("div");
     host.id = "recolor-host";
     host.style.cssText = `
-      margin-top: 4px; padding: 16px; border: 1px solid rgba(0,0,0,.10);
-      border-radius: 24px; background: rgba(255,255,255,.70);
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin-top: 4px; padding: 14px; border: 1px solid rgba(0,0,0,.08);
+      border-radius: 24px; background: rgba(255,255,255,.62);
+      font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif;
     `;
     card.appendChild(host);
 
@@ -1738,16 +1738,16 @@
     const header = document.createElement("div");
     header.style.cssText = "display:flex; justify-content:space-between; align-items:flex-end; gap:14px; flex-wrap:wrap; padding:2px 2px 10px;";
     header.innerHTML = `
-      <div style="font-weight:950; font-size:26px; letter-spacing:-.04em;">Mesa de recoloreo</div>
+      <div style="font-weight:720; font-size:25px; letter-spacing:-.045em;">Recolorizador</div>
       <div style="color:rgba(0,0,0,.60); font-size:13px; font-weight:750;">
-        1. Selecciona color original → 2. Aplica sugerencia o marcador → 3. Exporta
+        Selecciona un color, ajusta marcador y exporta. La memoria queda activa automáticamente.
       </div>
     `;
     host.appendChild(header);
 
     const memoryNotice = document.createElement("div");
-    memoryNotice.style.cssText = "margin:2px 0 12px; display:inline-flex; padding:8px 11px; border-radius:999px; background:#eef8eb; color:#315b2c; font-size:12px; font-weight:900;";
-    memoryNotice.textContent = "Memoria activa: los reemplazos, renombres, bloqueos y toggles se guardan aunque cambies tamaño/viewBox del SVG.";
+    memoryNotice.style.cssText = "margin:2px 0 12px; display:inline-flex; padding:7px 10px; border-radius:999px; background:#f0fbf2; color:#1f7a37; font-size:12px; font-weight:620;";
+    memoryNotice.textContent = "Memoria activa · conserva colores, renombres, bloqueos y ajustes aunque cambies tamaño o viewBox.";
     host.appendChild(memoryNotice);
 
     const originalClone = originalSvg.cloneNode(true);
@@ -1757,15 +1757,15 @@
 
     const previews = document.createElement("div");
     previews.className = "recolor-responsive-grid";
-    previews.style.cssText = "display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; margin-top: 12px;";
+    previews.style.cssText = "display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 12px;";
     const panel = (title, node) => {
       const wrap = document.createElement("div");
-      wrap.style.cssText = `border: 1px solid rgba(0,0,0,.10); border-radius: 22px; padding: 12px; overflow: hidden; background: rgba(255,255,255,.88); box-shadow: 0 14px 34px rgba(25,22,19,.07);`;
+      wrap.style.cssText = `border: 1px solid rgba(0,0,0,.09); border-radius: 20px; padding: 12px; overflow: hidden; background: rgba(255,255,255,.92); box-shadow: none;`;
       const h = document.createElement("div");
       h.textContent = title;
-      h.style.cssText = "font-weight:900; margin-bottom: 10px; letter-spacing:-.02em;";
+      h.style.cssText = "font-weight:650; margin-bottom: 9px; letter-spacing:-.02em; color:#1d1d1f;";
       const viewport = document.createElement("div");
-      viewport.style.cssText = `width: 100%; max-height: 46vh; border-radius: 18px; border: 1px solid rgba(0,0,0,.08); background: white; overflow: auto; display:flex; align-items:center; justify-content:center;`;
+      viewport.style.cssText = `width: 100%; height: 43vh; max-height: 520px; min-height: 320px; border-radius: 16px; border: 1px solid rgba(0,0,0,.08); background: #fafafa; overflow: hidden; display:flex; align-items:center; justify-content:center; padding:10px;`;
       viewport.appendChild(node);
       wrap.appendChild(h);
       wrap.appendChild(viewport);
@@ -1833,23 +1833,23 @@
 
     const controls = document.createElement("div");
     controls.className = "recolor-responsive-grid";
-    controls.style.cssText = "display:grid; grid-template-columns: minmax(430px, .86fr) minmax(520px, 1.14fr); gap: 14px; margin-top: 14px; align-items:start;";
+    controls.style.cssText = "display:grid; grid-template-columns: minmax(360px, .78fr) minmax(520px, 1.22fr); gap: 12px; margin-top: 12px; align-items:start;";
     host.appendChild(controls);
 
     const left = document.createElement("div");
-    left.style.cssText = "border:1px solid rgba(0,0,0,.10); border-radius:22px; padding:12px; background:rgba(255,255,255,.90); box-shadow:0 14px 34px rgba(25,22,19,.06);";
+    left.style.cssText = "border:1px solid rgba(0,0,0,.09); border-radius:20px; padding:12px; background:rgba(255,255,255,.92); box-shadow:none;";
     const leftHeader = document.createElement("div");
     leftHeader.style.cssText = "position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; padding-bottom:10px; background:linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.86)); backdrop-filter:blur(12px);";
     const leftTitle = document.createElement("div");
     leftTitle.textContent = "Colores detectados";
-    leftTitle.style.cssText = "font-weight:950; letter-spacing:-.025em;";
+    leftTitle.style.cssText = "font-weight:680; letter-spacing:-.025em;";
     leftHeader.appendChild(leftTitle);
     left.appendChild(leftHeader);
     controls.appendChild(left);
 
     const right = document.createElement("div");
-    right.style.cssText = "border:1px solid rgba(0,0,0,.10); border-radius:22px; padding:12px; background:rgba(255,255,255,.90); box-shadow:0 14px 34px rgba(25,22,19,.06);";
-    right.innerHTML = `<div style="font-weight:950; letter-spacing:-.025em; margin-bottom:8px;">Paleta de marcadores</div>`;
+    right.style.cssText = "border:1px solid rgba(0,0,0,.09); border-radius:20px; padding:12px; background:rgba(255,255,255,.92); box-shadow:none;";
+    right.innerHTML = `<div style="font-weight:680; letter-spacing:-.025em; margin-bottom:8px;">Paleta de marcadores</div>`;
     controls.appendChild(right);
 
     const info = document.createElement("div");
@@ -2654,7 +2654,7 @@
     const btnTemplatePdf = document.createElement("button");
     btnTemplatePdf.type = "button";
     btnTemplatePdf.textContent = "DOWNLOAD PRINT TEMPLATE PDF";
-    btnTemplatePdf.style.cssText = "padding:11px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#111; color:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
+    btnTemplatePdf.style.cssText = "padding:11px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#0071e3; color:white; cursor:pointer; font-weight:650; display:inline-flex; align-items:center;";
     enhanceButton(btnTemplatePdf);
 
     const exportProgress = document.createElement("div");
@@ -2712,8 +2712,8 @@
 
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = "Abrir mesa de recoloreo";
-    btn.style.cssText = "padding:12px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#111; color:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
+    btn.textContent = "Abrir recolorizador";
+    btn.style.cssText = "padding:12px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#0071e3; color:white; cursor:pointer; font-weight:650; display:inline-flex; align-items:center;";
     enhanceButton(btn);
     btn.addEventListener("click", () => {
       const current = findFinalOutputSvgLight();
