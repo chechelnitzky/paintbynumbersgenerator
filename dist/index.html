@@ -2,8 +2,8 @@
 <html>
 
 <head>
-    <title>Paint by Number Studio</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paint by Number Studio</title>
     <link rel="stylesheet" href="styles/lib/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
@@ -12,40 +12,25 @@
 
 <body>
     <div class="container">
-        <section class="app-hero">
-            <div class="hero-copy">
-                <div class="eyebrow">Paint by Number Studio · v2.9</div>
-                <h1>Paint by Number Studio</h1>
-                <p>Una mesa de trabajo limpia para generar, revisar, recolorear y exportar kits personalizados sin perder foco en la imagen.</p>
-            </div>
-            <div class="upload-card">
-                <label for="file" class="upload-label">
-                    <span class="upload-icon">+</span>
-                    <span>Subir imagen</span>
-                    <small>PNG, JPG o GIF · pegar con Ctrl+V</small>
-                </label>
-                <input id="file" type="file" accept="image/x-png,image/gif,image/jpeg"></input>
-                <div class="examples">
-                    <span>Ejemplos:</span>
-                    <a id="lnkTrivial" href="#">trivial</a>
-                    <a id="lnkSmall" href="#">small</a>
-                    <a id="lnkMedium" href="#">medium</a>
-                </div>
-                <div class="apple-quick-presets" aria-label="Presets rápidos">
-                    <button type="button" data-pbn-preset="balanced">Balanceado</button>
-                    <button type="button" data-pbn-preset="quality">Alta calidad</button>
-                    <button type="button" data-pbn-preset="light">SVG &lt;10MB</button>
-                </div>
-            </div>
-        </section>
+        <div class="row">
+            <h2>Paint by Number Studio</h2>
+            <span>Paste from clipboard (Ctrl+V) or choose an image <input id="file" type="file"
+                    accept="image/x-png,image/gif,image/jpeg"></input>). Larger images may take longer to process.</span>
+            <br />
+            <span>Examples:
+                <a id="lnkTrivial" href="#">trivial</a> -
+                <a id="lnkSmall" href="#">small</a> -
+                <a id="lnkMedium" href="#">medium</a>
+            </span>
+        </div>
         <div class="row">
             <div class="col s12">
                 <ul class="tabs">
                     <li class="tab col s2">
-                        <a href="#input-pane">Imagen</a>
+                        <a href="#input-pane">Input</a>
                     </li>
                     <li class="tab col s2">
-                        <a href="#options-pane">Ajustes</a>
+                        <a href="#options-pane">Options</a>
                     </li>
                 </ul>
             </div>
@@ -224,7 +209,7 @@
             </div>
 
             <div class="col s12">
-                <a class="waves-effect waves-light btn" id="btnProcess">Generar paint by number</a>
+                <a class="waves-effect waves-light btn" id="btnProcess">Generate</a>
             </div>
         </div>
 
@@ -264,7 +249,7 @@
             </div>
             <div class="col s2">
                 <div class="status facetBorderSegmentation">
-                    Border segmentation
+                    Segments
                     <div class="progress">
                         <div id="statusFacetBorderSegmentation" class="determinate" style="width: 0%"></div>
                     </div>
@@ -272,7 +257,7 @@
             </div>
             <div class="col s2">
                 <div class="status facetLabelPlacement">
-                    Label placement
+                    Labels
                     <div class="progress">
                         <div id="statusFacetLabelPlacement" class="determinate" style="width: 0%"></div>
                     </div>
@@ -294,19 +279,19 @@
             <div class="col s12">
                 <ul id="tabsOutput" class="tabs">
                     <li class="tab col s2">
-                        <a href="#kmeans-pane">Quantized image</a>
+                        <a href="#kmeans-pane">Quantized</a>
                     </li>
                     <li class="tab col s2">
-                        <a href="#reduction-pane">Facet reduction</a>
+                        <a href="#reduction-pane">Facets</a>
                     </li>
                     <li class="tab col s2">
-                        <a href="#borderpath-pane">Border tracing</a>
+                        <a href="#borderpath-pane">Borders</a>
                     </li>
                     <li class="tab col s2">
-                        <a href="#bordersegmentation-pane">Border segmentation</a>
+                        <a href="#bordersegmentation-pane">Segments</a>
                     </li>
                     <li class="tab col s2">
-                        <a href="#labelplacement-pane">Label placement</a>
+                        <a href="#labelplacement-pane">Labels</a>
                     </li>
                     <li class="tab col s2">
                         <a href="#output-pane">Output</a>
@@ -335,7 +320,7 @@
             <div id="output-pane" class="col s12">
                 <div class="row">
                     <div class="col s2">
-                        <label>SVG Render options</label>
+                        <label>SVG options</label>
                     </div>
                     <div class="col s2">
                         <label>
@@ -439,33 +424,6 @@
 
         });
     </script>
-<script id="apple-ui-helper-v29">
-(function(){
-  function $(id){ return document.getElementById(id); }
-  function setVal(id, value){ var el=$(id); if(el){ el.value=value; try{ el.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} } }
-  function setChecked(id, value){ var el=$(id); if(el){ el.checked=!!value; try{ el.dispatchEvent(new Event('change',{bubbles:true})); }catch(e){} } }
-  function applyPreset(name){
-    if(name==='balanced'){
-      setChecked('chkResizeImage', true); setVal('txtResizeWidth',1024); setVal('txtResizeHeight',1024); setVal('txtNrOfClusters',16); setVal('txtRemoveFacetsSmallerThan',20); setVal('txtMaximumNumberOfFacets',100000); setVal('txtNrOfTimesToHalveBorderSegments',2); setVal('txtSizeMultiplier',7); setVal('txtLabelFontSize',50);
-    } else if(name==='quality'){
-      setChecked('chkResizeImage', true); setVal('txtResizeWidth',1400); setVal('txtResizeHeight',1400); setVal('txtNrOfClusters',22); setVal('txtRemoveFacetsSmallerThan',12); setVal('txtMaximumNumberOfFacets',140000); setVal('txtNrOfTimesToHalveBorderSegments',1); setVal('txtSizeMultiplier',8); setVal('txtLabelFontSize',48);
-    } else if(name==='light'){
-      setChecked('chkResizeImage', true); setVal('txtResizeWidth',900); setVal('txtResizeHeight',900); setVal('txtNrOfClusters',14); setVal('txtRemoveFacetsSmallerThan',30); setVal('txtMaximumNumberOfFacets',45000); setVal('txtNrOfTimesToHalveBorderSegments',3); setVal('txtSizeMultiplier',5); setVal('txtLabelFontSize',52);
-    }
-  }
-  document.addEventListener('click', function(e){
-    var btn=e.target && e.target.closest ? e.target.closest('[data-pbn-preset]') : null;
-    if(!btn) return; applyPreset(btn.getAttribute('data-pbn-preset'));
-    document.querySelectorAll('[data-pbn-preset]').forEach(function(b){ b.classList.toggle('is-active', b===btn); });
-  });
-  document.addEventListener('DOMContentLoaded', function(){
-    var coll=document.querySelector('#options-pane > .collection');
-    if(coll && !coll.querySelector('.apple-section-title')){
-      var title=document.createElement('div'); title.className='apple-section-title'; title.textContent='Ajustes de producción'; coll.prepend(title);
-    }
-  });
-})();
-</script>
 </body>
 
 </html>
