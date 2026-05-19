@@ -2,7 +2,8 @@
 <html>
 
 <head>
-    <title>Paint by number generator</title>
+    <title>Paint by Number Studio</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="styles/lib/materialize.min.css">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
@@ -11,18 +12,27 @@
 
 <body>
     <div class="container">
-        <div class="row">
-            <h2> Paint by number generator </h2>
-            <span>Paste from clipboard (ctrl+v) to change the image (or browse for a file <input id="file" type="file"
-                    accept="image/x-png,image/gif,image/jpeg"></input>). Large images are very slow to process
-                though.</span>
-            <br />
-            <span>Example images:
-                <a id="lnkTrivial" href="#">trivial</a> -
-                <a id="lnkSmall" href="#">small</a> -
-                <a id="lnkMedium" href="#">medium</a>
-            </span>
-        </div>
+        <section class="app-hero">
+            <div class="hero-copy">
+                <div class="eyebrow">Paint by Number Studio · v2.8</div>
+                <h1>Generador y recolorizador profesional</h1>
+                <p>Sube una imagen, genera el SVG numerado, recolorea con tu paleta de marcadores y exporta archivos listos para producción.</p>
+            </div>
+            <div class="upload-card">
+                <label for="file" class="upload-label">
+                    <span class="upload-icon">+</span>
+                    <span>Subir imagen</span>
+                    <small>PNG, JPG o GIF · también puedes pegar con Ctrl+V</small>
+                </label>
+                <input id="file" type="file" accept="image/x-png,image/gif,image/jpeg"></input>
+                <div class="examples">
+                    <span>Ejemplos:</span>
+                    <a id="lnkTrivial" href="#">trivial</a>
+                    <a id="lnkSmall" href="#">small</a>
+                    <a id="lnkMedium" href="#">medium</a>
+                </div>
+            </div>
+        </section>
         <div class="row">
             <div class="col s12">
                 <ul class="tabs">

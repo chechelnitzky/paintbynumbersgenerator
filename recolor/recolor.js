@@ -3,7 +3,7 @@
    ✅ Code always has a VERSION constant
    ✅ Suggestion selector: OFF (Closest) [DEFAULT] / SOFT (recommended) / HARD (experimental)
    ✅ SOFT/HARD only apply when user activates them
-   ✅ Keeps your UI/layout exactly as in the provided base (no redesign)
+   ✅ UX/UI refresh: larger workspace, clearer panels, same functionality
    ✅ Does NOT change your picker/rename/toggles/export/memory behavior except suggestion mode
 
    Motor de sugerencias:
@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v2.7"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v2.8 UX"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -141,6 +141,17 @@
       .recolor-suggest { transition: transform 80ms ease, box-shadow 120ms ease; }
       .recolor-suggest:hover { box-shadow: 0 10px 18px rgba(0,0,0,.12); }
       .recolor-suggest:active { transform: translateY(1px) scale(.99); }
+      #recolor-modal * { box-sizing: border-box; }
+      #recolor-modal button { font-family: inherit; }
+      #recolor-modal input[type="text"], #recolor-modal input[type="range"] { font-family: inherit; }
+      #recolor-modal svg { max-width: 100%; height: auto; }
+      #recolor-host ::-webkit-scrollbar { width: 10px; height: 10px; }
+      #recolor-host ::-webkit-scrollbar-thumb { background: rgba(20,18,16,.22); border-radius: 999px; border: 3px solid rgba(255,255,255,.75); }
+      #recolor-host ::-webkit-scrollbar-track { background: rgba(20,18,16,.04); border-radius: 999px; }
+      @media (max-width: 1100px) {
+        #recolor-modal { padding: 10px !important; }
+        #recolor-host .recolor-responsive-grid { grid-template-columns: 1fr !important; }
+      }
     `;
     document.head.appendChild(st);
   }
@@ -1664,29 +1675,29 @@
 
     const overlay = document.createElement("div");
     overlay.id = "recolor-modal";
-    overlay.style.cssText = `position: fixed; inset: 0; background: rgba(0,0,0,.28); z-index: 2147483647; overflow: auto; padding: 22px;`;
+    overlay.style.cssText = `position: fixed; inset: 0; background: rgba(18,16,14,.58); backdrop-filter: blur(12px); z-index: 2147483647; overflow: auto; padding: 18px;`;
 
     const card = document.createElement("div");
     card.style.cssText = `
-      max-width: 1200px; margin: 0 auto;
-      background: rgba(255,255,255,.98);
-      border: 1px solid rgba(0,0,0,.14);
-      border-radius: 16px;
-      box-shadow: 0 24px 80px rgba(0,0,0,.25);
-      padding: 14px;
+      max-width: 1540px; margin: 0 auto;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,247,241,.98));
+      border: 1px solid rgba(255,255,255,.52);
+      border-radius: 28px;
+      box-shadow: 0 34px 100px rgba(0,0,0,.30);
+      padding: 16px;
     `;
 
     const topbar = document.createElement("div");
-    topbar.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    topbar.style.cssText = "position:sticky; top:0; z-index:3; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:8px 8px 14px; background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(255,255,255,.88)); backdrop-filter:blur(14px); border-radius:22px;";
 
     const title = document.createElement("div");
-    title.style.cssText = "font-weight:900;";
+    title.style.cssText = "font-weight:950; letter-spacing:-.03em; font-size:22px;";
     title.textContent = `Recoloreo (paleta ${PALETTE.length})`;
 
     const close = document.createElement("button");
     close.type = "button";
     close.textContent = "Cerrar";
-    close.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    close.style.cssText = "padding:11px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#111; color:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
     enhanceButton(close);
     close.addEventListener("click", () => overlay.remove());
 
@@ -1697,9 +1708,9 @@
     const host = document.createElement("div");
     host.id = "recolor-host";
     host.style.cssText = `
-      margin-top: 10px; padding: 14px; border: 1px solid rgba(0,0,0,.12);
-      border-radius: 12px; background: rgba(255,255,255,.96);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin-top: 4px; padding: 16px; border: 1px solid rgba(0,0,0,.10);
+      border-radius: 24px; background: rgba(255,255,255,.70);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     `;
     card.appendChild(host);
 
@@ -1725,17 +1736,17 @@
     // after reading the original colors/tags below.
 
     const header = document.createElement("div");
-    header.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
+    header.style.cssText = "display:flex; justify-content:space-between; align-items:flex-end; gap:14px; flex-wrap:wrap; padding:2px 2px 10px;";
     header.innerHTML = `
-      <div style="font-weight:900;">Recoloreo (paleta ${PALETTE.length})</div>
-      <div style="color:rgba(0,0,0,.65); font-size:13px;">
-        Selecciona color original → elige reemplazo / sugerencia → (renombrar) → toggles → descarga
+      <div style="font-weight:950; font-size:26px; letter-spacing:-.04em;">Mesa de recoloreo</div>
+      <div style="color:rgba(0,0,0,.60); font-size:13px; font-weight:750;">
+        1. Selecciona color original → 2. Aplica sugerencia o marcador → 3. Exporta
       </div>
     `;
     host.appendChild(header);
 
     const memoryNotice = document.createElement("div");
-    memoryNotice.style.cssText = "margin-top:8px; font-size:12px; color:rgba(0,0,0,.62); font-weight:800;";
+    memoryNotice.style.cssText = "margin:2px 0 12px; display:inline-flex; padding:8px 11px; border-radius:999px; background:#eef8eb; color:#315b2c; font-size:12px; font-weight:900;";
     memoryNotice.textContent = "Memoria activa: los reemplazos, renombres, bloqueos y toggles se guardan aunque cambies tamaño/viewBox del SVG.";
     host.appendChild(memoryNotice);
 
@@ -1745,15 +1756,16 @@
     makePreview(recolorSvg);
 
     const previews = document.createElement("div");
-    previews.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
+    previews.className = "recolor-responsive-grid";
+    previews.style.cssText = "display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; margin-top: 12px;";
     const panel = (title, node) => {
       const wrap = document.createElement("div");
-      wrap.style.cssText = `border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; overflow: hidden; background: white;`;
+      wrap.style.cssText = `border: 1px solid rgba(0,0,0,.10); border-radius: 22px; padding: 12px; overflow: hidden; background: rgba(255,255,255,.88); box-shadow: 0 14px 34px rgba(25,22,19,.07);`;
       const h = document.createElement("div");
       h.textContent = title;
-      h.style.cssText = "font-weight:800; margin-bottom: 8px;";
+      h.style.cssText = "font-weight:900; margin-bottom: 10px; letter-spacing:-.02em;";
       const viewport = document.createElement("div");
-      viewport.style.cssText = `width: 100%; border-radius: 10px; border: 1px solid rgba(0,0,0,.10); background: white; overflow: hidden;`;
+      viewport.style.cssText = `width: 100%; max-height: 46vh; border-radius: 18px; border: 1px solid rgba(0,0,0,.08); background: white; overflow: auto; display:flex; align-items:center; justify-content:center;`;
       viewport.appendChild(node);
       wrap.appendChild(h);
       wrap.appendChild(viewport);
@@ -1820,42 +1832,43 @@
     const usedReplacementHex = new Set();
 
     const controls = document.createElement("div");
-    controls.style.cssText = "display:grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px;";
+    controls.className = "recolor-responsive-grid";
+    controls.style.cssText = "display:grid; grid-template-columns: minmax(430px, .86fr) minmax(520px, 1.14fr); gap: 14px; margin-top: 14px; align-items:start;";
     host.appendChild(controls);
 
     const left = document.createElement("div");
-    left.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
+    left.style.cssText = "border:1px solid rgba(0,0,0,.10); border-radius:22px; padding:12px; background:rgba(255,255,255,.90); box-shadow:0 14px 34px rgba(25,22,19,.06);";
     const leftHeader = document.createElement("div");
-    leftHeader.style.cssText = "display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;";
+    leftHeader.style.cssText = "position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; padding-bottom:10px; background:linear-gradient(180deg, rgba(255,255,255,.96), rgba(255,255,255,.86)); backdrop-filter:blur(12px);";
     const leftTitle = document.createElement("div");
-    leftTitle.textContent = "Colores originales (TAG + reemplazo + renombrar + sugerencia)";
-    leftTitle.style.cssText = "font-weight:800;";
+    leftTitle.textContent = "Colores detectados";
+    leftTitle.style.cssText = "font-weight:950; letter-spacing:-.025em;";
     leftHeader.appendChild(leftTitle);
     left.appendChild(leftHeader);
     controls.appendChild(left);
 
     const right = document.createElement("div");
-    right.style.cssText = "border: 1px solid rgba(0,0,0,.12); border-radius: 12px; padding: 10px; background:white;";
-    right.innerHTML = `<div style="font-weight:800; margin-bottom:8px;">Picker (grilla con tags del Excel)</div>`;
+    right.style.cssText = "border:1px solid rgba(0,0,0,.10); border-radius:22px; padding:12px; background:rgba(255,255,255,.90); box-shadow:0 14px 34px rgba(25,22,19,.06);";
+    right.innerHTML = `<div style="font-weight:950; letter-spacing:-.025em; margin-bottom:8px;">Paleta de marcadores</div>`;
     controls.appendChild(right);
 
     const info = document.createElement("div");
-    info.style.cssText = "color: rgba(0,0,0,.65); font-size: 13px; margin-bottom: 8px;";
+    info.style.cssText = "color:rgba(0,0,0,.62); font-size:13px; line-height:1.35; margin-bottom:10px; padding:10px 12px; border-radius:16px; background:rgba(0,0,0,.035);";
     info.textContent = "Click en un color original (izquierda). Luego elige reemplazo. Para marcar un marcador como NO DISPONIBLE: activa BLOQUEAR o usa click derecho/Shift+click en la grilla.";
     right.appendChild(info);
 
     const pickerTools = document.createElement("div");
-    pickerTools.style.cssText = "display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;";
+    pickerTools.style.cssText = "display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;";
     const btnBlockMode = document.createElement("button");
     btnBlockMode.type = "button";
     btnBlockMode.textContent = "BLOQUEAR NO DISPONIBLES: OFF";
     btnBlockMode.title = "Activa este modo y luego haz click en colores de la grilla para marcarlos como no disponibles. También puedes usar click derecho o Shift+click.";
-    btnBlockMode.style.cssText = "padding:8px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.20); background:white; cursor:pointer; font-size:11px; font-weight:900;";
+    btnBlockMode.style.cssText = "padding:9px 12px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:white; cursor:pointer; font-size:11px; font-weight:950;";
     enhanceButton(btnBlockMode);
     const btnClearBlocked = document.createElement("button");
     btnClearBlocked.type = "button";
     btnClearBlocked.textContent = "LIMPIAR BLOQUEOS";
-    btnClearBlocked.style.cssText = "padding:8px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.14); background:rgba(0,0,0,.04); cursor:pointer; font-size:11px; font-weight:900;";
+    btnClearBlocked.style.cssText = "padding:9px 12px; border-radius:999px; border:1px solid rgba(0,0,0,.12); background:rgba(0,0,0,.045); cursor:pointer; font-size:11px; font-weight:950;";
     enhanceButton(btnClearBlocked);
     const blockedCount = document.createElement("span");
     blockedCount.style.cssText = "font-size:11px; color:rgba(0,0,0,.62); font-weight:800;";
@@ -2154,7 +2167,7 @@
     });
 
     const list = document.createElement("div");
-    list.style.cssText = "display:grid; gap:10px; max-height: 420px; overflow:auto; padding-right: 6px;";
+    list.style.cssText = "display:grid; gap:10px; max-height: 58vh; overflow:auto; padding-right: 6px;";
     left.appendChild(list);
 
     function highlightRow(oldHex) {
@@ -2275,7 +2288,7 @@
     btnQuickApply.type = "button";
     btnQuickApply.textContent = "QUICK APPLY SUGGESTIONS";
     btnQuickApply.title = "Aplica todas las sugerencias visibles de una vez y renombra los números automáticamente";
-    btnQuickApply.style.cssText = "padding:8px 11px; border-radius:10px; border:1px solid rgba(0,0,0,.20); background:#111; color:white; cursor:pointer; font-size:11px; font-weight:900; letter-spacing:.2px; white-space:nowrap;";
+    btnQuickApply.style.cssText = "padding:9px 12px; border-radius:999px; border:1px solid rgba(0,0,0,.18); background:#111; color:white; cursor:pointer; font-size:11px; font-weight:950; letter-spacing:.2px; white-space:nowrap;";
     enhanceButton(btnQuickApply);
     btnQuickApply.addEventListener("click", (e) => {
       e.preventDefault();
@@ -2316,14 +2329,14 @@
         row.setAttribute("data-replhex", "");
         row.setAttribute("data-repltag", "");
         row.style.cssText = `
-          text-align:left; display:grid; grid-template-columns: 72px 72px 72px 72px 1fr;
-          gap: 10px; align-items:center; padding: 10px; border-radius: 12px;
-          border: 1px solid rgba(0,0,0,.12); background: white; cursor: pointer;
+          text-align:left; display:grid; grid-template-columns: 62px 62px 62px 62px minmax(150px, 1fr);
+          gap: 9px; align-items:center; padding: 10px; border-radius: 18px;
+          border: 1px solid rgba(0,0,0,.10); background: rgba(255,255,255,.92); cursor: pointer; box-shadow: 0 8px 20px rgba(25,22,19,.045);
         `;
 
         const boxTag = document.createElement("div");
         boxTag.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.20);
+          width:62px; height:42px; border-radius:14px; border:1px solid rgba(0,0,0,.16);
           background:${oldHex}; position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center;
           font-weight:900; font-size:18px; color:${textColorForBg(oldHex)};
         `;
@@ -2332,7 +2345,7 @@
         const boxRepl = document.createElement("div");
         boxRepl.className = "sw-new";
         boxRepl.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px dashed rgba(0,0,0,.20);
+          width:62px; height:42px; border-radius:14px; border:1px dashed rgba(0,0,0,.18);
           background:transparent; position:relative; overflow:hidden;
         `;
         const newBadgeHost = document.createElement("div");
@@ -2342,7 +2355,7 @@
 
         const boxRename = document.createElement("div");
         boxRename.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.22);
+          width:62px; height:42px; border-radius:14px; border:1px solid rgba(0,0,0,.16);
           background:white; display:flex; align-items:center; justify-content:center; padding:0 6px;
         `;
         const input = document.createElement("input");
@@ -2355,7 +2368,7 @@
         boxSug.type = "button";
         boxSug.className = "recolor-suggest";
         boxSug.style.cssText = `
-          width:72px; height:44px; border-radius:12px; border:1px solid rgba(0,0,0,.18);
+          width:62px; height:42px; border-radius:14px; border:1px solid rgba(0,0,0,.14);
           background:${isHex6(sugHex) ? sugHex : "rgba(0,0,0,.03)"}; position:relative; overflow:hidden;
           cursor:${isHex6(sugHex) ? "pointer" : "not-allowed"}; display:flex; align-items:center; justify-content:center; padding:0;
         `;
@@ -2555,13 +2568,13 @@
 
     // ---------- Downloads ----------
     const dl = document.createElement("div");
-    dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top: 12px;";
+    dl.style.cssText = "display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; padding:12px; border-radius:22px; background:rgba(255,255,255,.72); border:1px solid rgba(0,0,0,.08);";
     host.appendChild(dl);
 
     const btnSvg = document.createElement("button");
     btnSvg.type = "button";
     btnSvg.textContent = "DOWNLOAD RECOLORED SVG";
-    btnSvg.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    btnSvg.style.cssText = "padding:11px 15px; border-radius:999px; border:1px solid rgba(0,0,0,.14); background:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
     enhanceButton(btnSvg);
     btnSvg.addEventListener("click", async () => {
       setButtonLoading(btnSvg, true);
@@ -2577,7 +2590,7 @@
     const btnPng = document.createElement("button");
     btnPng.type = "button";
     btnPng.textContent = "DOWNLOAD RECOLORED PNG";
-    btnPng.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    btnPng.style.cssText = "padding:11px 15px; border-radius:999px; border:1px solid rgba(0,0,0,.14); background:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
     enhanceButton(btnPng);
     btnPng.addEventListener("click", async () => {
       setButtonLoading(btnPng, true);
@@ -2595,7 +2608,7 @@
 
 
     const nameInputWrap = document.createElement("div");
-    nameInputWrap.style.cssText = "display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:12px; border:1px solid rgba(0,0,0,.14); background:white;";
+    nameInputWrap.style.cssText = "display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; border:1px solid rgba(0,0,0,.12); background:white;";
     const nameLabel = document.createElement("label");
     nameLabel.textContent = "Nombre imagen";
     nameLabel.style.cssText = "font-size:12px; font-weight:900; color:rgba(0,0,0,.72); white-space:nowrap;";
@@ -2610,7 +2623,7 @@
     btnStorageConfig.type = "button";
     btnStorageConfig.textContent = "CONFIG STORAGE";
     btnStorageConfig.title = "Configura Cloudinary para subir automáticamente la imagen y generar el QR público";
-    btnStorageConfig.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    btnStorageConfig.style.cssText = "padding:11px 15px; border-radius:999px; border:1px solid rgba(0,0,0,.14); background:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
     enhanceButton(btnStorageConfig);
     btnStorageConfig.addEventListener("click", async () => {
       setButtonLoading(btnStorageConfig, true);
@@ -2627,7 +2640,7 @@
     const btnMarkers = document.createElement("button");
     btnMarkers.type = "button";
     btnMarkers.textContent = "DOWNLOAD MARKER LIST JPG";
-    btnMarkers.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    btnMarkers.style.cssText = "padding:11px 15px; border-radius:999px; border:1px solid rgba(0,0,0,.14); background:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
     enhanceButton(btnMarkers);
     btnMarkers.addEventListener("click", () => {
       setButtonLoading(btnMarkers, true);
@@ -2641,7 +2654,7 @@
     const btnTemplatePdf = document.createElement("button");
     btnTemplatePdf.type = "button";
     btnTemplatePdf.textContent = "DOWNLOAD PRINT TEMPLATE PDF";
-    btnTemplatePdf.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    btnTemplatePdf.style.cssText = "padding:11px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#111; color:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
     enhanceButton(btnTemplatePdf);
 
     const exportProgress = document.createElement("div");
@@ -2691,16 +2704,16 @@
     fab.id = "recolor-fab";
     fab.style.cssText = `
       position: fixed; right: 18px; bottom: 18px; z-index: 2147483646;
-      display: none; gap: 8px; align-items: center; padding: 10px; border-radius: 14px;
-      background: rgba(255,255,255,.96); border: 1px solid rgba(0,0,0,.14);
-      box-shadow: 0 12px 40px rgba(0,0,0,.18);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      display: none; gap: 10px; align-items: center; padding: 10px; border-radius: 999px;
+      background: rgba(255,255,255,.92); border: 1px solid rgba(0,0,0,.12);
+      box-shadow: 0 18px 50px rgba(0,0,0,.20); backdrop-filter: blur(16px);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     `;
 
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = "Abrir Recolorear";
-    btn.style.cssText = "padding:10px 14px; border-radius:12px; border:1px solid rgba(0,0,0,.22); background:white; cursor:pointer; font-weight:900; display:inline-flex; align-items:center;";
+    btn.textContent = "Abrir mesa de recoloreo";
+    btn.style.cssText = "padding:12px 16px; border-radius:999px; border:1px solid rgba(0,0,0,.16); background:#111; color:white; cursor:pointer; font-weight:950; display:inline-flex; align-items:center;";
     enhanceButton(btn);
     btn.addEventListener("click", () => {
       const current = findFinalOutputSvgLight();
@@ -2710,7 +2723,7 @@
 
     const status = document.createElement("div");
     status.id = "recolor-fab-status";
-    status.style.cssText = "font-size: 12px; color: rgba(0,0,0,.65); white-space:nowrap;";
+    status.style.cssText = "font-size:12px; color:rgba(0,0,0,.65); white-space:nowrap; font-weight:800; padding-right:4px;";
     status.textContent = "Esperando output…";
 
     fab.appendChild(btn);
