@@ -17,7 +17,7 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v2.5"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v2.7"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
   const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
@@ -30,6 +30,11 @@
   // ---------- Memory ----------
   // Keep a stable key to avoid breaking persistence across versions.
   const STORAGE_KEY = "recolor_state_stable";
+  // Small history lets the recolor work survive SVG regeneration/resizing.
+  // Exact SVG signatures can change when width/viewBox/font styling changes,
+  // but the useful recolor state is keyed by the set of original colors/tags.
+  const STORAGE_HISTORY_KEY = "recolor_state_history_v1";
+  const STORAGE_MAX_HISTORY = 20;
   let saveTimer = null;
 
   function safeJsonParse(s) {
@@ -50,7 +55,52 @@
     }
   }
   function loadStored() { return safeJsonParse(localStorage.getItem(STORAGE_KEY)) || null; }
-  function writeStored(obj) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
+  function loadStoredHistory() {
+    const arr = safeJsonParse(localStorage.getItem(STORAGE_HISTORY_KEY) || "[]");
+    return Array.isArray(arr) ? arr : [];
+  }
+  function writeStored(obj) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+      const history = loadStoredHistory().filter((x) => x && x.memoryKey && x.memoryKey !== obj.memoryKey && x.svgSig !== obj.svgSig);
+      history.unshift(Object.assign({}, obj, { savedAt: Date.now() }));
+      localStorage.setItem(STORAGE_HISTORY_KEY, JSON.stringify(history.slice(0, STORAGE_MAX_HISTORY)));
+    } catch (_) {}
+  }
+  function stateLooksCompatibleWithEntries(st, entries) {
+    if (!st || !st.mappings || !entries || !entries.length) return false;
+    const entryHexes = new Set(entries.map((e) => norm(e.oldHex)).filter(isHex6));
+    const mappingHexes = Object.keys(st.mappings || {}).map(norm).filter(isHex6);
+    if (!mappingHexes.length) return false;
+    let hits = 0;
+    mappingHexes.forEach((h) => { if (entryHexes.has(h)) hits++; });
+    return hits >= Math.max(1, Math.min(3, Math.ceil(Math.min(mappingHexes.length, entryHexes.size) * 0.25)));
+  }
+  function memoryKeyFromEntries(entries) {
+    const compact = (entries || [])
+      .map((e) => `${norm(e.oldHex)}:${(e.tagOriginal || "").toString().trim()}`)
+      .sort()
+      .join("|");
+    return hashDjb2(compact || "empty");
+  }
+  function getReusableStoredForSvg(sig, entries) {
+    const memoryKey = memoryKeyFromEntries(entries);
+    const current = loadStored();
+    if (current && current.svgSig === sig) return { state: current, memoryKey, exact: true };
+
+    const history = loadStoredHistory();
+    const byKey = history.find((x) => x && x.memoryKey === memoryKey && stateLooksCompatibleWithEntries(x, entries));
+    if (byKey) return { state: Object.assign({}, byKey, { svgSig: sig, memoryKey }), memoryKey, exact: false };
+
+    if (current && stateLooksCompatibleWithEntries(current, entries)) {
+      return { state: Object.assign({}, current, { svgSig: sig, memoryKey }), memoryKey, exact: false };
+    }
+
+    const loose = history.find((x) => stateLooksCompatibleWithEntries(x, entries));
+    if (loose) return { state: Object.assign({}, loose, { svgSig: sig, memoryKey }), memoryKey, exact: false };
+
+    return { state: { svgSig: sig, memoryKey, version: VERSION, mappings: {}, ui: {} }, memoryKey, exact: true };
+  }
 
   // ---------- Page version label (above H1) ----------
   function injectVersionLabelAboveTitle() {
@@ -938,7 +988,7 @@
     folder: "paintbynumber-referencias"
   };
 
-  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v25";
+  const PBN_UPLOAD_CONFIG_STORAGE_KEY = "pbn_upload_config_v26";
 
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
@@ -1184,10 +1234,10 @@
   .qr-label-top, .qr-label-bottom { width:100%; font-family:Inter, Arial, Helvetica, sans-serif; font-size:3.15mm; line-height:1; font-weight:850; letter-spacing:.03em; color:#333; text-transform:uppercase; white-space:nowrap; }
   .qr-card { width:23mm; height:23mm; padding:1.25mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,.95); border:.28mm solid rgba(0,0,0,.055); border-radius:2.3mm; box-shadow:0 .85mm 2.5mm rgba(0,0,0,.07), 0 .18mm .55mm rgba(0,0,0,.045); }
   .qr { width:100%; height:100%; max-width:100%; max-height:100%; object-fit:contain; display:block; }
-  .image-frame { position:absolute; left:50%; top:77.5mm; transform:translateX(-50%); width:163mm; height:115mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:visible; background:transparent; border:none; border-radius:0; box-shadow:none; padding:0; }
+  .image-frame { position:absolute; left:50%; top:73.8mm; transform:translateX(-50%); width:171mm; height:160mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:visible; background:transparent; border:none; border-radius:0; box-shadow:none; padding:0; }
   .artwork { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; border:none; box-shadow:none; border-radius:0; }
-  .markers { position:absolute; left:20mm; right:20mm; top:207.5mm; min-height:31mm; background:transparent; box-sizing:border-box; }
-  .markers-title { font-size:4.1mm; line-height:1.1; font-weight:760; color:#2c2c2c; margin-bottom:3.2mm; letter-spacing:.004em; }
+  .markers { position:absolute; left:20mm; right:20mm; top:239.5mm; min-height:28mm; background:transparent; box-sizing:border-box; }
+  .markers-title { font-size:4.1mm; line-height:1.05; font-weight:760; color:#2c2c2c; margin-bottom:2.6mm; letter-spacing:.004em; }
   .markers-grid { display:flex; flex-wrap:wrap; gap:2.9mm 2.8mm; align-content:flex-start; }
   .marker-chip { min-width:12.1mm; height:7.4mm; padding:0 2.8mm; border:none; border-radius:1.7mm; box-sizing:border-box; display:flex; align-items:center; justify-content:center; font-family: Inter, Arial, Helvetica, sans-serif; font-size:2.95mm; font-weight:820; letter-spacing:.01em; box-shadow:inset 0 .2mm .35mm rgba(255,255,255,.24), 0 .42mm 1.1mm rgba(0,0,0,.08); }
   .empty-markers { font-size:9pt; color:#777; margin-top:2mm; }
@@ -1670,11 +1720,9 @@
     host.innerHTML = "";
 
     const sig = svgSignature(originalSvg);
-    const stored = loadStored();
-    const sameDoc = stored && stored.svgSig === sig;
-
-    // init storage for this svg if new
-    if (!sameDoc) writeStored({ svgSig: sig, version: VERSION, mappings: {}, ui: {} });
+    // Do not wipe memory here. Width/viewBox/font tweaks can change the raw SVG
+    // signature even when it is the same artwork. We decide what can be restored
+    // after reading the original colors/tags below.
 
     const header = document.createElement("div");
     header.style.cssText = "display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;";
@@ -1685,6 +1733,11 @@
       </div>
     `;
     host.appendChild(header);
+
+    const memoryNotice = document.createElement("div");
+    memoryNotice.style.cssText = "margin-top:8px; font-size:12px; color:rgba(0,0,0,.62); font-weight:800;";
+    memoryNotice.textContent = "Memoria activa: los reemplazos, renombres, bloqueos y toggles se guardan aunque cambies tamaño/viewBox del SVG.";
+    host.appendChild(memoryNotice);
 
     const originalClone = originalSvg.cloneNode(true);
     const recolorSvg = originalSvg.cloneNode(true);
@@ -1723,6 +1776,13 @@
       return { oldHex: hex, nodes, tagOriginal };
     });
 
+    const reusableMemory = getReusableStoredForSvg(sig, rawEntries);
+    const memoryKey = reusableMemory.memoryKey;
+    const activeStoredState = reusableMemory.state;
+    // Normalize current storage to the newly generated SVG signature, but keep
+    // compatible mappings when only SVG size/viewBox/font styling changed.
+    writeStored(activeStoredState);
+
     rawEntries.sort((a, b) => {
       const ta = a.tagOriginal || "";
       const tb = b.tagOriginal || "";
@@ -1744,8 +1804,8 @@
     // ✅ Requirement: default suggestion mode is OFF on modal open
     let suggestMode = "off"; // off | soft | hard
 
-    const storedNow = loadStored();
-    const savedUi = storedNow && storedNow.svgSig === sig && storedNow.ui ? storedNow.ui : {};
+    const storedNow = activeStoredState || loadStored();
+    const savedUi = storedNow && storedNow.ui ? storedNow.ui : {};
     if (typeof savedUi.colorsOn === "boolean") colorsOn = savedUi.colorsOn;
     if (typeof savedUi.bordersOn === "boolean") bordersOn = savedUi.bordersOn;
     if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
@@ -1978,8 +2038,10 @@
     function queueSaveState(buildStateFn) {
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
-        const current = loadStored() || { svgSig: sig, version: VERSION, mappings: {}, ui: {} };
-        if (current.svgSig !== sig) return;
+        const current = loadStored() || { svgSig: sig, memoryKey, version: VERSION, mappings: {}, ui: {} };
+        if (current.svgSig !== sig && !stateLooksCompatibleWithEntries(current, rawEntries)) return;
+        current.svgSig = sig;
+        current.memoryKey = memoryKey;
         const next = buildStateFn(current);
         next.version = VERSION;
         writeStored(next);
@@ -2356,8 +2418,8 @@
 
     // Restore mappings if same SVG
     function restoreMappingsIfAny() {
-      const st = loadStored();
-      if (!st || st.svgSig !== sig || !st.mappings) return;
+      const st = activeStoredState || loadStored();
+      if (!st || !st.mappings) return;
 
       const mappings = st.mappings || {};
       for (const oldHex of Object.keys(mappings)) {
