@@ -1,4 +1,4 @@
-/* Recolor add-on (v1.4 - TEMPLATE BACKGROUND + RECOLORED-ARTWORK QR + CLEAN PRINT)
+/* Recolor add-on (v3.0 - GLOBAL INVENTORY MEMORY + COLOR EDITOR + EXPORT FIXES)
    ✅ Adds small visible version label above “Paint by number generator” title (page)
    ✅ Code always has a VERSION constant
    ✅ Suggestion selector: OFF (Closest) [DEFAULT] / SOFT (recommended) / HARD (experimental)
@@ -17,15 +17,35 @@
 
 (function () {
   // ---------- Version ----------
-  const VERSION = "v2.7"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
+  const VERSION = "v3.0"; // Change this on every ZIP/code delivery so the browser visibly confirms the update.
 
   // ---------- Config ----------
-  const PALETTE_ITEMS = window.PALETTE_ITEMS || [];
-  const PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map((x) => x.hex);
+  // Keep an immutable copy of the Excel/base palette. The live PALETTE_ITEMS array
+  // is intentionally mutable so custom HEX/RGB overrides can update every picker
+  // and suggestion without touching palette168.js.
+  const BASE_PALETTE_ITEMS = (window.PALETTE_ITEMS || []).map((x) => ({
+    tag: (x.tag || "").toString().trim(),
+    hex: (x.hex || "").toString().trim().toLowerCase(),
+  }));
+  const PALETTE_ITEMS = window.PALETTE_ITEMS || BASE_PALETTE_ITEMS.map((x) => ({ ...x }));
+  let PALETTE = window.PALETTE_168 || PALETTE_ITEMS.map((x) => x.hex);
 
   const norm = (v) => (v || "").toString().trim().toLowerCase();
   const isHex6 = (s) => /^#[0-9a-f]{6}$/i.test(s);
   const isTagLike = (t) => /^[a-z0-9]{1,6}$/i.test((t || "").toString().trim());
+  const BASE_PALETTE_HEX_BY_TAG = Object.fromEntries(
+    BASE_PALETTE_ITEMS.map((x) => [String(x.tag), norm(x.hex)])
+  );
+
+  // Global inventory memory is independent from any particular generated SVG.
+  // localStorage gives immediate persistence on the current browser; Cloudinary
+  // synchronization (defined below) makes the same state available on other PCs.
+  const GLOBAL_PALETTE_STORAGE_KEY = "pbn_global_palette_state_v1";
+  const GLOBAL_PALETTE_CLOUD_TAG = "pbn-global-palette-state-v1";
+  let globalPaletteState = null;
+  let globalPaletteCloudStatus = { code: "local", message: "Memoria local activa" };
+  const globalPaletteStatusListeners = new Set();
+  let globalPaletteUploadTimer = null;
 
   // ---------- Memory ----------
   // Keep a stable key to avoid breaking persistence across versions.
@@ -40,6 +60,86 @@
   function safeJsonParse(s) {
     try { return JSON.parse(s); } catch { return null; }
   }
+
+  function normalizeGlobalPaletteState(raw) {
+    const src = raw && typeof raw === "object" ? raw : {};
+    const validTags = new Set(BASE_PALETTE_ITEMS.map((x) => String(x.tag)));
+    const blockedTags = Array.isArray(src.blockedTags)
+      ? Array.from(new Set(src.blockedTags.map((x) => String(x).trim()).filter((x) => validTags.has(x))))
+      : [];
+    const overrides = {};
+    const sourceOverrides = src.overrides && typeof src.overrides === "object" ? src.overrides : {};
+    Object.keys(sourceOverrides).forEach((tag) => {
+      const t = String(tag).trim();
+      const hex = norm(sourceOverrides[tag]);
+      if (!validTags.has(t) || !isHex6(hex)) return;
+      if (hex !== BASE_PALETTE_HEX_BY_TAG[t]) overrides[t] = hex;
+    });
+    return {
+      schema: 1,
+      blockedTags,
+      overrides,
+      updatedAt: Number.isFinite(Number(src.updatedAt)) ? Number(src.updatedAt) : 0,
+      updatedBy: (src.updatedBy || "").toString().slice(0, 80),
+    };
+  }
+
+  function loadGlobalPaletteStateLocal() {
+    try {
+      return normalizeGlobalPaletteState(safeJsonParse(localStorage.getItem(GLOBAL_PALETTE_STORAGE_KEY) || "null"));
+    } catch (_) {
+      return normalizeGlobalPaletteState(null);
+    }
+  }
+
+  function writeGlobalPaletteStateLocal(state) {
+    try { localStorage.setItem(GLOBAL_PALETTE_STORAGE_KEY, JSON.stringify(state)); } catch (_) {}
+  }
+
+  function applyGlobalPaletteStateToItems(state) {
+    const st = normalizeGlobalPaletteState(state);
+    PALETTE_ITEMS.forEach((item) => {
+      const tag = String(item.tag || "").trim();
+      const baseHex = BASE_PALETTE_HEX_BY_TAG[tag] || norm(item.hex);
+      item.hex = st.overrides[tag] || baseHex;
+    });
+    PALETTE = PALETTE_ITEMS.map((x) => norm(x.hex));
+    window.PALETTE_168 = PALETTE.slice();
+    window.PALETTE_168_COUNT = PALETTE.length;
+    window.PALETTE_HEX_BY_TAG = Object.fromEntries(PALETTE_ITEMS.map((x) => [String(x.tag), norm(x.hex)]));
+    window.PALETTE_TAG_BY_HEX = Object.fromEntries(PALETTE_ITEMS.map((x) => [norm(x.hex), String(x.tag)]));
+    return st;
+  }
+
+  function getPaletteItemByTag(tag) {
+    const t = String(tag || "").trim();
+    return PALETTE_ITEMS.find((x) => String(x.tag || "").trim() === t) || null;
+  }
+
+  function getBasePaletteHex(tag) {
+    return BASE_PALETTE_HEX_BY_TAG[String(tag || "").trim()] || "";
+  }
+
+  function paletteTagFromHex(hex) {
+    const h = norm(hex);
+    const live = PALETTE_ITEMS.find((x) => norm(x.hex) === h);
+    if (live) return String(live.tag || "").trim();
+    const base = BASE_PALETTE_ITEMS.find((x) => norm(x.hex) === h);
+    return base ? String(base.tag || "").trim() : "";
+  }
+
+  function setGlobalPaletteCloudStatus(code, message) {
+    globalPaletteCloudStatus = { code, message: message || "" };
+    globalPaletteStatusListeners.forEach((fn) => { try { fn(globalPaletteCloudStatus); } catch (_) {} });
+  }
+
+  function subscribeGlobalPaletteStatus(fn) {
+    globalPaletteStatusListeners.add(fn);
+    try { fn(globalPaletteCloudStatus); } catch (_) {}
+    return () => globalPaletteStatusListeners.delete(fn);
+  }
+
+  globalPaletteState = applyGlobalPaletteStateToItems(loadGlobalPaletteStateLocal());
   function hashDjb2(str) {
     let h = 5381;
     for (let i = 0; i < str.length; i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
@@ -818,10 +918,28 @@
     };
   }
 
-  // ---------- Build palette cache ONCE ----------
-  const PALETTE_CACHE = buildPaletteCache(
+  // ---------- Build/rebuild palette cache ----------
+  let PALETTE_CACHE = buildPaletteCache(
     PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ hex, tag: "" }))
   );
+
+  function rebuildPaletteCache() {
+    PALETTE_CACHE = buildPaletteCache(
+      PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ hex, tag: "" }))
+    );
+  }
+
+  function commitGlobalPaletteState(nextState, { syncCloud = true, updatedBy = "browser" } = {}) {
+    const normalized = normalizeGlobalPaletteState(Object.assign({}, nextState, {
+      updatedAt: Number(nextState && nextState.updatedAt) || Date.now(),
+      updatedBy,
+    }));
+    globalPaletteState = applyGlobalPaletteStateToItems(normalized);
+    rebuildPaletteCache();
+    writeGlobalPaletteStateLocal(globalPaletteState);
+    if (syncCloud) scheduleGlobalPaletteCloudSave();
+    return globalPaletteState;
+  }
 
   // ---------- SVG sizing ----------
   function ensureViewBox(svg) {
@@ -993,7 +1111,8 @@
   function getUploadConfig() {
     // v3 intentionally ignores older saved config keys so a previously mistyped
     // cloud_name does not keep breaking the new integrated version.
-    const saved = safeJsonParse(localStorage.getItem(PBN_UPLOAD_CONFIG_STORAGE_KEY) || "null") || {};
+    let saved = {};
+    try { saved = safeJsonParse(localStorage.getItem(PBN_UPLOAD_CONFIG_STORAGE_KEY) || "null") || {}; } catch (_) {}
     const cfg = Object.assign({}, DEFAULT_PBN_UPLOAD_CONFIG, window.PBN_UPLOAD_CONFIG || {}, saved || {});
     return {
       cloudName: (cfg.cloudName || "").toString().trim(),
@@ -1010,6 +1129,105 @@
     try { localStorage.removeItem(PBN_UPLOAD_CONFIG_STORAGE_KEY); } catch (_) {}
   }
 
+  function cloudRawResourceUrl(resource, cloudName) {
+    if (!resource) return "";
+    if (resource.secure_url) return resource.secure_url;
+    if (resource.url) return String(resource.url).replace(/^http:/i, "https:");
+    const publicId = (resource.public_id || "").toString();
+    if (!publicId) return "";
+    const version = resource.version ? `/v${resource.version}` : "";
+    const format = (resource.format || "json").toString();
+    const encodedId = publicId.split("/").map(encodeURIComponent).join("/");
+    const suffix = encodedId.toLowerCase().endsWith(`.${format.toLowerCase()}`) ? "" : `.${format}`;
+    return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/raw/upload${version}/${encodedId}${suffix}`;
+  }
+
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 6500) {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      return await fetch(url, Object.assign({}, options, controller ? { signal: controller.signal } : {}));
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async function syncGlobalPaletteStateFromCloud({ silent = true } = {}) {
+    const cfg = getUploadConfig();
+    if (!cfg.cloudName) return globalPaletteState;
+    setGlobalPaletteCloudStatus("syncing", "Sincronizando memoria global…");
+    try {
+      const listUrl = `https://res.cloudinary.com/${encodeURIComponent(cfg.cloudName)}/raw/list/${GLOBAL_PALETTE_CLOUD_TAG}.json?_=${Date.now()}`;
+      const listResponse = await fetchWithTimeout(listUrl, { cache: "no-store" }, 6500);
+      if (!listResponse.ok) {
+        const errText = await listResponse.text().catch(() => "");
+        throw new Error(`Cloudinary list ${listResponse.status}${errText ? ": " + errText.slice(0, 180) : ""}`);
+      }
+      const listing = await listResponse.json();
+      const resources = Array.isArray(listing.resources) ? listing.resources.slice() : [];
+      resources.sort((a, b) => {
+        const ta = Date.parse(a.created_at || "") || Number(a.version) || 0;
+        const tb = Date.parse(b.created_at || "") || Number(b.version) || 0;
+        return tb - ta;
+      });
+
+      let newest = null;
+      for (const resource of resources.slice(0, 8)) {
+        const stateUrl = cloudRawResourceUrl(resource, cfg.cloudName);
+        if (!stateUrl) continue;
+        try {
+          const stateResponse = await fetchWithTimeout(`${stateUrl}${stateUrl.includes("?") ? "&" : "?"}_=${Date.now()}`, { cache: "no-store" }, 5000);
+          if (!stateResponse.ok) continue;
+          const candidate = normalizeGlobalPaletteState(await stateResponse.json());
+          if (!newest || candidate.updatedAt > newest.updatedAt) newest = candidate;
+        } catch (_) {}
+      }
+
+      if (newest && newest.updatedAt > (globalPaletteState.updatedAt || 0)) {
+        commitGlobalPaletteState(newest, { syncCloud: false, updatedBy: newest.updatedBy || "cloud" });
+      }
+      setGlobalPaletteCloudStatus("cloud", resources.length ? "Memoria global sincronizada (otro PC puede tardar hasta 1 min en ver cambios nuevos)" : "Nube conectada; aún no hay estado remoto");
+      return globalPaletteState;
+    } catch (err) {
+      const message = "Memoria local activa; nube no disponible. Habilita Resource list en Cloudinary para sincronizar entre PCs.";
+      setGlobalPaletteCloudStatus("local-only", message);
+      if (!silent) alert(`${message}\n\nDetalle: ${err && err.message ? err.message : err}`);
+      return globalPaletteState;
+    }
+  }
+
+  async function uploadGlobalPaletteStateToCloud(snapshot) {
+    const cfg = await ensureUploadConfig(false);
+    const state = normalizeGlobalPaletteState(snapshot);
+    const form = new FormData();
+    form.append("file", new Blob([JSON.stringify(state)], { type: "application/json" }), "pbn-global-palette-state.json");
+    form.append("upload_preset", cfg.unsignedPreset);
+    form.append("tags", GLOBAL_PALETTE_CLOUD_TAG);
+    form.append("public_id", `pbn-palette-state-${state.updatedAt || Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+    if (cfg.folder) form.append("folder", `${cfg.folder}/shared-state`);
+
+    const endpoint = `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/raw/upload`;
+    const response = await fetchWithTimeout(endpoint, { method: "POST", body: form }, 15000);
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error((json.error && json.error.message) || `Cloudinary upload ${response.status}`);
+    return json;
+  }
+
+  function scheduleGlobalPaletteCloudSave() {
+    clearTimeout(globalPaletteUploadTimer);
+    const snapshot = JSON.parse(JSON.stringify(globalPaletteState));
+    globalPaletteUploadTimer = setTimeout(async () => {
+      setGlobalPaletteCloudStatus("saving", "Guardando memoria global en la nube…");
+      try {
+        await uploadGlobalPaletteStateToCloud(snapshot);
+        setGlobalPaletteCloudStatus("cloud", "Memoria global guardada (otro PC puede tardar hasta 1 min en verla)");
+      } catch (err) {
+        console.warn("No se pudo guardar memoria global en Cloudinary", err);
+        setGlobalPaletteCloudStatus("local-only", "Guardado local correcto; nube no disponible. Revisa Cloudinary.");
+      }
+    }, 700);
+  }
+
   function explainCloudinaryConfig() {
     return [
       "Para automatizar el QR, la imagen debe subirse a un hosting público.",
@@ -1018,6 +1236,7 @@
       "1) Cloud name: el nombre corto de tu cuenta Cloudinary. No es tu email ni tu usuario de GitHub.",
       "2) Unsigned upload preset: un preset activo creado en Cloudinary > Settings > Upload > Upload presets, con Signing Mode = Unsigned.",
       "3) Carpeta: opcional. Ej: paintbynumber-referencias.",
+      "4) Para memoria compartida entre PCs: en Cloudinary > Settings > Security, habilita Resource list (quítalo de Restricted image types).",
       "",
       "Esta versión ya trae integrada tu configuración inicial:",
       "Cloud name: df4fayh1q",
@@ -1222,7 +1441,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>${safeName || 'plantilla-referencia'}</title>
+<title>Paint by number generator ${safeName || 'plantilla-referencia'}</title>
 <style>
   @page { size: 216mm 330mm; margin: 0; }
   html, body { margin:0; padding:0; background:#fff; font-family: Inter, Arial, Helvetica, sans-serif; }
@@ -1259,6 +1478,9 @@
 
   async function printHtmlAsPdf(html, imageName) {
     setExportProgress("Etapa 4/5: abriendo plantilla OFICIO en modo impresión del navegador…");
+    const desiredFilenameTitle = `Paint by number generator ${(imageName || "referencia").toString().trim()}`.trim();
+    const previousDocumentTitle = document.title;
+    const restoreDocumentTitle = () => { document.title = previousDocumentTitle; };
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.right = "0";
@@ -1272,6 +1494,10 @@
     doc.open();
     doc.write(html);
     doc.close();
+    // Chrome/Edge use the active document title as the suggested Save-as-PDF filename.
+    // Set both the print frame and the parent title for consistent behavior.
+    doc.title = desiredFilenameTitle;
+    document.title = desiredFilenameTitle;
     await new Promise((resolve) => {
       const imgs = Array.from(doc.images || []);
       if (!imgs.length) return resolve();
@@ -1286,10 +1512,11 @@
     });
     setExportProgress("Etapa 5/5: se abrirá impresión. Elige 'Guardar como PDF', papel OFICIO y DESACTIVA 'Encabezados y pies de página' para que no aparezcan fecha/URL. Orientación vertical, escala 100%, márgenes ninguno.");
     try {
+      iframe.contentWindow.addEventListener("afterprint", restoreDocumentTitle, { once: true });
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
     } finally {
-      setTimeout(() => iframe.remove(), 60000);
+      setTimeout(() => { restoreDocumentTitle(); iframe.remove(); }, 60000);
     }
   }
 
@@ -1482,62 +1709,79 @@
       border: 1px solid rgba(0,0,0,.10); border-radius: 12px; background: rgba(0,0,0,.02);
     `;
 
-    const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex) => ({ tag: "", hex }));
-    const tilesByHex = new Map();
+    const tilesByTag = new Map();
 
-    items.forEach((it) => {
-      const hex = norm(it.hex);
-      const tag = (it.tag || "").toString().trim();
+    function buildTiles() {
+      grid.innerHTML = "";
+      tilesByTag.clear();
+      const items = PALETTE_ITEMS.length ? PALETTE_ITEMS : PALETTE.map((hex, idx) => ({ tag: String(idx + 1), hex }));
 
-      const tile = document.createElement("button");
-      tile.type = "button";
-      tile.title = tag ? `${tag} — ${hex}` : hex;
-      tile.style.cssText = `
-        height: 40px; border-radius: 10px; border: 1px solid rgba(0,0,0,.16);
-        background: ${hex}; cursor: pointer; position: relative; overflow: hidden;
-      `;
+      items.forEach((it) => {
+        const hex = norm(it.hex);
+        const tag = (it.tag || "").toString().trim();
+        if (!isHex6(hex)) return;
 
-      if (tag) tile.appendChild(makeBadgeCorner(tag));
-      const x = makePickerTileX();
-      const bx = makePickerBlockedX();
-      tile.appendChild(x);
-      tile.appendChild(bx);
+        const tile = document.createElement("button");
+        tile.type = "button";
+        tile.setAttribute("data-palette-tag", tag);
+        tile.setAttribute("data-palette-hex", hex);
+        tile.title = tag ? `${tag} — ${hex}` : hex;
+        tile.style.cssText = `
+          height: 40px; border-radius: 10px; border: 1px solid rgba(0,0,0,.16);
+          background: ${hex}; cursor: pointer; position: relative; overflow: hidden;
+        `;
 
-      tile.addEventListener("click", (ev) => {
-        const blockIntent = (getBlockMode && getBlockMode()) || ev.altKey || ev.shiftKey;
-        if (blockIntent) { onToggleBlocked({ hex, tag }); return; }
-        if (isBlocked && isBlocked(hex)) {
-          alert("Ese marcador está marcado como NO DISPONIBLE. Desbloquéalo o usa otro color.");
-          return;
-        }
-        onPick({ hex, tag });
+        if (tag) tile.appendChild(makeBadgeCorner(tag));
+        const x = makePickerTileX();
+        const bx = makePickerBlockedX();
+        tile.appendChild(x);
+        tile.appendChild(bx);
+
+        tile.addEventListener("click", (ev) => {
+          const liveItem = getPaletteItemByTag(tag) || { tag, hex };
+          const liveHex = norm(liveItem.hex);
+          const blockIntent = (getBlockMode && getBlockMode()) || ev.altKey || ev.shiftKey;
+          if (blockIntent) { onToggleBlocked({ hex: liveHex, tag }); return; }
+          if (isBlocked && isBlocked({ hex: liveHex, tag })) {
+            alert("Ese marcador está marcado como NO DISPONIBLE. Desbloquéalo o usa otro color.");
+            return;
+          }
+          onPick({ hex: liveHex, tag });
+        });
+        tile.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          const liveItem = getPaletteItemByTag(tag) || { tag, hex };
+          onToggleBlocked({ hex: norm(liveItem.hex), tag });
+        });
+        grid.appendChild(tile);
+        tilesByTag.set(tag, tile);
       });
-      tile.addEventListener("contextmenu", (ev) => {
-        ev.preventDefault();
-        onToggleBlocked({ hex, tag });
-      });
-      grid.appendChild(tile);
-      tilesByHex.set(hex, tile);
-    });
+      refreshStates();
+    }
 
     function refreshStates() {
-      for (const [hex, tile] of tilesByHex.entries()) {
+      for (const [tag, tile] of tilesByTag.entries()) {
+        const item = getPaletteItemByTag(tag);
+        const hex = norm(item ? item.hex : tile.getAttribute("data-palette-hex"));
+        tile.setAttribute("data-palette-hex", hex);
+        tile.style.background = hex;
         const usedX = tile.querySelector(".tile-used-x");
         const blockedX = tile.querySelector(".tile-blocked-x");
-        const blocked = isBlocked && isBlocked(hex);
+        const blocked = isBlocked && isBlocked({ hex, tag });
         if (usedX) usedX.style.opacity = (!blocked && isUsed(hex)) ? "1" : "0";
         if (blockedX) blockedX.style.opacity = blocked ? "1" : "0";
         tile.style.opacity = blocked ? ".48" : "1";
         tile.style.filter = blocked ? "grayscale(.18)" : "none";
         tile.style.border = blocked ? "2px solid rgba(220,0,0,.72)" : "1px solid rgba(0,0,0,.16)";
-        const tag = tile.querySelector('.tag-badge') ? (tile.querySelector('.tag-badge').textContent || '').trim() : '';
+        const custom = globalPaletteState.overrides && globalPaletteState.overrides[tag];
         tile.title = blocked
-          ? `${tag ? tag + " — " : ""}${hex} — NO DISPONIBLE. Click derecho o modo bloquear para desbloquear.`
-          : `${tag ? tag + " — " : ""}${hex}`;
+          ? `${tag ? tag + " — " : ""}${hex}${custom ? " — COLOR PERSONALIZADO" : ""} — NO DISPONIBLE. Click derecho o modo bloquear para desbloquear.`
+          : `${tag ? tag + " — " : ""}${hex}${custom ? " — COLOR PERSONALIZADO" : ""}`;
       }
     }
-    refreshStates();
-    return { grid, refreshUsedX: refreshStates, refreshStates };
+
+    buildTiles();
+    return { grid, refreshUsedX: refreshStates, refreshStates, refreshPalette: buildTiles };
   }
 
   // ---------- ORIGINAL TAG MAPPING ----------
@@ -1715,8 +1959,12 @@
   }
 
   // ---------- Editor ----------
-  function openEditor(originalSvg) {
+  async function openEditor(originalSvg) {
     const host = openModal();
+    host.innerHTML = `<div style="padding:18px; font-weight:900; color:rgba(0,0,0,.68);">Sincronizando bloqueos y colores personalizados…</div>`;
+    // Pull the most recent shared inventory state before drawing the picker.
+    // If Cloudinary list delivery is unavailable, this silently falls back to local memory.
+    await syncGlobalPaletteStateFromCloud({ silent: true });
     host.innerHTML = "";
 
     const sig = svgSignature(originalSvg);
@@ -1736,7 +1984,7 @@
 
     const memoryNotice = document.createElement("div");
     memoryNotice.style.cssText = "margin-top:8px; font-size:12px; color:rgba(0,0,0,.62); font-weight:800;";
-    memoryNotice.textContent = "Memoria activa: los reemplazos, renombres, bloqueos y toggles se guardan aunque cambies tamaño/viewBox del SVG.";
+    memoryNotice.textContent = "Memoria activa: reemplazos/renombres por imagen; bloqueos y colores personalizados son globales y se sincronizan entre PCs mediante Cloudinary.";
     host.appendChild(memoryNotice);
 
     const originalClone = originalSvg.cloneNode(true);
@@ -1811,7 +2059,20 @@
     if (typeof savedUi.textColorModeOn === "boolean") textColorModeOn = savedUi.textColorModeOn;
     if (typeof savedUi.textOpacity === "number") textOpacity = Math.max(0, Math.min(1, savedUi.textOpacity));
     if (typeof savedUi.selectedOldHex === "string") selectedOldHex = savedUi.selectedOldHex;
-    const blockedPaletteHexes = new Set(Array.isArray(savedUi.blockedPaletteHexes) ? savedUi.blockedPaletteHexes.map(norm).filter(isHex6) : []);
+    const blockedPaletteTags = new Set(Array.isArray(globalPaletteState.blockedTags) ? globalPaletteState.blockedTags.map(String) : []);
+    // One-time migration from the older per-SVG/local HEX storage.
+    if (!blockedPaletteTags.size && Array.isArray(savedUi.blockedPaletteHexes)) {
+      savedUi.blockedPaletteHexes.map(norm).filter(isHex6).forEach((hex) => {
+        const tag = paletteTagFromHex(hex);
+        if (tag) blockedPaletteTags.add(tag);
+      });
+      if (blockedPaletteTags.size) {
+        commitGlobalPaletteState(Object.assign({}, globalPaletteState, {
+          blockedTags: Array.from(blockedPaletteTags),
+          updatedAt: Date.now(),
+        }), { syncCloud: true, updatedBy: "migration" });
+      }
+    }
     let blockUnavailableMode = false;
 
     setColorFills(recolorSvg, colorsOn);
@@ -1859,9 +2120,23 @@
     enhanceButton(btnClearBlocked);
     const blockedCount = document.createElement("span");
     blockedCount.style.cssText = "font-size:11px; color:rgba(0,0,0,.62); font-weight:800;";
+    const btnCloudSync = document.createElement("button");
+    btnCloudSync.type = "button";
+    btnCloudSync.textContent = "SYNC NUBE";
+    btnCloudSync.title = "Descarga el último inventario global desde Cloudinary";
+    btnCloudSync.style.cssText = "padding:8px 10px; border-radius:10px; border:1px solid rgba(0,0,0,.14); background:white; cursor:pointer; font-size:11px; font-weight:900;";
+    enhanceButton(btnCloudSync);
+    const cloudMemoryStatus = document.createElement("span");
+    cloudMemoryStatus.style.cssText = "flex-basis:100%; font-size:11px; color:rgba(0,0,0,.58); font-weight:800;";
+    subscribeGlobalPaletteStatus((st) => {
+      cloudMemoryStatus.textContent = st.message || "";
+      cloudMemoryStatus.style.color = st.code === "cloud" ? "#176b36" : (st.code === "local-only" ? "#9a5b00" : "rgba(0,0,0,.58)");
+    });
     pickerTools.appendChild(btnBlockMode);
     pickerTools.appendChild(btnClearBlocked);
     pickerTools.appendChild(blockedCount);
+    pickerTools.appendChild(btnCloudSync);
+    pickerTools.appendChild(cloudMemoryStatus);
     right.appendChild(pickerTools);
 
     function paintBlockTools() {
@@ -1869,7 +2144,7 @@
       btnBlockMode.style.background = blockUnavailableMode ? "#fff0f0" : "white";
       btnBlockMode.style.borderColor = blockUnavailableMode ? "rgba(220,0,0,.55)" : "rgba(0,0,0,.20)";
       btnBlockMode.style.color = blockUnavailableMode ? "#b00000" : "#111";
-      blockedCount.textContent = blockedPaletteHexes.size ? `${blockedPaletteHexes.size} bloqueado(s)` : "sin bloqueos";
+      blockedCount.textContent = blockedPaletteTags.size ? `${blockedPaletteTags.size} bloqueado(s)` : "sin bloqueos";
     }
     paintBlockTools();
 
@@ -1935,7 +2210,7 @@
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = "#111111";
       ctx.font = "bold 34px Arial, sans-serif";
-      const markerCount = unique.length;
+      const markerCount = markers.length;
       ctx.fillText(`Marcadores incluidos (${markerCount} ${markerCount === 1 ? "color" : "colores"})`, pad, 50);
       ctx.font = "18px Arial, sans-serif";
       ctx.fillStyle = "#666666";
@@ -2059,7 +2334,7 @@
           if (replHex || rename || replTag) mappings[oldHex] = { replHex, replTag, rename };
         }
         cur.mappings = mappings;
-        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "", blockedPaletteHexes: Array.from(blockedPaletteHexes) };
+        cur.ui = { colorsOn, bordersOn, textColorModeOn, textOpacity, selectedOldHex: selectedOldHex || "", blockedPaletteTags: Array.from(blockedPaletteTags) };
         return cur;
       });
     }
@@ -2114,11 +2389,19 @@
     }
 
     let picker;
-    function toggleBlockedPaletteHex(hex) {
-      const h = norm(hex);
-      if (!isHex6(h)) return;
-      if (blockedPaletteHexes.has(h)) blockedPaletteHexes.delete(h);
-      else blockedPaletteHexes.add(h);
+    function persistBlockedPaletteTags() {
+      commitGlobalPaletteState(Object.assign({}, globalPaletteState, {
+        blockedTags: Array.from(blockedPaletteTags),
+        updatedAt: Date.now(),
+      }), { syncCloud: true, updatedBy: "inventory" });
+    }
+
+    function toggleBlockedPaletteTag(tag) {
+      const t = String(tag || "").trim();
+      if (!t || !getPaletteItemByTag(t)) return;
+      if (blockedPaletteTags.has(t)) blockedPaletteTags.delete(t);
+      else blockedPaletteTags.add(t);
+      persistBlockedPaletteTags();
       recomputeSuggestionData();
       if (picker) picker.refreshStates();
       updateAllSuggestionTiles();
@@ -2128,9 +2411,9 @@
 
     picker = renderGridPicker({
       isUsed: (hex) => usedReplacementHex.has(norm(hex)),
-      isBlocked: (hex) => blockedPaletteHexes.has(norm(hex)),
+      isBlocked: ({ tag }) => blockedPaletteTags.has(String(tag || "").trim()),
       getBlockMode: () => blockUnavailableMode,
-      onToggleBlocked: ({ hex }) => toggleBlockedPaletteHex(hex),
+      onToggleBlocked: ({ tag }) => toggleBlockedPaletteTag(tag),
       onPick: ({ hex, tag }) => {
         if (!selectedOldHex) { alert("Primero selecciona un color original (panel izquierdo)."); return; }
         applyReplacementToOldHex(selectedOldHex, hex, tag, { autoRename: true });
@@ -2139,13 +2422,187 @@
     });
     right.appendChild(picker.grid);
 
+    // ---------- Global palette color editor (HEX / RGB) ----------
+    const colorEditor = document.createElement("div");
+    colorEditor.style.cssText = "margin-top:10px; padding:10px; border:1px solid rgba(0,0,0,.12); border-radius:12px; background:rgba(0,0,0,.018);";
+    const colorEditorTitle = document.createElement("div");
+    colorEditorTitle.textContent = "Editar código de color del marcador";
+    colorEditorTitle.style.cssText = "font-size:12px; font-weight:900; margin-bottom:7px;";
+    const colorEditorInfo = document.createElement("div");
+    colorEditorInfo.textContent = "Selecciona el número/tag, escribe HEX o RGB y aplica. El cambio actualiza el picker y queda guardado hasta restablecerlo.";
+    colorEditorInfo.style.cssText = "font-size:11px; color:rgba(0,0,0,.62); margin-bottom:8px; line-height:1.35;";
+    const colorEditorGrid = document.createElement("div");
+    colorEditorGrid.style.cssText = "display:grid; grid-template-columns:80px 42px minmax(120px,1fr) minmax(145px,1fr); gap:7px; align-items:end;";
+
+    const tagField = document.createElement("label");
+    tagField.style.cssText = "display:grid; gap:3px; font-size:10px; font-weight:900; color:rgba(0,0,0,.65);";
+    tagField.appendChild(document.createTextNode("NÚMERO"));
+    const paletteTagSelect = document.createElement("select");
+    paletteTagSelect.className = "browser-default";
+    paletteTagSelect.style.cssText = "height:34px; border:1px solid rgba(0,0,0,.18); border-radius:8px; background:white; padding:0 7px;";
+    PALETTE_ITEMS.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = String(item.tag);
+      option.textContent = String(item.tag);
+      paletteTagSelect.appendChild(option);
+    });
+    tagField.appendChild(paletteTagSelect);
+
+    const editorSwatch = document.createElement("div");
+    editorSwatch.style.cssText = "height:34px; border-radius:9px; border:1px solid rgba(0,0,0,.18);";
+
+    const hexField = document.createElement("label");
+    hexField.style.cssText = "display:grid; gap:3px; font-size:10px; font-weight:900; color:rgba(0,0,0,.65);";
+    hexField.appendChild(document.createTextNode("HEX"));
+    const paletteHexInput = document.createElement("input");
+    paletteHexInput.type = "text";
+    paletteHexInput.placeholder = "#68303e";
+    paletteHexInput.maxLength = 7;
+    paletteHexInput.style.cssText = "box-sizing:border-box; height:34px; margin:0; border:1px solid rgba(0,0,0,.18); border-radius:8px; background:white; padding:0 8px; font-size:12px;";
+    hexField.appendChild(paletteHexInput);
+
+    const rgbField = document.createElement("label");
+    rgbField.style.cssText = "display:grid; gap:3px; font-size:10px; font-weight:900; color:rgba(0,0,0,.65);";
+    rgbField.appendChild(document.createTextNode("RGB"));
+    const paletteRgbInput = document.createElement("input");
+    paletteRgbInput.type = "text";
+    paletteRgbInput.placeholder = "104, 48, 62";
+    paletteRgbInput.style.cssText = "box-sizing:border-box; height:34px; margin:0; border:1px solid rgba(0,0,0,.18); border-radius:8px; background:white; padding:0 8px; font-size:12px;";
+    rgbField.appendChild(paletteRgbInput);
+
+    colorEditorGrid.appendChild(tagField);
+    colorEditorGrid.appendChild(editorSwatch);
+    colorEditorGrid.appendChild(hexField);
+    colorEditorGrid.appendChild(rgbField);
+
+    const colorEditorActions = document.createElement("div");
+    colorEditorActions.style.cssText = "display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-top:8px;";
+    const btnApplyPaletteColor = document.createElement("button");
+    btnApplyPaletteColor.type = "button";
+    btnApplyPaletteColor.textContent = "APLICAR COLOR";
+    btnApplyPaletteColor.style.cssText = "padding:8px 10px; border-radius:9px; border:1px solid rgba(0,0,0,.22); background:#111; color:white; cursor:pointer; font-size:11px; font-weight:900;";
+    enhanceButton(btnApplyPaletteColor);
+    const btnResetPaletteColor = document.createElement("button");
+    btnResetPaletteColor.type = "button";
+    btnResetPaletteColor.textContent = "RESTABLECER ORIGINAL";
+    btnResetPaletteColor.style.cssText = "padding:8px 10px; border-radius:9px; border:1px solid rgba(0,0,0,.16); background:white; cursor:pointer; font-size:11px; font-weight:900;";
+    enhanceButton(btnResetPaletteColor);
+    const paletteColorStatus = document.createElement("span");
+    paletteColorStatus.style.cssText = "font-size:11px; color:rgba(0,0,0,.60); font-weight:800;";
+    colorEditorActions.appendChild(btnApplyPaletteColor);
+    colorEditorActions.appendChild(btnResetPaletteColor);
+    colorEditorActions.appendChild(paletteColorStatus);
+
+    colorEditor.appendChild(colorEditorTitle);
+    colorEditor.appendChild(colorEditorInfo);
+    colorEditor.appendChild(colorEditorGrid);
+    colorEditor.appendChild(colorEditorActions);
+    right.appendChild(colorEditor);
+
+    function rgbTextForHex(hex) {
+      const rgb = hexToRgb(hex);
+      return rgb ? `${rgb.r}, ${rgb.g}, ${rgb.b}` : "";
+    }
+
+    function parseRgbText(value) {
+      const nums = String(value || "").match(/\d+(?:\.\d+)?/g);
+      if (!nums || nums.length !== 3) return null;
+      const parts = nums.map((x) => Math.round(Number(x)));
+      if (!parts.every((x) => Number.isFinite(x) && x >= 0 && x <= 255)) return null;
+      return `#${parts.map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+    }
+
+    function refreshPaletteEditor() {
+      const tag = paletteTagSelect.value || (PALETTE_ITEMS[0] && String(PALETTE_ITEMS[0].tag)) || "";
+      const item = getPaletteItemByTag(tag);
+      const hex = item ? norm(item.hex) : getBasePaletteHex(tag);
+      paletteHexInput.value = hex;
+      paletteRgbInput.value = rgbTextForHex(hex);
+      editorSwatch.style.background = hex || "transparent";
+      const isCustom = !!(globalPaletteState.overrides && globalPaletteState.overrides[tag]);
+      paletteColorStatus.textContent = isCustom ? `Personalizado · original ${getBasePaletteHex(tag)}` : "Color original de la base";
+      paletteColorStatus.style.color = isCustom ? "#7b4a00" : "rgba(0,0,0,.60)";
+    }
+
+    function updateRowsUsingPaletteTag(tag, hex) {
+      for (const [oldHex, row] of rowByOldHex.entries()) {
+        const replTag = (row.getAttribute("data-repltag") || "").toString().trim();
+        if (replTag === tag) applyReplacementToOldHex(oldHex, hex, tag, { autoRename: false });
+      }
+    }
+
+    function applyPaletteOverride(tag, hexOrNull) {
+      const overrides = Object.assign({}, globalPaletteState.overrides || {});
+      const baseHex = getBasePaletteHex(tag);
+      if (!hexOrNull || norm(hexOrNull) === baseHex) delete overrides[tag];
+      else overrides[tag] = norm(hexOrNull);
+      commitGlobalPaletteState(Object.assign({}, globalPaletteState, { overrides, updatedAt: Date.now() }), { syncCloud: true, updatedBy: "palette-editor" });
+      const liveHex = norm((getPaletteItemByTag(tag) || {}).hex || baseHex);
+      updateRowsUsingPaletteTag(tag, liveHex);
+      recomputeSuggestionData();
+      picker.refreshPalette();
+      updateAllSuggestionTiles();
+      refreshPaletteEditor();
+      saveAllState();
+    }
+
+    paletteTagSelect.addEventListener("change", refreshPaletteEditor);
+    paletteHexInput.addEventListener("input", () => {
+      let hex = paletteHexInput.value.trim();
+      if (/^[0-9a-f]{6}$/i.test(hex)) hex = "#" + hex;
+      if (!isHex6(hex)) return;
+      hex = norm(hex);
+      paletteHexInput.value = hex;
+      paletteRgbInput.value = rgbTextForHex(hex);
+      editorSwatch.style.background = hex;
+    });
+    paletteRgbInput.addEventListener("input", () => {
+      const hex = parseRgbText(paletteRgbInput.value);
+      if (!hex) return;
+      paletteHexInput.value = hex;
+      editorSwatch.style.background = hex;
+    });
+    btnApplyPaletteColor.addEventListener("click", () => {
+      const tag = paletteTagSelect.value;
+      let hex = paletteHexInput.value.trim();
+      if (/^[0-9a-f]{6}$/i.test(hex)) hex = "#" + hex;
+      if (!isHex6(hex)) {
+        const fromRgb = parseRgbText(paletteRgbInput.value);
+        if (!fromRgb) return alert("Código inválido. Usa HEX #RRGGBB o RGB con tres valores entre 0 y 255.");
+        hex = fromRgb;
+      }
+      applyPaletteOverride(tag, norm(hex));
+    });
+    btnResetPaletteColor.addEventListener("click", () => {
+      const tag = paletteTagSelect.value;
+      applyPaletteOverride(tag, null);
+    });
+    refreshPaletteEditor();
+
+    btnCloudSync.addEventListener("click", async () => {
+      setButtonLoading(btnCloudSync, true);
+      try {
+        await syncGlobalPaletteStateFromCloud({ silent: false });
+        blockedPaletteTags.clear();
+        (globalPaletteState.blockedTags || []).forEach((tag) => blockedPaletteTags.add(String(tag)));
+        recomputeSuggestionData();
+        picker.refreshPalette();
+        updateAllSuggestionTiles();
+        paintBlockTools();
+        refreshPaletteEditor();
+      } finally {
+        setButtonLoading(btnCloudSync, false);
+      }
+    });
+
     btnBlockMode.addEventListener("click", () => {
       blockUnavailableMode = !blockUnavailableMode;
       paintBlockTools();
     });
     btnClearBlocked.addEventListener("click", () => {
-      if (!blockedPaletteHexes.size) return;
-      blockedPaletteHexes.clear();
+      if (!blockedPaletteTags.size) return;
+      blockedPaletteTags.clear();
+      persistBlockedPaletteTags();
       recomputeSuggestionData();
       picker.refreshStates();
       updateAllSuggestionTiles();
@@ -2191,7 +2648,7 @@
     const neighborGraph = buildNeighborGraphFromSVG(recolorSvg, fillGroups, originalCache, SUG_PARAMS);
 
     function computeAvailablePaletteCache() {
-      const available = computePaletteCache().filter((p) => !blockedPaletteHexes.has(norm(p.hex)));
+      const available = computePaletteCache().filter((p) => !blockedPaletteTags.has(String(p.tag || "").trim()));
       return available.length ? available : computePaletteCache();
     }
 
@@ -2705,7 +3162,12 @@
     btn.addEventListener("click", () => {
       const current = findFinalOutputSvgLight();
       if (!current) return alert("Aún no detecto el SVG final. Aprieta PROCESS IMAGE y espera el output.");
-      openEditor(current);
+      openEditor(current).catch((err) => {
+        console.error(err);
+        const modal = document.getElementById("recolor-modal");
+        if (modal) modal.remove();
+        alert(err && err.message ? err.message : "No pude abrir el recoloreador.");
+      });
     });
 
     const status = document.createElement("div");
