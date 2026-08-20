@@ -1,13 +1,103 @@
-<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PBN Marker Optimizer</title><link rel="stylesheet" href="styles.css"></head><body><main class="wrap">
-<header class="top"><div><span class="eyebrow">PaintByNumber.cl · experimental</span><h1>Marker & Palette Optimizer</h1><p>Reorganiza recetas existentes y propone cambios de marcador mediante ΔE00 para aumentar la cantidad de diseños que pueden salir de un mismo estuche.</p></div><div class="branch">Base protegida: <b>v4-13.07.26</b><br>Desarrollo: <b>feature/palette-optimizer</b></div></header>
-<section id="summary" class="summary"></section>
-<div class="grid2"><aside>
-<section class="panel controls"><span class="eyebrow">Optimización</span><h3>Buscar una paleta productiva</h3><label>Modo</label><select id="mode"><option value="conservative">Conservador</option><option value="balanced" selected>Balanceado</option><option value="aggressive">Agresivo</option></select><div class="inline"><div><label>Objetivo</label><select id="target"><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option selected>10</option></select></div><div><label>ΔE máximo</label><input id="max-delta" type="number" value="5" min="0" step="0.5"></div></div><div class="inline"><div><label>Penalización por cambio</label><input id="change-penalty" type="number" value="8" min="0" step="1"></div><div><label>Máx. cambios/diseño</label><input id="max-changes" type="number" value="8" min="0" step="1"></div></div><label>Intentos automáticos</label><input id="tries" type="number" value="120" min="20" max="500" step="20"><button id="btn-auto" class="action">Buscar grupo y recolorear</button><button id="btn-current" class="action alt">Ver máximo actual sin cambios</button><div id="busy" class="busy" hidden><span class="spinner"></span><span id="busy-text">Calculando…</span></div><p class="note">El algoritmo asigna globalmente colores únicos. Primero intenta conservar marcadores actuales; si hay colisiones, busca sustitutos perceptualmente cercanos dentro del ΔE permitido.</p></section>
-<section class="panel"><span class="eyebrow">Estado actual</span><h3>Grupo exacto encontrado</h3><div id="exact-current"></div></section>
-<section class="panel"><span class="eyebrow">Marcador</span><div id="marker-detail" class="marker-detail"></div></section>
-</aside><section>
-<div id="solution" class="panel"></div>
-<section class="panel"><span class="eyebrow">167 marcadores</span><h3>Mapa de utilización actual</h3><p class="note">Cuenta recetas, no ventas. Rojo = muy repetido; borde punteado = sin uso.</p><div id="marker-grid" class="marker-grid"></div></section>
-<section class="panel"><span class="eyebrow">Catálogo recuperado del RAR</span><h3>25 productos · 28 recetas</h3><div class="catalog-tools"><button id="select-all" class="secondary">Todos</button><button id="select-none" class="secondary">Ninguno</button><button id="btn-selected" class="action" style="width:auto;margin:0">Optimizar selección</button></div><div id="catalog-list" class="product-list"></div></section>
-</section></div>
-</main><script src="../recolor/palette168.js"></script><script src="catalog.js"></script><script src="core.js"></script><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PBN · Optimizador de Estuches</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div>
+      <span class="eyebrow">PaintByNumber.cl · experimental</span>
+      <h1>Optimizador de Estuches y Marcadores</h1>
+      <p>Un <b>estuche</b> es un grupo de diseños que puede fabricarse usando una sola unidad de cada marcador. Una <b>receta</b> es la lista de marcadores de un diseño.</p>
+    </div>
+    <div class="top-actions">
+      <a class="secondary linkbtn" href="../">← Volver al generador</a>
+      <div class="branch">Base protegida: <b>v4-13.07.26</b><br>Desarrollo: <b>feature/palette-optimizer</b></div>
+    </div>
+  </header>
+
+  <section id="summary" class="summary"></section>
+
+  <div class="grid2">
+    <aside>
+      <section class="panel controls">
+        <span class="eyebrow">Optimización</span>
+        <h3>Buscar un estuche productivo</h3>
+        <label>Modo</label>
+        <select id="mode"><option value="conservative">Conservador</option><option value="balanced" selected>Balanceado</option><option value="aggressive">Agresivo</option></select>
+        <div class="inline"><div><label>Objetivo · diseños/estuche</label><select id="target"><option>4</option><option>5</option><option>6</option><option selected>7</option><option>8</option><option>9</option><option>10</option></select></div><div><label>ΔE máximo</label><input id="max-delta" type="number" value="5" min="0" step="0.5"></div></div>
+        <div class="inline"><div><label>Penalización por cambio</label><input id="change-penalty" type="number" value="8" min="0" step="1"></div><div><label>Máx. cambios/diseño</label><input id="max-changes" type="number" value="8" min="0" step="1"></div></div>
+        <label>Intentos automáticos</label><input id="tries" type="number" value="240" min="20" max="2000" step="20">
+        <button id="btn-auto" class="action">Buscar estuche y recolorear</button>
+        <button id="btn-current" class="action alt">Ver máximo actual sin cambios</button>
+        <div id="busy" class="busy" hidden><span class="spinner"></span><span id="busy-text">Calculando…</span></div>
+        <p class="note">El algoritmo intenta mantener las recetas actuales. Cuando un marcador se repite dentro del mismo estuche, busca sustitutos cercanos dentro del ΔE permitido.</p>
+      </section>
+
+      <section class="panel">
+        <span class="eyebrow">Estado actual</span>
+        <h3>Máximo por estuche sin cambios</h3>
+        <div id="exact-current"></div>
+      </section>
+
+      <section class="panel">
+        <span class="eyebrow">Marcador</span>
+        <div id="marker-detail" class="marker-detail"></div>
+      </section>
+    </aside>
+
+    <section>
+      <section class="panel case-plan-panel">
+        <div class="panel-head">
+          <div><span class="eyebrow">Plan general</span><h2>Todos los diseños agrupados en estuches</h2><p class="note">Cada producto aparece una sola vez. Dentro de cada estuche ningún marcador se repite. Las recetas validadas también participan del cálculo.</p></div>
+          <button id="btn-plan" class="secondary">Recalcular estuches</button>
+        </div>
+        <div id="case-plan-summary" class="case-plan-summary"></div>
+        <div id="case-plan" class="case-plan"></div>
+      </section>
+
+      <div id="solution" class="panel"></div>
+
+      <section class="panel">
+        <div class="panel-head"><div><span class="eyebrow">167 marcadores</span><h3>Mapa de utilización actual</h3></div><div class="usage-legend"><span class="u0">0</span><span class="u1">1–2</span><span class="u3">3–4</span><span class="u5">5–7</span><span class="u8">8+</span></div></div>
+        <p class="note">Cuenta recetas, no ventas. El color de la tarjeta indica cuántas recetas actuales usan ese marcador.</p>
+        <div id="marker-grid" class="marker-grid"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div><span class="eyebrow">Registro</span><h3>Propuestas y recetas validadas</h3><p class="note">Las propuestas se guardan en este navegador. Al validarlas pasan a ser alternativas reales para calcular los estuches.</p></div>
+          <div class="saved-tools"><button id="export-saved" class="secondary">Exportar respaldo</button><label class="secondary import-label">Importar respaldo<input id="import-saved" type="file" accept="application/json" hidden></label></div>
+        </div>
+        <div id="saved-list" class="saved-list"></div>
+      </section>
+
+      <section class="panel">
+        <span class="eyebrow">Catálogo recuperado</span>
+        <h3>25 productos · 28 recetas originales</h3>
+        <p class="note">Hacé clic en el nombre de un diseño para ver sus recetas, marcadores y propuestas guardadas.</p>
+        <div class="catalog-tools"><button id="select-all" class="secondary">Todos</button><button id="select-none" class="secondary">Ninguno</button><button id="btn-selected" class="action compact">Optimizar selección</button></div>
+        <div id="catalog-list" class="product-list"></div>
+      </section>
+    </section>
+  </div>
+</main>
+
+<div id="product-modal" class="modal-backdrop" hidden>
+  <div class="modal-card">
+    <button id="modal-close" class="modal-close" aria-label="Cerrar">×</button>
+    <div id="product-modal-body"></div>
+  </div>
+</div>
+
+<script src="../recolor/palette168.js?v=3.0"></script>
+<script src="catalog.js"></script>
+<script src="core.js"></script>
+<script src="planner.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
