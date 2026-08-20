@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PBN · Optimizador de Estuches</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="case-editor.css?v=1.0">
 </head>
 <body>
 <main class="wrap">
@@ -26,16 +27,16 @@
     <aside>
       <section class="panel controls">
         <span class="eyebrow">Optimización</span>
-        <h3>Buscar un estuche productivo</h3>
+        <h3>Completar el estuche seleccionado</h3>
         <label>Modo</label>
         <select id="mode"><option value="conservative">Conservador</option><option value="balanced" selected>Balanceado</option><option value="aggressive">Agresivo</option></select>
-        <div class="inline"><div><label>Objetivo · diseños/estuche</label><select id="target"><option>4</option><option>5</option><option>6</option><option selected>7</option><option>8</option><option>9</option><option>10</option></select></div><div><label>ΔE máximo</label><input id="max-delta" type="number" value="5" min="0" step="0.5"></div></div>
+        <div class="inline"><div><label>Tamaño objetivo del estuche</label><select id="target"><option>4</option><option>5</option><option>6</option><option selected>7</option><option>8</option><option>9</option><option>10</option></select></div><div><label>ΔE máximo</label><input id="max-delta" type="number" value="5" min="0" step="0.5"></div></div>
         <div class="inline"><div><label>Penalización por cambio</label><input id="change-penalty" type="number" value="8" min="0" step="1"></div><div><label>Máx. cambios/diseño</label><input id="max-changes" type="number" value="8" min="0" step="1"></div></div>
         <label>Intentos automáticos</label><input id="tries" type="number" value="240" min="20" max="2000" step="20">
-        <button id="btn-auto" class="action">Buscar estuche y recolorear</button>
+        <button id="btn-auto" class="action">Completar estuche seleccionado</button>
         <button id="btn-current" class="action alt">Ver máximo actual sin cambios</button>
         <div id="busy" class="busy" hidden><span class="spinner"></span><span id="busy-text">Calculando…</span></div>
-        <p class="note">El algoritmo intenta mantener las recetas actuales. Cuando un marcador se repite dentro del mismo estuche, busca sustitutos cercanos dentro del ΔE permitido.</p>
+        <p class="note">Primero seleccioná un estuche del plan general. El botón intenta completar <b>ese mismo estuche</b>, manteniendo intactos los diseños que ya contiene y recoloreando candidatos nuevos si hace falta.</p>
       </section>
 
       <section class="panel">
@@ -53,11 +54,40 @@
     <section>
       <section class="panel case-plan-panel">
         <div class="panel-head">
-          <div><span class="eyebrow">Plan general</span><h2>Todos los diseños agrupados en estuches</h2><p class="note">Cada producto aparece una sola vez. Dentro de cada estuche ningún marcador se repite. Las recetas validadas también participan del cálculo.</p></div>
-          <button id="btn-plan" class="secondary">Recalcular estuches</button>
+          <div><span class="eyebrow">Plan general</span><h2>Todos los diseños agrupados en estuches</h2><p class="note">Cada producto aparece una sola vez. Hacé clic sobre cualquier estuche para abrirlo en el editor de abajo.</p></div>
+          <button id="btn-plan" class="secondary">Rearmar automático</button>
         </div>
         <div id="case-plan-summary" class="case-plan-summary"></div>
         <div id="case-plan" class="case-plan"></div>
+      </section>
+
+      <section id="case-editor-panel" class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="eyebrow">Editor de estuche</span>
+            <h2>Armar y recolorear manualmente</h2>
+            <p class="note">Los candidatos están ordenados desde el que tiene menos conflictos al que tiene más. Los marcadores repetidos aparecen en rojo.</p>
+          </div>
+          <div class="ce-top-actions">
+            <button id="case-add-zero" class="secondary">Agregar todos los 0 conflictos</button>
+            <button id="case-try-max" class="secondary">Intentar llegar a 10</button>
+            <button id="case-reset-plan" class="secondary">Deshacer armado manual</button>
+          </div>
+        </div>
+        <div class="ce-help">Podés mover diseños entre estuches. Si un candidato repite marcadores, el sistema sugiere el reemplazo libre más cercano por ΔE00, pero el selector te deja elegir cualquier otro marcador libre.</div>
+        <div class="ce-toolbar">
+          <label>Estuche activo
+            <select id="case-editor-select"></select>
+          </label>
+        </div>
+        <div id="case-editor-current"></div>
+        <div class="ce-editor-layout" style="margin-top:14px">
+          <div class="ce-candidate-panel">
+            <div class="ce-candidate-list-head"><h3>Diseños para intentar agregar</h3><small id="candidate-count"></small></div>
+            <div id="case-candidates"></div>
+          </div>
+          <div id="candidate-editor" class="ce-editor-box"></div>
+        </div>
       </section>
 
       <div id="solution" class="panel"></div>
@@ -97,7 +127,8 @@
 <script src="../recolor/palette168.js?v=3.0"></script>
 <script src="catalog.js"></script>
 <script src="core.js"></script>
-<script src="planner.js"></script>
-<script src="app.js"></script>
+<script src="planner.js?v=1.1"></script>
+<script src="app.js?v=1.1"></script>
+<script src="case-editor.js?v=1.0"></script>
 </body>
 </html>
