@@ -1,48 +1,64 @@
 # Generator 2 · PBN Studio
 
-Generator 2 is a parallel UI at `/generator2/`. It does not replace or modify the published legacy generator flow.
+Generator 2 is a parallel UI at `/generator2/`. It does not replace or modify the stable generator.
 
-## v0 architecture
+## Current architecture
 
-Generator 2 wraps the stable generator as a same-origin embedded engine, then adds a new application layer around it:
+Generator 2 wraps the stable generator as a same-origin engine and adds a production application layer:
 
 1. **Create** — use the proven generator/recolor workflow.
-2. **Capture** — save the current SVG, source preview, detected marker recipe and generator settings into a structured project/version.
-3. **Preview** — duplicate a saved version, swap marker tags, preview the recolored SVG and compare without overwriting the original.
-4. **Library** — browse designs and versions with thumbnails; export/import a full local backup.
-5. **Production** — approved versions are collected in one queue ready for the future render/optimizer pipeline.
+2. **Capture** — save SVG, source preview, marker recipe and settings into a project/version.
+3. **Preview** — swap marker tags on a copy and approve a new version without overwriting the source.
+4. **Library** — browse current + legacy designs, versions and previews.
+5. **Production** — regenerate a structured approved version as SVG color, SVG line, PNG color, PNG line, print PDF and recipe JSON in one ZIP.
 
-The first iteration persists in `localStorage` under `pbn_studio_library_v1`. This is deliberate: the UI and project model can be tested before choosing which connected Supabase project should hold production data.
+LocalStorage remains as an offline/cache layer, but production persistence is now connected to the dedicated Supabase project **Byte by Number**.
 
-## Project/version bundle
+## Supabase
 
-A saved version currently contains:
+- Project ref: `mxjehmvrobpaetmhrgqz`
+- Region: `sa-east-1`
+- Private bucket: `pbn-studio-assets`
+- RLS: admin-only
+- First administrator: claimed once using an activation code whose plaintext is never committed to GitHub.
 
-- source canvas preview when available;
-- colored SVG output;
-- derived line SVG;
-- detected marker tags and palette hex values;
-- rough marker importance based on SVG element count;
-- generator settings;
-- parent/source version id for derived versions;
-- status (`draft` or `approved`).
+Generator 2 automatically syncs:
 
-## Current preview behavior
+- designs;
+- versions;
+- recipes/markers;
+- SVG color + line;
+- source preview when available;
+- project JSON bundle;
+- generated PNG/PDF production assets.
 
-The marker editor replaces exact palette colors inside a copy of the saved SVG. It also updates a text label when the text content exactly equals the old marker tag. This gives immediate visual experimentation while preserving the original.
+## Legacy import
 
-For production-grade regeneration, the next engine bridge should persist facet/color-label metadata directly from the generator/recolor pipeline so labels and area weights can always be regenerated deterministically instead of inferred from a finished SVG.
+`Importar PDFs legacy` accepts multiple PDFs at once. It uses PDF.js + jsQR to:
 
-## Database / Storage
+1. read marker tags from page 1;
+2. decode the Cloudinary QR;
+3. match the marker set against existing recipes in Supabase;
+4. attach the PDF to the matched version, or create a new legacy design;
+5. upload the PDF to private Storage;
+6. retain the Cloudinary reference as the visual preview.
 
-A proposed Supabase schema lives at `../supabase/pbn_studio_schema.sql`. It defines designs, versions, markers, assets, optimization runs, estuches/cases and render jobs. The SQL is intentionally not deployed yet because the connected account currently exposes more than one Supabase project and the production destination must be chosen explicitly.
+Legacy designs can participate immediately in the optimizer even before their SVG is recovered. To regenerate production assets after recoloring, they need to be converted to a structured Generator 2 version.
 
-## Next technical milestones
+## Optimizer bridge
 
-- expose a structured `PBNProjectBundle` directly from the generator/recolor engine;
-- capture facet-to-marker bindings and true pixel/area weights;
-- Supabase adapter + private Storage bucket;
-- Optimizer 2 reads/writes versions from the same library;
-- before/after split preview for proposed recipes;
-- render job that regenerates SVG, PNG and print PDF deterministically;
-- batch download for every approved design in an estuche.
+Optimizer 2 stores optimization runs, estuches and marker changes in Supabase. Generator 2 reads the latest changes for the active base version and exposes **Cargar a preview**, allowing the proposal to be reviewed visually and saved as a new approved version.
+
+## Production package
+
+For a structured approved version, `Paquete final`:
+
+- renders color + line PNGs;
+- uploads the color reference to Cloudinary for a public QR;
+- builds the printable reference PDF;
+- syncs generated PNG/PDF assets to Supabase when logged in;
+- downloads a ZIP containing SVG color, SVG line, PNG color, PNG line, PDF and recipe JSON.
+
+## Next engine-level improvement
+
+The remaining high-value improvement is to expose true facet-to-marker bindings and pixel/area weights directly from the generator engine. The current structured version already preserves SVG + labels, but exact facet metadata will make area-weighted optimization and deterministic regeneration even stronger.
