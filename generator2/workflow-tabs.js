@@ -1,0 +1,1 @@
+(function(){const tab=new URLSearchParams(location.search).get('tab');if(!tab)return;setTimeout(()=>{const b=document.querySelector(`[data-tab="${CSS.escape(tab)}"]`);if(b&&b.tagName==='BUTTON')b.click();},120);})();
