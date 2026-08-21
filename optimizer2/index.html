@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PBN · Optimizador 2 Global</title>
+  <link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <div>
+      <span class="eyebrow">PaintByNumber.cl · experimento paralelo</span>
+      <h1>Optimizador 2 · Negociación global</h1>
+      <p>Forma grupos de hasta <b>10 diseños</b> y negocia simultáneamente todos sus marcadores para que, dentro de cada grupo, cada marcador físico se use una sola vez.</p>
+    </div>
+    <nav class="nav"><a href="../optimizer/">← Optimizador actual</a><a href="../">Generador</a></nav>
+  </header>
+
+  <section class="notice">
+    <b>Esta página es independiente.</b> No modifica recetas, estuches ni propuestas guardadas en el Optimizador 1. Sólo calcula y permite exportar experimentos.
+  </section>
+
+  <section class="controls panel">
+    <div>
+      <label>Tamaño máximo del grupo</label>
+      <select id="group-size"><option>8</option><option>9</option><option selected>10</option></select>
+    </div>
+    <div>
+      <label>ΔE máximo permitido</label>
+      <input id="max-delta" type="number" value="9" min="1" max="30" step="0.5">
+    </div>
+    <div>
+      <label>Penalización por cambiar</label>
+      <input id="change-penalty" type="number" value="4" min="0" max="50" step="1">
+    </div>
+    <div>
+      <label>Intentos de agrupación</label>
+      <input id="attempts" type="number" value="120" min="20" max="1000" step="20">
+    </div>
+    <button id="run" class="primary">Negociar todos los diseños</button>
+  </section>
+
+  <section class="summary" id="summary"></section>
+
+  <section class="panel explanation">
+    <h2>Cómo negocia</h2>
+    <p>No reemplaza un conflicto de forma aislada. Dentro de cada grupo toma todos los colores a la vez y hace una asignación global 1:1. Por eso puede resolver cadenas como <b>71 → 72</b>, mientras el diseño que tenía <b>72 → 74</b>, si esa combinación produce menor costo visual total.</p>
+    <div class="legend"><span class="chip conflict">71 repetido</span><span>→</span><span class="chip replacement">72 nuevo</span><span class="chip unchanged">95 sin cambio</span></div>
+  </section>
+
+  <section id="progress" class="progress panel" hidden><div class="bar"><span id="bar-fill"></span></div><b id="progress-text">Preparando…</b></section>
+  <section id="result"></section>
+
+  <section class="panel" id="catalog-panel">
+    <div class="section-head"><div><span class="eyebrow">Catálogo de entrada</span><h2>Todos los diseños y recetas</h2></div><span id="catalog-count"></span></div>
+    <div id="catalog" class="catalog"></div>
+  </section>
+</main>
+
+<script src="../recolor/palette168.js?v=3.0"></script>
+<script src="../optimizer/catalog.js?v=1"></script>
+<script src="../optimizer/core.js?v=1"></script>
+<script src="engine.js?v=1"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>
