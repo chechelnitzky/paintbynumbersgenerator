@@ -1,0 +1,11 @@
+(function(){
+'use strict';
+const C=window.PBNCloud,S=window.PBNStudioStorage;
+if(!S)return;
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function injectStyle(){if(document.getElementById('pbn-library-rename-style'))return;const st=document.createElement('style');st.id='pbn-library-rename-style';st.textContent='.project-info>div:last-child{display:flex;gap:6px;align-items:center}.rename-project{color:#4f46e5!important;background:#eef0ff!important;font-size:16px!important}.rename-project:hover{background:#dedcff!important}';document.head.appendChild(st)}
+function decorate(){injectStyle();document.querySelectorAll('.project-card').forEach(card=>{if(card.querySelector('[data-rename-project]'))return;const del=card.querySelector('[data-delete]');if(!del)return;const b=document.createElement('button');b.type='button';b.className='icon rename-project';b.dataset.renameProject=card.dataset.project;b.title='Renombrar diseño';b.setAttribute('aria-label','Renombrar diseño');b.textContent='✎';del.parentElement?.insertBefore(b,del)})}
+async function rename(id){const p=S.get(id);if(!p)return;const raw=prompt('Nuevo nombre del diseño:',p.name||'');if(raw===null)return;const name=raw.trim();if(!name||name===p.name)return;const old=p.name;try{if(p.cloudId&&C?.admin()){const slug=C.slug(name);const{data:dup,error:qe}=await C.client.from('pbn_designs').select('id,name').eq('slug',slug).neq('id',p.cloudId).maybeSingle();if(qe)throw qe;if(dup)throw new Error(`Ya existe un diseño llamado “${dup.name}”.`);const{error}=await C.client.from('pbn_designs').update({name,slug,updated_at:new Date().toISOString()}).eq('id',p.cloudId);if(error)throw error;}S.upsert({...p,name,slug:C?.slug?C.slug(name):p.slug});alert(`Renombrado: ${old} → ${name}`);location.reload()}catch(e){alert(`No pude renombrarlo: ${e.message}`)}}
+document.addEventListener('click',e=>{const b=e.target.closest?.('[data-rename-project]');if(!b)return;e.preventDefault();e.stopPropagation();rename(b.dataset.renameProject)},true);
+new MutationObserver(()=>decorate()).observe(document.body,{childList:true,subtree:true});setTimeout(decorate,300);
+})();
