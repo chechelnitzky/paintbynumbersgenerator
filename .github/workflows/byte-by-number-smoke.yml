@@ -1,0 +1,33 @@
+name: Byte by Number Smoke
+on:
+  push:
+    branches: [feature/palette-optimizer]
+  workflow_dispatch:
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          node --check constructor/app.js
+          node --check constructor/structured-snapshots.js
+          node --check optimizer2/app.js
+          node --check optimizer2/engine.js
+          node --check optimizer2/plan-bridge.js
+          node --check plan-produccion/app.js
+          node --check plan-produccion/publish-fix.js
+          node --check generator2/app2.js
+          node --check generator2/cloud-integration.js
+          node --check generator2/production-plan-summary.js
+          node --check shared/pbn-cloud.js
+          node --check shared/suite-nav.js
+      - name: Verify key pages exist
+        run: |
+          test -f generator2/index.html
+          test -f optimizer2/index.html
+          test -f constructor/index.html
+          test -f plan-produccion/index.html
