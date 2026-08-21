@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PBN · Optimizador 2 Global</title>
-  <link rel="stylesheet" href="styles.css?v=1">
+  <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
 <main class="wrap">
@@ -44,9 +44,15 @@
   <section class="summary" id="summary"></section>
 
   <section class="panel explanation">
-    <h2>Cómo negocia</h2>
+    <h2>Cómo leer el resultado</h2>
     <p>No reemplaza un conflicto de forma aislada. Dentro de cada grupo toma todos los colores a la vez y hace una asignación global 1:1. Por eso puede resolver cadenas como <b>71 → 72</b>, mientras el diseño que tenía <b>72 → 74</b>, si esa combinación produce menor costo visual total.</p>
-    <div class="legend"><span class="chip conflict">71 repetido</span><span>→</span><span class="chip replacement">72 nuevo</span><span class="chip unchanged">95 sin cambio</span></div>
+    <div class="legend four-state">
+      <span class="chip state-unchanged">95 · libre y conservado</span>
+      <span class="chip state-kept">32 · conflicto, se lo quedó</span>
+      <span class="chip state-yielded">53 → 179 · conflicto, cedió</span>
+      <span class="chip state-strategic">71 → 72 · movimiento estratégico</span>
+    </div>
+    <p class="legend-help"><b>Rojo</b> no significa error final: significa que ese marcador estaba repetido originalmente, pero este diseño terminó conservándolo. <b>Morado</b> significa que el color no estaba en conflicto originalmente, pero se movió para mejorar la solución global.</p>
   </section>
 
   <section id="progress" class="progress panel" hidden><div class="bar"><span id="bar-fill"></span></div><b id="progress-text">Preparando…</b></section>
@@ -62,6 +68,6 @@
 <script src="../optimizer/catalog.js?v=1"></script>
 <script src="../optimizer/core.js?v=1"></script>
 <script src="engine.js?v=1"></script>
-<script src="app.js?v=1"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>
