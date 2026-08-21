@@ -42,18 +42,22 @@
     </section>
 
     <section id="view-production" class="view" hidden>
-      <section class="panel"><div class="section-head"><div><span class="eyebrow">Producción</span><h2>Versiones aprobadas</h2><p>Estas versiones son las que toma el Optimizador 2 desde Supabase.</p></div><span class="badge future">cloud pipeline</span></div><div id="production-list" class="production-list"></div><div class="roadmap"><b>Pipeline activo:</b> Generator 2 guarda versiones y assets en Supabase; Optimizer 2 lee las recetas aprobadas y guarda estuches/propuestas. La regeneración PDF automática se completa sobre versiones estructuradas.</div></section>
+      <section class="panel"><div class="section-head"><div><span class="eyebrow">Producción</span><h2>Versiones aprobadas</h2><p>Para versiones estructuradas, “Paquete final” regenera y descarga ZIP con SVG color, SVG líneas, PNG color, PNG líneas, PDF de referencia y receta JSON.</p></div><span class="badge future">cloud pipeline</span></div><div id="production-list" class="production-list"></div><div class="roadmap"><b>Pipeline activo:</b> Generator 2 guarda versiones/assets en Supabase; Optimizer 2 lee recetas aprobadas y guarda estuches/propuestas. Las versiones legacy quedan visibles pero necesitan SVG para regenerar sus entregables.</div></section>
     </section>
   </main>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script src="../recolor/palette168.js?v=3.0"></script>
 <script src="../shared/pbn-cloud.js?v=1"></script>
 <script src="storage.js?v=1"></script>
 <script src="app.js?v=1"></script>
 <script src="cloud-integration.js?v=1"></script>
 <script src="legacy-import.js?v=1"></script>
+<script src="production.js?v=1"></script>
 </body>
 </html>
