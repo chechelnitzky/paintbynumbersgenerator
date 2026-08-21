@@ -4,26 +4,32 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PBN · Optimizador 2 Global</title>
-  <link rel="stylesheet" href="styles.css?v=2">
+  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="../shared/pbn-cloud.css?v=1">
 </head>
 <body>
 <main class="wrap">
   <header class="top">
     <div>
-      <span class="eyebrow">PaintByNumber.cl · experimento paralelo</span>
-      <h1>Optimizador 2 · Negociación global</h1>
-      <p>Forma grupos de hasta <b>10 diseños</b> y negocia simultáneamente todos sus marcadores para que, dentro de cada grupo, cada marcador físico se use una sola vez.</p>
+      <span class="eyebrow">PaintByNumber.cl · negociación global</span>
+      <h1>Optimizador 2 · Estuches globales</h1>
+      <p>Forma grupos de hasta <b>10 diseños</b> y negocia simultáneamente todos sus marcadores para que, dentro de cada estuche, cada marcador físico se use una sola vez.</p>
     </div>
     <nav class="nav"><a href="../generator2/">Generator 2</a><a href="../optimizer/">← Optimizador actual</a><a href="../">Generador clásico</a></nav>
   </header>
 
-  <section class="notice">
-    <b>Esta página es independiente.</b> No modifica recetas, estuches ni propuestas guardadas en el Optimizador 1. Sólo calcula y permite exportar experimentos.
+  <section class="panel" style="display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap">
+    <div><span class="eyebrow">Byte by Number</span><b id="catalog-source">Usando catálogo local de respaldo</b><div style="font-size:12px;color:#6b7280;margin-top:4px">Al iniciar sesión, carga las recetas aprobadas desde Supabase y guarda cada corrida/estuche.</div></div>
+    <div id="cloud-auth"></div>
+  </section>
+
+  <section class="notice" id="cloud-notice">
+    <b>Modo experimental seguro.</b> Sin sesión sigue funcionando con el catálogo estático. Con sesión, la propuesta queda registrada en Supabase sin modificar automáticamente las recetas originales.
   </section>
 
   <section class="controls panel">
     <div>
-      <label>Tamaño máximo del grupo</label>
+      <label>Tamaño máximo del estuche</label>
       <select id="group-size"><option>8</option><option>9</option><option selected>10</option></select>
     </div>
     <div>
@@ -45,7 +51,7 @@
 
   <section class="panel explanation">
     <h2>Cómo leer el resultado</h2>
-    <p>No reemplaza un conflicto de forma aislada. Dentro de cada grupo toma todos los colores a la vez y hace una asignación global 1:1. Por eso puede resolver cadenas como <b>71 → 72</b>, mientras el diseño que tenía <b>72 → 74</b>, si esa combinación produce menor costo visual total.</p>
+    <p>No reemplaza un conflicto de forma aislada. Dentro de cada estuche toma todos los colores a la vez y hace una asignación global 1:1. Por eso puede resolver cadenas como <b>71 → 72</b>, mientras el diseño que tenía <b>72 → 74</b>, si esa combinación produce menor costo visual total.</p>
     <div class="legend four-state">
       <span class="chip state-unchanged">95 · libre y conservado</span>
       <span class="chip state-kept">32 · conflicto, se lo quedó</span>
@@ -64,10 +70,12 @@
   </section>
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../recolor/palette168.js?v=3.0"></script>
+<script src="../shared/pbn-cloud.js?v=1"></script>
 <script src="../optimizer/catalog.js?v=1"></script>
 <script src="../optimizer/core.js?v=1"></script>
 <script src="engine.js?v=1"></script>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
