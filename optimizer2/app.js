@@ -20,22 +20,37 @@
   }
 
   function markerToken(m){
-    if(m.change){
-      return `<span class="marker-token changed${m.conflict?' conflict':''}" title="${m.conflictWith.map(x=>x.productName).join(', ')}">${sw(m.tag)}<b>${esc(m.tag)}</b><span class="arrow">→</span>${sw(m.change.to)}<span class="new">${esc(m.change.to)}</span></span>`;
+    const conflicts=(m.conflictWith||[]).map(x=>x.productName).join(', ');
+    if(m.change && m.conflict){
+      return `<span class="marker-token changed-conflict" title="Conflicto original con: ${esc(conflicts)}. Este diseño cedió el marcador y fue reasignado.">${sw(m.tag)}<b>${esc(m.tag)}</b><span class="arrow">→</span>${sw(m.change.to)}<span class="new">${esc(m.change.to)}</span></span>`;
     }
-    return `<span class="marker-token${m.conflict?' conflict':''}" title="${m.conflict?`Repetido con: ${m.conflictWith.map(x=>x.productName).join(', ')}`:'Sin cambio'}">${sw(m.tag)}<b>${esc(m.tag)}</b></span>`;
+    if(m.change && !m.conflict){
+      return `<span class="marker-token strategic" title="No estaba en conflicto. El algoritmo lo movió estratégicamente para mejorar la solución global.">${sw(m.tag)}<b>${esc(m.tag)}</b><span class="arrow">→</span>${sw(m.change.to)}<span class="new">${esc(m.change.to)}</span></span>`;
+    }
+    if(m.conflict){
+      return `<span class="marker-token conflict-kept" title="Conflicto original con: ${esc(conflicts)}. Este diseño conservó el marcador; otro diseño cedió.">${sw(m.tag)}<b>${esc(m.tag)}</b></span>`;
+    }
+    return `<span class="marker-token unchanged" title="Sin conflicto original y sin cambio.">${sw(m.tag)}<b>${esc(m.tag)}</b></span>`;
   }
 
   function designCard(d){
     const conflictMarkers=d.markers.filter(m=>m.conflict),changes=d.changes||[];
-    return `<article class="design"><div class="design-head"><h3>${esc(d.product.name)}</h3><span class="recipe-label">Receta ${esc(d.recipe.name)}</span></div><div class="design-meta">${d.recipe.markers.length} colores · ${conflictMarkers.length} color(es) originalmente en conflicto · ${changes.length} cambio(s)</div><div class="marker-list">${d.markers.map(markerToken).join('')}</div>${conflictMarkers.length?`<div class="conflict-note">Conflictos originales: ${conflictMarkers.map(m=>`${esc(m.tag)} con ${m.conflictWith.map(x=>esc(x.productName)).join('/')}`).join(' · ')}</div>`:''}${changes.length?`<div class="change-list">${changes.slice().sort((a,b)=>a.deltaE-b.deltaE).map(c=>`<div class="change-row"><span class="from">${sw(c.from)}${esc(c.from)}</span><span>→</span><span class="to">${sw(c.to)}${esc(c.to)}</span><span class="delta">ΔE ${fmt(c.deltaE)}</span></div>`).join('')}</div>`:''}</article>`;
+    const conflictChanged=d.markers.filter(m=>m.conflict&&m.change).length;
+    const conflictKept=d.markers.filter(m=>m.conflict&&!m.change).length;
+    const strategic=d.markers.filter(m=>!m.conflict&&m.change).length;
+    const changeRows=changes.slice().sort((a,b)=>a.deltaE-b.deltaE).map(c=>{
+      const original=d.markers.find(m=>String(m.tag)===String(c.from));
+      const strategicMove=original&&!original.conflict;
+      return `<div class="change-row ${strategicMove?'strategic-row':'conflict-change-row'}"><span class="from">${sw(c.from)}${esc(c.from)}</span><span>→</span><span class="to">${sw(c.to)}${esc(c.to)}</span><span class="delta">ΔE ${fmt(c.deltaE)}</span></div>`;
+    }).join('');
+    return `<article class="design"><div class="design-head"><h3>${esc(d.product.name)}</h3><span class="recipe-label">Receta ${esc(d.recipe.name)}</span></div><div class="design-meta">${d.recipe.markers.length} colores · ${conflictMarkers.length} conflictos originales · <span class="meta-kept">${conflictKept} se quedan</span> · <span class="meta-yielded">${conflictChanged} ceden</span>${strategic?` · <span class="meta-strategic">${strategic} movimiento${strategic===1?'':'s'} estratégico${strategic===1?'':'s'}</span>`:''}</div><div class="marker-list">${d.markers.map(markerToken).join('')}</div>${conflictMarkers.length?`<div class="conflict-note">Conflictos originales: ${conflictMarkers.map(m=>`${esc(m.tag)} con ${m.conflictWith.map(x=>esc(x.productName)).join('/')}`).join(' · ')}</div>`:''}${changes.length?`<div class="change-list">${changeRows}</div>`:''}</article>`;
   }
 
   function renderResult(res){
     const box=$('#result');last=res;
     if(!res.ok){box.innerHTML=`<div class="error"><b>No se encontró solución completa.</b><br>${esc(res.reason)}</div>`;return;}
     const totalSlots=res.groups.reduce((s,g)=>s+g.res.slots,0);
-    box.innerHTML=`<section class="panel"><div class="run-head"><div><span class="eyebrow">Mejor negociación encontrada</span><h2>${res.groups.length} grupos · ${catalog.products.length} diseños</h2><p>Todos los marcadores quedan únicos dentro de cada grupo. Las colisiones originales se muestran en rojo; las flechas muestran la reasignación negociada.</p></div><div class="run-score"><b>${res.totalChanges}</b><small>cambios totales</small></div></div><div class="summary"><div class="metric"><b>${fmt(res.meanDelta)}</b><span>ΔE medio de cambios</span></div><div class="metric"><b>${fmt(res.maxUsedDelta)}</b><span>ΔE máximo utilizado</span></div><div class="metric"><b>${res.totalRaw}</b><span>colisiones antes</span></div><div class="metric"><b>${totalSlots}</b><span>asignaciones de color</span></div><div class="metric"><b>${res.shortlistTested}</b><span>agrupaciones finales evaluadas</span></div></div><button id="export" class="export">Exportar propuesta JSON</button></section><div class="groups">${res.groups.map((g,i)=>`<section class="group"><header class="group-head"><div><span class="eyebrow">Grupo ${i+1}</span><h2>${g.designs.length} diseños</h2></div><div class="group-stats"><span class="stat"><b>${g.res.slots}/167</b> marcadores</span><span class="stat"><b>${g.rawConflicts}</b> conflictos antes</span><span class="stat"><b>${g.res.changeCount}</b> cambios</span><span class="stat">ΔE medio <b>${fmt(g.res.meanChangedDelta)}</b></span><span class="stat">ΔE máx <b>${fmt(g.res.maxUsedDelta)}</b></span></div></header><div class="designs">${g.designs.map(designCard).join('')}</div></section>`).join('')}</div>`;
+    box.innerHTML=`<section class="panel"><div class="run-head"><div><span class="eyebrow">Mejor negociación encontrada</span><h2>${res.groups.length} grupos · ${catalog.products.length} diseños</h2><p>Dentro de cada grupo todos los marcadores finales son únicos. <b>Rojo</b> = conflicto que conserva el marcador; <b>naranja</b> = conflicto que cede; <b>morado</b> = movimiento estratégico sin conflicto original; <b>gris</b> = intacto.</p></div><div class="run-score"><b>${res.totalChanges}</b><small>cambios totales</small></div></div><div class="summary"><div class="metric"><b>${fmt(res.meanDelta)}</b><span>ΔE medio de cambios</span></div><div class="metric"><b>${fmt(res.maxUsedDelta)}</b><span>ΔE máximo utilizado</span></div><div class="metric"><b>${res.totalRaw}</b><span>colisiones antes</span></div><div class="metric"><b>${totalSlots}</b><span>asignaciones de color</span></div><div class="metric"><b>${res.shortlistTested}</b><span>agrupaciones finales evaluadas</span></div></div><button id="export" class="export">Exportar propuesta JSON</button></section><div class="groups">${res.groups.map((g,i)=>`<section class="group"><header class="group-head"><div><span class="eyebrow">Grupo ${i+1}</span><h2>${g.designs.length} diseños</h2></div><div class="group-stats"><span class="stat"><b>${g.res.slots}/167</b> marcadores</span><span class="stat"><b>${g.rawConflicts}</b> conflictos antes</span><span class="stat"><b>${g.res.changeCount}</b> cambios</span><span class="stat">ΔE medio <b>${fmt(g.res.meanChangedDelta)}</b></span><span class="stat">ΔE máx <b>${fmt(g.res.maxUsedDelta)}</b></span></div></header><div class="designs">${g.designs.map(designCard).join('')}</div></section>`).join('')}</div>`;
     $('#export').addEventListener('click',exportResult);
   }
 
