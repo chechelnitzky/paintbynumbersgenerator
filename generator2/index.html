@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PBN Studio · Generator 2</title>
-  <link rel="stylesheet" href="styles.css?v=2">
+  <link rel="stylesheet" href="styles.css?v=3">
   <link rel="stylesheet" href="../shared/pbn-cloud.css?v=1">
 </head>
 <body>
@@ -27,7 +27,7 @@
 
     <section id="view-create" class="view">
       <div class="create-toolbar panel"><div><label>Nombre del diseño</label><input id="design-name" placeholder="Ej. Tulipanes"></div><div class="engine-state"><span class="dot"></span><span id="engine-status">Cargando motor…</span></div><button id="capture" class="primary">Guardar salida en biblioteca</button></div>
-      <div class="engine-card panel"><div class="section-head"><div><span class="eyebrow">Motor compatible</span><h2>Generator clásico · embebido</h2><p>Usá el flujo que ya conocés. Cuando el SVG final esté listo, apretá “Guardar salida en biblioteca”.</p></div><span class="badge">motor estable</span></div><iframe id="legacy-frame" src="../" title="Motor Paint by Number"></iframe></div>
+      <div class="engine-card panel"><div class="section-head"><div><span class="eyebrow">Motor compatible</span><h2>Generator clásico · embebido</h2><p>Usá el flujo que ya conocés. Si escribís un nombre distinto al diseño activo, Generator 2 crea un diseño nuevo y no modifica el anterior.</p></div><span class="badge">motor estable</span></div><iframe id="legacy-frame" src="../" title="Motor Paint by Number"></iframe></div>
     </section>
 
     <section id="view-preview" class="view" hidden>
@@ -38,11 +38,11 @@
     </section>
 
     <section id="view-library" class="view" hidden>
-      <section class="panel"><div class="section-head"><div><span class="eyebrow">Biblioteca central</span><h2>Diseños guardados</h2><p>Incluye diseños legacy importados y nuevas versiones generadas desde Generator 2.</p></div><div class="library-tools"><span id="library-count"></span><label class="ghost file-label">Importar PDFs legacy<input id="legacy-pdf-import" type="file" accept="application/pdf" multiple hidden></label><button id="export-library" class="ghost">Exportar respaldo</button><label class="ghost file-label">Importar respaldo<input id="import-library" type="file" accept="application/json" hidden></label></div></div><div id="project-grid" class="project-grid"></div></section>
+      <section class="panel"><div class="section-head"><div><span class="eyebrow">Biblioteca central</span><h2>Diseños guardados</h2><p>Incluye diseños antiguos importados desde PDF/Cloudinary y nuevas versiones generadas desde Generator 2.</p></div><div class="library-tools"><span id="library-count"></span><label class="ghost file-label">Importar PDFs antiguos<input id="legacy-pdf-import" type="file" accept="application/pdf" multiple hidden></label><button id="export-library" class="ghost">Exportar respaldo</button><label class="ghost file-label">Importar respaldo<input id="import-library" type="file" accept="application/json" hidden></label></div></div><div id="project-grid" class="project-grid"></div></section>
     </section>
 
     <section id="view-production" class="view" hidden>
-      <section class="panel"><div class="section-head"><div><span class="eyebrow">Producción</span><h2>Versiones aprobadas</h2><p>Para versiones estructuradas, “Paquete final” regenera y descarga ZIP con SVG color, SVG líneas, PNG color, PNG líneas, PDF de referencia y receta JSON.</p></div><span class="badge future">cloud pipeline</span></div><div id="production-list" class="production-list"></div><div class="roadmap"><b>Pipeline activo:</b> Generator 2 guarda versiones/assets en Supabase; Optimizer 2 lee recetas aprobadas y guarda estuches/propuestas. Las versiones legacy quedan visibles pero necesitan SVG para regenerar sus entregables.</div></section>
+      <section class="panel"><div class="section-head"><div><span class="eyebrow">Producción</span><h2>Versiones aprobadas</h2><p>Para versiones estructuradas, “Paquete final” regenera y descarga ZIP con SVG color, SVG líneas, PNG color, PNG líneas, PDF de referencia y receta JSON.</p></div><span class="badge future">cloud pipeline</span></div><div id="production-list" class="production-list"></div><div class="roadmap"><b>Pipeline activo:</b> Generator 2 guarda versiones/assets en Supabase; Optimizer 2 lee recetas aprobadas y guarda estuches/propuestas. Los diseños antiguos pueden previsualizar recolores sobre su PNG; para regenerar números y archivos finales necesitan vincular o reconstruir su SVG.</div></section>
     </section>
   </main>
 </div>
@@ -53,10 +53,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 <script src="../recolor/palette168.js?v=3.0"></script>
-<script src="../shared/pbn-cloud.js?v=1"></script>
+<script src="../shared/pbn-cloud.js?v=2"></script>
 <script src="storage.js?v=1"></script>
-<script src="app.js?v=1"></script>
-<script src="cloud-integration.js?v=1"></script>
+<script src="app2.js?v=1"></script>
+<script src="cloud-integration.js?v=2"></script>
 <script src="legacy-import.js?v=1"></script>
 <script src="proposals.js?v=1"></script>
 <script src="production.js?v=1"></script>
