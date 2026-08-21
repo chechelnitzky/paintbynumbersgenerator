@@ -38,7 +38,7 @@
     </section>
 
     <section id="view-library" class="view" hidden>
-      <section class="panel"><div class="section-head"><div><span class="eyebrow">Biblioteca central</span><h2>Diseños guardados</h2><p>Incluye diseños legacy importados y nuevas versiones generadas desde Generator 2.</p></div><div class="library-tools"><span id="library-count"></span><button id="export-library" class="ghost">Exportar respaldo</button><label class="ghost file-label">Importar respaldo<input id="import-library" type="file" accept="application/json" hidden></label></div></div><div id="project-grid" class="project-grid"></div></section>
+      <section class="panel"><div class="section-head"><div><span class="eyebrow">Biblioteca central</span><h2>Diseños guardados</h2><p>Incluye diseños legacy importados y nuevas versiones generadas desde Generator 2.</p></div><div class="library-tools"><span id="library-count"></span><label class="ghost file-label">Importar PDFs legacy<input id="legacy-pdf-import" type="file" accept="application/pdf" multiple hidden></label><button id="export-library" class="ghost">Exportar respaldo</button><label class="ghost file-label">Importar respaldo<input id="import-library" type="file" accept="application/json" hidden></label></div></div><div id="project-grid" class="project-grid"></div></section>
     </section>
 
     <section id="view-production" class="view" hidden>
@@ -47,10 +47,13 @@
   </main>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="../recolor/palette168.js?v=3.0"></script>
 <script src="../shared/pbn-cloud.js?v=1"></script>
 <script src="storage.js?v=1"></script>
 <script src="app.js?v=1"></script>
 <script src="cloud-integration.js?v=1"></script>
+<script src="legacy-import.js?v=1"></script>
 </body>
 </html>
