@@ -15,15 +15,22 @@ jobs:
         run: |
           node --check constructor/app.js
           node --check constructor/structured-snapshots.js
+          node --check constructor/priority-ui.js
+          node --check constructor/plan-status.js
           node --check optimizer2/app.js
           node --check optimizer2/engine.js
-          node --check optimizer2/plan-bridge.js
+          node --check optimizer2/plan-bridge-v2.js
+          node --check optimizer2/saved-plans.js
+          node --check optimizer2/state-memory.js
           node --check plan-produccion/app.js
           node --check plan-produccion/publish-fix.js
           node --check generator2/app2.js
-          node --check generator2/cloud-integration.js
+          node --check generator2/cloud-integration-v3.js
+          node --check generator2/legacy-import-v2.js
+          node --check generator2/recipe-health-ui.js
           node --check generator2/production-plan-summary.js
           node --check shared/pbn-cloud.js
+          node --check shared/recipe-health.js
           node --check shared/suite-nav.js
       - name: Verify key pages exist
         run: |
