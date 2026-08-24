@@ -17,6 +17,7 @@ jobs:
           node --check constructor/structured-snapshots.js
           node --check constructor/priority-ui.js
           node --check constructor/conflict-preview-editor.js
+          node --check constructor/color-dropdown.js
           node --check constructor/plan-status.js
           node --check optimizer2/app.js
           node --check optimizer2/engine.js
