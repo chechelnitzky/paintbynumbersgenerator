@@ -1,0 +1,221 @@
+name: Deploy protected generator to Cloudflare Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cloudflare-private-access
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages-production
+  cancel-in-progress: false
+
+env:
+  CF_ZONE_NAME: paintbynumber.cl
+  CF_CUSTOM_DOMAIN: generador.paintbynumber.cl
+  CF_PROJECT_NAME: paintbynumbersgenerator
+  CF_PRODUCTION_BRANCH: cloudflare-private-access
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required GitHub secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PBN_USERNAME: ${{ secrets.PBN_USERNAME }}
+          PBN_PASSWORD: ${{ secrets.PBN_PASSWORD }}
+          PBN_SESSION_SECRET: ${{ secrets.PBN_SESSION_SECRET }}
+        run: |
+          set -euo pipefail
+          for key in CLOUDFLARE_API_TOKEN PBN_USERNAME PBN_PASSWORD PBN_SESSION_SECRET; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing required GitHub Actions secret: $key" >&2
+              exit 1
+            fi
+          done
+          if [ "${#PBN_SESSION_SECRET}" -lt 32 ]; then
+            echo "PBN_SESSION_SECRET must be at least 32 characters." >&2
+            exit 1
+          fi
+
+      - name: Resolve Cloudflare zone and account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          response="$(curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones?name=${CF_ZONE_NAME}&status=active")"
+          if [ "$(jq -r '.success' <<<"$response")" != "true" ]; then
+            echo "$response" | jq >&2
+            exit 1
+          fi
+          count="$(jq '.result | length' <<<"$response")"
+          if [ "$count" -ne 1 ]; then
+            echo "Expected exactly one active Cloudflare zone for ${CF_ZONE_NAME}; got ${count}." >&2
+            exit 1
+          fi
+          echo "CF_ZONE_ID=$(jq -r '.result[0].id' <<<"$response")" >> "$GITHUB_ENV"
+          echo "CF_ACCOUNT_ID=$(jq -r '.result[0].account.id' <<<"$response")" >> "$GITHUB_ENV"
+
+      - name: Ensure Pages project exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          get_response="$(curl -sS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}")"
+
+          if [ "$(jq -r '.success' <<<"$get_response")" = "true" ]; then
+            echo "Pages project ${CF_PROJECT_NAME} already exists."
+          else
+            create_response="$(curl -fsS -X POST \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "$(jq -nc --arg name "$CF_PROJECT_NAME" --arg branch "$CF_PRODUCTION_BRANCH" '{name:$name,production_branch:$branch}')" \
+              "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects")"
+            if [ "$(jq -r '.success' <<<"$create_response")" != "true" ]; then
+              echo "$create_response" | jq >&2
+              exit 1
+            fi
+            echo "Created Pages project ${CF_PROJECT_NAME}."
+          fi
+
+      - name: Upload authentication secrets to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PBN_USERNAME: ${{ secrets.PBN_USERNAME }}
+          PBN_PASSWORD: ${{ secrets.PBN_PASSWORD }}
+          PBN_SESSION_SECRET: ${{ secrets.PBN_SESSION_SECRET }}
+        run: |
+          set -euo pipefail
+          secrets_file="$RUNNER_TEMP/pbn-pages-secrets.json"
+          umask 077
+          jq -n \
+            --arg username "$PBN_USERNAME" \
+            --arg password "$PBN_PASSWORD" \
+            --arg session "$PBN_SESSION_SECRET" \
+            '{PBN_USERNAME:$username,PBN_PASSWORD:$password,PBN_SESSION_SECRET:$session}' \
+            > "$secrets_file"
+          CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID" \
+          CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
+            npx --yes wrangler@latest pages secret bulk "$secrets_file" --project-name "$CF_PROJECT_NAME"
+          rm -f "$secrets_file"
+
+      - name: Build protected Pages bundle
+        run: bash scripts/cloudflare-build.sh
+
+      - name: Deploy production branch
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID" \
+          CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN" \
+            npx --yes wrangler@latest pages deploy cf-dist \
+              --project-name "$CF_PROJECT_NAME" \
+              --branch "$CF_PRODUCTION_BRANCH"
+
+      - name: Ensure custom domain is attached
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          get_response="$(curl -sS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/domains/${CF_CUSTOM_DOMAIN}")"
+
+          if [ "$(jq -r '.success' <<<"$get_response")" = "true" ]; then
+            echo "Custom domain is already attached."
+          else
+            create_response="$(curl -fsS -X POST \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "$(jq -nc --arg name "$CF_CUSTOM_DOMAIN" '{name:$name}')" \
+              "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/domains")"
+            if [ "$(jq -r '.success' <<<"$create_response")" != "true" ]; then
+              echo "$create_response" | jq >&2
+              exit 1
+            fi
+            echo "Attached custom domain ${CF_CUSTOM_DOMAIN}."
+          fi
+
+      - name: Ensure DNS points to Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          target="${CF_PROJECT_NAME}.pages.dev"
+          records="$(curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?name=${CF_CUSTOM_DOMAIN}")"
+          if [ "$(jq -r '.success' <<<"$records")" != "true" ]; then
+            echo "$records" | jq >&2
+            exit 1
+          fi
+
+          count="$(jq '.result | length' <<<"$records")"
+          if [ "$count" -eq 0 ]; then
+            response="$(curl -fsS -X POST \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "$(jq -nc --arg name "$CF_CUSTOM_DOMAIN" --arg content "$target" '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')" \
+              "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records")"
+            if [ "$(jq -r '.success' <<<"$response")" != "true" ]; then
+              echo "$response" | jq >&2
+              exit 1
+            fi
+            echo "Created CNAME ${CF_CUSTOM_DOMAIN} -> ${target}."
+          else
+            non_cname="$(jq '[.result[] | select(.type != "CNAME")] | length' <<<"$records")"
+            if [ "$non_cname" -ne 0 ]; then
+              echo "A non-CNAME DNS record already exists for ${CF_CUSTOM_DOMAIN}; refusing to delete or overwrite it automatically." >&2
+              echo "$records" | jq '.result[] | {id,type,name,content,proxied}' >&2
+              exit 1
+            fi
+            record_id="$(jq -r '.result[0].id' <<<"$records")"
+            response="$(curl -fsS -X PATCH \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "$(jq -nc --arg name "$CF_CUSTOM_DOMAIN" --arg content "$target" '{type:"CNAME",name:$name,content:$content,proxied:true,ttl:1}')" \
+              "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${record_id}")"
+            if [ "$(jq -r '.success' <<<"$response")" != "true" ]; then
+              echo "$response" | jq >&2
+              exit 1
+            fi
+            echo "Confirmed CNAME ${CF_CUSTOM_DOMAIN} -> ${target}."
+          fi
+
+      - name: Verify unauthenticated access is blocked on Pages hostname
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -o /dev/null -w '%{http_code}' --max-redirs 0 "https://${CF_PROJECT_NAME}.pages.dev/" || true)"
+          location="$(curl -sSI --max-redirs 0 "https://${CF_PROJECT_NAME}.pages.dev/" | awk -F': ' 'tolower($1)=="location" {gsub("\r", "", $2); print $2; exit}')"
+          if [ "$status" != "303" ] || [[ "$location" != /_pbn/login* ]]; then
+            echo "Authentication gate verification failed: HTTP ${status}, Location=${location:-<none>}" >&2
+            exit 1
+          fi
+          echo "Authentication gate is active on ${CF_PROJECT_NAME}.pages.dev."
+
+      - name: Report custom domain status
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          response="$(curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/domains/${CF_CUSTOM_DOMAIN}")"
+          echo "Custom domain status: $(jq -r '.result.status // "unknown"' <<<"$response")"
