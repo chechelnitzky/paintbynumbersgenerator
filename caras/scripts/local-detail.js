@@ -24,8 +24,8 @@
         overlay.width = canvas.width;
         overlay.height = canvas.height;
       }
-      wrapper.style.width = canvas.getBoundingClientRect().width + "px";
-      wrapper.style.height = canvas.getBoundingClientRect().height + "px";
+      // Never store measured dimensions while a Materialize tab is hidden.
+      // Its bounding box becomes 0x0 and would permanently collapse the image.
       overlay.style.pointerEvents = enabled.checked ? "auto" : "none";
       draw();
     }
