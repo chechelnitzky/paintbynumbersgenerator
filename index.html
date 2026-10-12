@@ -46,6 +46,17 @@
             <!-- I suck at materializecss design, in case you haven't noticed yet -->
             <div id="options-pane" class="col s12">
                 <ul class="collection">
+<li class="collection-item" id="detailZonesPanel">
+ <h5>Detalle local por zonas</h5>
+ <p>Selecciona áreas como caras, ojos o mascotas para conservar facetas pequeñas sin generar puntillismo en el resto. Arrastra un rectángulo sobre la imagen de entrada.</p>
+ <label><input type="checkbox" id="chkLocalDetail" /><span>Activar selección de zonas sobre la imagen</span></label>
+ <div class="row">
+  <div class="col s4"><label for="txtLocalFacetSize">Mínimo de píxeles por faceta en nuevas zonas</label><input id="txtLocalFacetSize" type="number" min="1" value="4" /></div>
+  <div class="col s8"><p>Selecciona una cara en la pestaña Input. Cada región tiene su propia configuración editable. El valor global se mantiene fuera de las selecciones.</p></div>
+ </div>
+ <div id="detailZoneList"></div>
+ <button class="btn-flat" type="button" id="btnClearDetailZones">Borrar todas las zonas</button>
+</li>
                     <li class="collection-item">
                         <div class="row">
                             <div class="col s3" style="margin-top: 34px;">
@@ -414,6 +425,7 @@
     <script src="scripts/lib/jquery-1.11.0.min.js"></script>
     <script src="scripts/lib/materialize.min.js"></script>
     <script src='scripts/main.js'></script>
+    <script src="scripts/local-detail.js"></script>
     <script>
         requirejs(['main'], function (MyApp) {
 
