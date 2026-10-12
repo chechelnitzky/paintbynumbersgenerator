@@ -7,13 +7,12 @@
     var canvas = document.getElementById("canvas");
     var panel = document.getElementById("detailZonesPanel");
     if (!canvas || !panel) return;
-    var wrapper = document.createElement("div");
-    wrapper.className = "pbn-image-wrapper";
-    canvas.parentNode.insertBefore(wrapper, canvas);
-    wrapper.appendChild(canvas);
+    // Keep #canvas as a direct child of #input-pane. Moving it into a wrapper
+    // interferes with Materialize's tab layout when panels are hidden/shown.
+    var inputPane = document.getElementById("input-pane");
     var overlay = document.createElement("canvas");
     overlay.id = "pbnZoneOverlay";
-    wrapper.appendChild(overlay);
+    inputPane.appendChild(overlay);
     var enabled = document.getElementById("chkLocalDetail");
     var minPixels = document.getElementById("txtLocalFacetSize");
     var zoneList = document.getElementById("detailZoneList");
@@ -24,8 +23,16 @@
         overlay.width = canvas.width;
         overlay.height = canvas.height;
       }
-      // Never store measured dimensions while a Materialize tab is hidden.
-      // Its bounding box becomes 0x0 and would permanently collapse the image.
+      // Only measure on a visible tab. Align overlay to the actual canvas;
+      // never set layout dimensions on the source image itself.
+      var rect = canvas.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        var parentRect = inputPane.getBoundingClientRect();
+        overlay.style.left = (rect.left - parentRect.left + inputPane.scrollLeft) + "px";
+        overlay.style.top = (rect.top - parentRect.top + inputPane.scrollTop) + "px";
+        overlay.style.width = rect.width + "px";
+        overlay.style.height = rect.height + "px";
+      }
       overlay.style.pointerEvents = enabled.checked ? "auto" : "none";
       draw();
     }
@@ -105,6 +112,10 @@
     });
     overlay.addEventListener("pointercancel", function () { drag = null; draw(); });
     enabled.addEventListener("change", sync);
+    document.querySelector('a[href="#input-pane"]').addEventListener("click", function () {
+      requestAnimationFrame(function () { requestAnimationFrame(sync); });
+    });
+    inputPane.addEventListener("scroll", sync);
     document.getElementById("btnClearDetailZones").addEventListener("click", function () { zones.splice(0); renderList(); draw(); });
     document.getElementById("file").addEventListener("change", function () { zones.splice(0); renderList(); draw(); });
     window.addEventListener("paste", function () { zones.splice(0); renderList(); draw(); });
@@ -112,6 +123,7 @@
       document.getElementById(id).addEventListener("click", function () { zones.splice(0); renderList(); draw(); });
     });
     if (window.ResizeObserver) new ResizeObserver(sync).observe(canvas);
+    window.addEventListener("resize", sync);
     setInterval(function () {
       if (overlay.width !== canvas.width || overlay.height !== canvas.height) sync();
     }, 1000);
