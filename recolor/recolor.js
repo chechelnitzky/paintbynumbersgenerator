@@ -1432,11 +1432,25 @@
     }).join('');
   }
 
-  function buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows }) {
+  async function loadPrintTemplateDataUrl() {
+    const url = new URL('assets/clean_template_v3.png', document.baseURI).href;
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) throw new Error('No se pudo cargar la plantilla base: HTTP ' + response.status + ' (' + url + ')');
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('La plantilla base no es una imagen válida.');
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('No se pudo incorporar la plantilla al PDF.'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows, templateDataUrl }) {
     const safeName = String(imageName || '').replace(/[<>&"]/g, (c) => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
     const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=10&data=${encodeURIComponent(artworkUrl)}`;
     const markerHtml = markerBoxesHtml(markerRows);
-    const bgUrl = new URL('assets/clean_template_v3.png', document.baseURI).href;
+    const bgUrl = templateDataUrl;
     return `<!doctype html>
 <html>
 <head>
@@ -1522,7 +1536,8 @@
 
   async function generatePrintableReferencePdf({ imageName, artworkDataUrl, artworkUrl, markerRows }) {
     setExportProgress("Etapa 4/5: armando plantilla OFICIO con tu diseño base + QR + marcadores…");
-    const html = buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows });
+    const templateDataUrl = await loadPrintTemplateDataUrl();
+    const html = buildPrintableTemplateHtml({ imageName, artworkDataUrl, artworkUrl, markerRows, templateDataUrl });
     await printHtmlAsPdf(html, imageName);
   }
 
