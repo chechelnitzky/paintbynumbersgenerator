@@ -9,8 +9,21 @@ export class FacetReducer {
     /**
      *  Remove all facets that have a pointCount smaller than the given number.
      */
-    public static async reduceFacets(smallerThan: number, removeFacetsFromLargeToSmall: boolean, maximumNumberOfFacets: number, colorsByIndex: RGB[], facetResult: FacetResult, imgColorIndices: Uint8Array2D, onUpdate: ((progress: number) => void) | null = null) {
+    public static async reduceFacets(smallerThan: number, removeFacetsFromLargeToSmall: boolean, maximumNumberOfFacets: number, colorsByIndex: RGB[], facetResult: FacetResult, imgColorIndices: Uint8Array2D, onUpdate: ((progress: number) => void) | null = null, detailZones: Array<{ x: number; y: number; width: number; height: number; minPixels: number }> = []) {
         const visitedCache = new BooleanArray2D(facetResult.width, facetResult.height);
+        const limitFor = (f: Facet): number => {
+            const x = (f.bbox.minX + f.bbox.maxX) / (2 * facetResult.width);
+            const y = (f.bbox.minY + f.bbox.maxY) / (2 * facetResult.height);
+            // Last painted region wins when selections overlap.
+            let threshold = smallerThan;
+            for (const zone of detailZones) {
+                if (x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.height) {
+                    threshold = Math.max(1, zone.minPixels);
+                }
+            }
+            return threshold;
+        };
+
 
         // build the color distance matrix, which describes the distance of each color to each other
         const colorDistances: number[][] = ColorReducer.buildColorDistanceMatrix(colorsByIndex);
@@ -29,7 +42,7 @@ export class FacetReducer {
         for (let fidx: number = 0; fidx < facetProcessingOrder.length; fidx++) {
             const f = facetResult.facets[facetProcessingOrder[fidx]];
             // facets can be removed by merging by others due to a previous facet deletion
-            if (f != null && f.pointCount < smallerThan) {
+            if (f != null && f.pointCount < limitFor(f)) {
                 FacetReducer.deleteFacet(f.id, facetResult, imgColorIndices, colorDistances, visitedCache);
 
                 if (new Date().getTime() - curTime > 500) {
@@ -54,9 +67,13 @@ export class FacetReducer {
             // because facets can be merged, reevaluate the order of facets to make sure the smallest one is removed 
             // this is slower but more accurate
             const facetProcessingOrder = facetResult.facets.filter((f) => f != null).slice(0)
-                .sort((a, b) => b!.pointCount > a!.pointCount ? 1 : (b!.pointCount < a!.pointCount ? -1 : 0))
-                .map((f) => f!.id)
-                .reverse();
+                .sort((a, b) => {
+                    // When a global cap is reached, remove outside the protected zones first.
+                    const aProtected = limitFor(a!) < smallerThan ? 1 : 0;
+                    const bProtected = limitFor(b!) < smallerThan ? 1 : 0;
+                    return aProtected - bProtected || a!.pointCount - b!.pointCount;
+                })
+                .map((f) => f!.id);
 
             const facetToRemove = facetResult.facets[facetProcessingOrder[0]];
 

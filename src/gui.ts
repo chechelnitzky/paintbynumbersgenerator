@@ -51,6 +51,8 @@ export function parseSettings(): Settings {
 
     settings.removeFacetsSmallerThanNrOfPoints = parseInt($("#txtRemoveFacetsSmallerThan").val() + "");
     settings.maximumNumberOfFacets = parseInt($("#txtMaximumNumberOfFacets").val() + "");
+    const zones = (window as any).pbnDetailZones;
+    settings.detailZones = Array.isArray(zones) ? zones.map((z: any) => ({ x: z.x, y: z.y, width: z.width, height: z.height, minPixels: z.minPixels })) : [];
 
     settings.nrOfTimesToHalveBorderSegments = parseInt($("#txtNrOfTimesToHalveBorderSegments").val() + "");
 

@@ -286,6 +286,7 @@ define("settings", ["require", "exports"], function (require, exports) {
             this.removeFacetsSmallerThanNrOfPoints = 20;
             this.removeFacetsFromLargeToSmall = true;
             this.maximumNumberOfFacets = Number.MAX_VALUE;
+            this.detailZones = [];
             this.nrOfTimesToHalveBorderSegments = 2;
             this.resizeImageIfTooLarge = true;
             this.resizeImageWidth = 1024;
@@ -1684,9 +1685,18 @@ define("facetReducer", ["require", "exports", "colorreductionmanagement", "commo
         /**
          *  Remove all facets that have a pointCount smaller than the given number.
          */
-        static reduceFacets(smallerThan, removeFacetsFromLargeToSmall, maximumNumberOfFacets, colorsByIndex, facetResult, imgColorIndices, onUpdate = null) {
+        static reduceFacets(smallerThan, removeFacetsFromLargeToSmall, maximumNumberOfFacets, colorsByIndex, facetResult, imgColorIndices, onUpdate = null, detailZones = []) {
             return __awaiter(this, void 0, void 0, function* () {
                 const visitedCache = new typedarrays_3.BooleanArray2D(facetResult.width, facetResult.height);
+                const limitFor = (f) => {
+                    const x = (f.bbox.minX + f.bbox.maxX) / (2 * facetResult.width);
+                    const y = (f.bbox.minY + f.bbox.maxY) / (2 * facetResult.height);
+                    let threshold = smallerThan;
+                    for (const zone of detailZones) {
+                        if (x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.height) threshold = Math.max(1, zone.minPixels);
+                    }
+                    return threshold;
+                };
                 // build the color distance matrix, which describes the distance of each color to each other
                 const colorDistances = colorreductionmanagement_1.ColorReducer.buildColorDistanceMatrix(colorsByIndex);
                 // process facets from large to small. This results in better consistency with the original image
@@ -1701,7 +1711,7 @@ define("facetReducer", ["require", "exports", "colorreductionmanagement", "commo
                 for (let fidx = 0; fidx < facetProcessingOrder.length; fidx++) {
                     const f = facetResult.facets[facetProcessingOrder[fidx]];
                     // facets can be removed by merging by others due to a previous facet deletion
-                    if (f != null && f.pointCount < smallerThan) {
+                    if (f != null && f.pointCount < limitFor(f)) {
                         FacetReducer.deleteFacet(f.id, facetResult, imgColorIndices, colorDistances, visitedCache);
                         if (new Date().getTime() - curTime > 500) {
                             curTime = new Date().getTime();
@@ -1721,9 +1731,12 @@ define("facetReducer", ["require", "exports", "colorreductionmanagement", "commo
                     // because facets can be merged, reevaluate the order of facets to make sure the smallest one is removed 
                     // this is slower but more accurate
                     const facetProcessingOrder = facetResult.facets.filter((f) => f != null).slice(0)
-                        .sort((a, b) => b.pointCount > a.pointCount ? 1 : (b.pointCount < a.pointCount ? -1 : 0))
-                        .map((f) => f.id)
-                        .reverse();
+                        .sort((a, b) => {
+                            const ap = limitFor(a) < smallerThan ? 1 : 0;
+                            const bp = limitFor(b) < smallerThan ? 1 : 0;
+                            return ap - bp || a.pointCount - b.pointCount;
+                        })
+                        .map((f) => f.id);
                     const facetToRemove = facetResult.facets[facetProcessingOrder[0]];
                     FacetReducer.deleteFacet(facetToRemove.id, facetResult, imgColorIndices, colorDistances, visitedCache);
                     facetCount = facetResult.facets.filter(f => f != null).length;
@@ -2787,7 +2800,7 @@ define("guiprocessmanager", ["require", "exports", "colorreductionmanagement", "
                         }
                     }
                     ctxReduction.putImageData(reductionImgData, 0, 0);
-                });
+                }, settings.detailZones);
                 $(".status").removeClass("active");
                 $(".status.facetReduction").addClass("complete");
                 gui_1.timeEnd("Facet reduction");
@@ -3065,6 +3078,8 @@ define("gui", ["require", "exports", "common", "guiprocessmanager", "settings"],
         settings.kMeansMinDeltaDifference = parseFloat($("#txtClusterPrecision").val() + "");
         settings.removeFacetsSmallerThanNrOfPoints = parseInt($("#txtRemoveFacetsSmallerThan").val() + "");
         settings.maximumNumberOfFacets = parseInt($("#txtMaximumNumberOfFacets").val() + "");
+        const zones = window.pbnDetailZones;
+        settings.detailZones = Array.isArray(zones) ? zones.map(z => ({ x: z.x, y: z.y, width: z.width, height: z.height, minPixels: z.minPixels })) : [];
         settings.nrOfTimesToHalveBorderSegments = parseInt($("#txtNrOfTimesToHalveBorderSegments").val() + "");
         settings.narrowPixelStripCleanupRuns = parseInt($("#txtNarrowPixelStripCleanupRuns").val() + "");
         settings.resizeImageIfTooLarge = $("#chkResizeImage").prop("checked");

@@ -186,7 +186,7 @@ export class GUIProcessManager {
                 }
             }
             ctxReduction.putImageData(reductionImgData, 0, 0);
-        });
+        }, settings.detailZones);
         $(".status").removeClass("active");
         $(".status.facetReduction").addClass("complete");
         timeEnd("Facet reduction");

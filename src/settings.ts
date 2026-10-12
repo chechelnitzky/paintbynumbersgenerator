@@ -20,6 +20,8 @@ export class Settings {
     public removeFacetsSmallerThanNrOfPoints: number = 20;
     public removeFacetsFromLargeToSmall: boolean = true;
     public maximumNumberOfFacets: number = Number.MAX_VALUE;
+    // Normalized rectangular regions with independent minimum facet area.
+    public detailZones: Array<{ x: number; y: number; width: number; height: number; minPixels: number }> = [];
 
     public nrOfTimesToHalveBorderSegments: number = 2;
 
