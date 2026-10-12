@@ -1436,7 +1436,7 @@
     const safeName = String(imageName || '').replace(/[<>&"]/g, (c) => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;' }[c]));
     const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=420x420&margin=10&data=${encodeURIComponent(artworkUrl)}`;
     const markerHtml = markerBoxesHtml(markerRows);
-    const bgUrl = new URL('./assets/clean_template_v3.png', window.location.href).href;
+    const bgUrl = new URL('assets/clean_template_v3.png', document.baseURI).href;
     return `<!doctype html>
 <html>
 <head>
